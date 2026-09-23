@@ -10,7 +10,7 @@ usage() {
     echo "  start   Run the compiled build from dist/"
     echo ""
     echo "Environment:"
-    echo "  PORT    Override the listen port (default from .env, 3000)"
+    echo "  PORT    Override the listen port (default from .env, 3010)"
     exit 1
 }
 
@@ -38,7 +38,7 @@ fi
 
 # The Piped upstream is private (contract D2) but the catalog is useless without
 # it, so say plainly whether it is up rather than failing later per-request.
-PIPED_URL="$(grep -E '^PIPED_API_URL=' .env | cut -d= -f2- || echo http://localhost:8080)"
+PIPED_URL="$(grep -E '^PIPED_API_URL=' .env | cut -d= -f2- || echo http://localhost:8090)"
 if curl -sf --max-time 3 "$PIPED_URL/healthcheck" >/dev/null 2>&1; then
     echo "Piped upstream: up ($PIPED_URL)"
 else

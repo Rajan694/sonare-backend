@@ -4,9 +4,9 @@ dotenv.config();
 
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
-  PORT: z.coerce.number().default(3000),
-  PIPED_API_URL: z.string().url().default('http://localhost:8080'),
-  PIPED_PROXY_URL: z.string().url().default('http://localhost:8081'),
+  PORT: z.coerce.number().default(3010),
+  PIPED_API_URL: z.string().url().default('http://localhost:8090'),
+  PIPED_PROXY_URL: z.string().url().default('http://localhost:8091'),
   GENIUS_CLIENT_ACCESS_TOKEN: z.string().optional(),
   LRCLIB_BASE: z.string().url().default('https://lrclib.net'),
   LRCLIB_USER_AGENT: z.string().default('Sonare/1.0'),

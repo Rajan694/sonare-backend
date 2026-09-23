@@ -16,6 +16,8 @@ import { requireAuth } from '../auth.js';
 import { idHelpers } from '../ids.js';
 import { BadRequestError } from '../errors.js';
 import { hydrateTracks } from '../db/hydrate.js';
+import { CachedPiped } from '../cache.js';
+import { normalizeChannelToArtist, normalizePlaylistToAlbum } from '../normalize/index.js';
 import crypto from 'node:crypto';
 
 export const meRouter = Router();
@@ -73,10 +75,17 @@ meRouter.get('/library/tracks', async (req, res, next) => {
 meRouter.get('/library/albums', async (req, res, next) => {
   try {
     const favs = await db.select().from(favouriteAlbums).where(eq(favouriteAlbums.userId, req.user!.id));
-    res.json({
-      items: favs.map(f => ({ id: idHelpers.prefixYt(f.albumId), addedAt: f.addedAt.getTime() })),
-      meta: { total: favs.length }
-    });
+    // The table only stores ids; the Library tab needs titles and artists to render cards.
+    // Details come through the playlist cache, and one failing album must not sink the list.
+    const items = await Promise.all(favs.map(async f => {
+      const base = { id: idHelpers.prefixYt(f.albumId), addedAt: f.addedAt.getTime() };
+      try {
+        return { ...normalizePlaylistToAlbum(await CachedPiped.playlist(f.albumId), f.albumId), ...base };
+      } catch {
+        return { ...base, title: 'Unavailable album', artist: '', artistId: '', year: null, trackCount: null, genre: null, source: 'server', downloaded: false };
+      }
+    }));
+    res.json({ items, meta: { total: favs.length } });
   } catch (e) {
     next(e);
   }
@@ -85,10 +94,15 @@ meRouter.get('/library/albums', async (req, res, next) => {
 meRouter.get('/library/artists', async (req, res, next) => {
   try {
     const follows = await db.select().from(artistFollows).where(eq(artistFollows.userId, req.user!.id));
-    res.json({
-      items: follows.map(f => ({ id: idHelpers.prefixYt(f.artistId), following: true })),
-      meta: { total: follows.length }
-    });
+    const items = await Promise.all(follows.map(async f => {
+      const base = { id: idHelpers.prefixYt(f.artistId), following: true };
+      try {
+        return { ...normalizeChannelToArtist(await CachedPiped.channel(f.artistId), f.artistId), ...base };
+      } catch {
+        return { ...base, name: 'Unavailable artist', albumCount: 0, localTrackCount: 0 };
+      }
+    }));
+    res.json({ items, meta: { total: follows.length } });
   } catch (e) {
     next(e);
   }

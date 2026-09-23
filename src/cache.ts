@@ -137,7 +137,10 @@ export const CachedPiped = {
     if (cached) return cached;
 
     const res = await Piped.playlist(id);
-    await setCached(key, res, TTL.albumDetail);
+    // A playlist that reports videos but lists none is an extraction failure upstream
+    // (e.g. YouTube's lockupViewModel change); caching it would pin empty albums for hours.
+    const failed = (res.videos ?? 0) > 0 && !(res.relatedStreams?.length);
+    if (!failed) await setCached(key, res, TTL.albumDetail);
     return res;
   },
 

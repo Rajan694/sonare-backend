@@ -55,7 +55,7 @@ export function normalizeStreamToTrack(streams: T.Streams, videoId: string, code
   return withUserFields({
     id: idHelpers.prefixYt(videoId),
     title: stripTitle(streams.title),
-    artistId: idHelpers.prefixYt(idHelpers.extractChannelIdFromUrl(streams.uploaderUrl) || streams.uploader),
+    artistId: idHelpers.artistIdFromUrl(streams.uploaderUrl),
     artist: stripArtist(streams.uploader),
     albumId: null as any,
     album: null as any,
@@ -79,7 +79,7 @@ export function normalizeStreamItemToTrack(item: T.StreamItem, userFields?: User
   return withUserFields({
     id: idHelpers.prefixYt(id),
     title: stripTitle(item.title || item.name || ''),
-    artistId: idHelpers.prefixYt(idHelpers.extractChannelIdFromUrl(item.uploaderUrl) || item.uploaderName || item.uploader || item.author || ''),
+    artistId: idHelpers.artistIdFromUrl(item.uploaderUrl),
     artist: stripArtist(item.uploaderName || item.uploader || item.author),
     albumId: null as any,
     album: null as any,
@@ -115,7 +115,7 @@ export function normalizeStreamItemToAlbum(item: any) {
     id: ytid,
     title: item.name || item.title || '',
     artist: stripArtist(item.uploaderName || item.uploader || item.author || ''),
-    artistId: idHelpers.prefixYt(idHelpers.extractChannelIdFromUrl(item.uploaderUrl) || item.uploaderName || item.uploader || item.author || ''),
+    artistId: idHelpers.artistIdFromUrl(item.uploaderUrl),
     year: null,
     trackCount: sanitizeCount(item.videos),
     genre: null,
@@ -133,7 +133,7 @@ export function normalizeChannelTabAlbum(item: any) {
     id: ytid,
     title: item.name || item.title || '',
     artist: stripArtist(item.uploaderName || item.author || item.uploader || ''),
-    artistId: idHelpers.prefixYt(idHelpers.extractChannelIdFromUrl(item.uploaderUrl) || item.uploaderName || item.author || item.uploader || ''),
+    artistId: idHelpers.artistIdFromUrl(item.uploaderUrl),
     year: null,
     trackCount: sanitizeCount(item.videos) ?? sanitizeCount(item.videoCount),
     genre: null,
@@ -163,11 +163,26 @@ export function normalizePlaylistToAlbum(playlist: T.Playlist, playlistId: strin
     if (match) year = parseInt(match[0], 10);
   }
   const ytid = idHelpers.prefixYt(playlistId);
+  // YouTube Music albums (OLAK… ids) have no uploader; credit the channel that uploaded
+  // most of their tracks instead, so the album has an artist and a link to it.
+  let uploader = playlist.uploader;
+  let uploaderUrl = playlist.uploaderUrl;
+  if (!uploader) {
+    const counts = new Map<string, { n: number; url?: string }>();
+    for (const s of playlist.relatedStreams ?? []) {
+      if (!s.uploaderName) continue;
+      const c = counts.get(s.uploaderName) ?? { n: 0, url: s.uploaderUrl };
+      counts.set(s.uploaderName, { n: c.n + 1, url: c.url ?? s.uploaderUrl });
+    }
+    const top = [...counts.entries()].sort((a, b) => b[1].n - a[1].n)[0];
+    if (top) [uploader, uploaderUrl] = [top[0], top[1].url ?? ''];
+  }
   return {
     id: ytid,
-    title: playlist.name,
-    artist: stripArtist(playlist.uploader),
-    artistId: idHelpers.prefixYt(idHelpers.extractChannelIdFromUrl(playlist.uploaderUrl) || playlist.uploader),
+    // YouTube prefixes album titles with "Album – ".
+    title: playlist.name.replace(/^Album\s+[–-]\s+/, ''),
+    artist: stripArtist(uploader),
+    artistId: idHelpers.artistIdFromUrl(uploaderUrl),
     year,
     trackCount: sanitizeCount(playlist.videos),
     genre: null,

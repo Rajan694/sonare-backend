@@ -27,6 +27,16 @@ export const idHelpers = {
     return null;
   },
 
+  /**
+   * Artist id for a catalog item: `yt:<channelId>` only when the uploader URL names a real
+   * channel. Uploader display names are not ids (`/channel/Arijit Singh` 500s in Piped),
+   * so without a channel the artist is left empty and clients hide "Go to artist".
+   */
+  artistIdFromUrl(url: string | undefined | null): string {
+    const channelId = idHelpers.extractChannelIdFromUrl(url ?? undefined);
+    return channelId ? idHelpers.prefixYt(channelId) : '';
+  },
+
   extractListIdFromUrl(url: string | undefined): string | null {
     if (!url) return null;
     const match = url.match(/[?&]list=([a-zA-Z0-9_-]+)/);
