@@ -484,10 +484,22 @@ meRouter.post('/playlists/:id/tracks', async (req, res, next) => {
   }
 });
 
+// Every playlist mutation must be scoped to the caller: ids are guessable once shared.
+async function ownsPlaylist(userId: string, playlistId: string): Promise<boolean> {
+  const [p] = await db.select({ id: playlists.id }).from(playlists).where(
+    and(eq(playlists.id, playlistId), eq(playlists.userId, userId))
+  ).limit(1);
+  return !!p;
+}
+
 meRouter.delete('/playlists/:id/tracks', async (req, res, next) => {
   try {
     const { index, trackIds } = req.body;
     const playlistId = req.params.id;
+    if (!(await ownsPlaylist(req.user!.id, playlistId))) {
+      res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Playlist not found' } });
+      return;
+    }
 
     if (index !== undefined) {
       await db.delete(playlistTracks).where(
@@ -526,6 +538,10 @@ meRouter.patch('/playlists/:id/tracks/order', async (req, res, next) => {
     if (from === undefined || to === undefined) throw new BadRequestError('Missing from or to');
 
     const playlistId = req.params.id;
+    if (!(await ownsPlaylist(req.user!.id, playlistId))) {
+      res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Playlist not found' } });
+      return;
+    }
     const tracks = await db.select().from(playlistTracks).where(
       eq(playlistTracks.playlistId, playlistId)
     ).orderBy(playlistTracks.position);
