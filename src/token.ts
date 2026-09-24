@@ -6,11 +6,19 @@ const STREAM_TOKEN_SECRET = config.JWT_SECRET || crypto.randomBytes(32).toString
 export interface StreamTokenData {
   url: string;
   exp: number;
+  // Set for audio streams so the relay can fetch a replacement URL when YouTube
+  // rejects this one mid-file.
+  vid?: string;
+  itag?: number;
 }
 
-export function signStreamToken(url: string, expiresInMs: number = 3600_000): string {
+export function signStreamToken(
+  url: string,
+  expiresInMs: number = 3600_000,
+  source?: { vid: string; itag: number },
+): string {
   const exp = Date.now() + expiresInMs;
-  const payload = JSON.stringify({ url, exp });
+  const payload = JSON.stringify({ url, exp, ...source });
   const payloadB64 = Buffer.from(payload).toString('base64url');
   
   const hmac = crypto.createHmac('sha256', STREAM_TOKEN_SECRET);

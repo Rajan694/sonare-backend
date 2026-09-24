@@ -10,7 +10,8 @@ import {
   normalizeStreamItemToAlbum,
   normalizeChannelTabAlbum,
   normalizeChannelToArtist, 
-  normalizePlaylistToAlbum 
+  normalizePlaylistToAlbum,
+  albumThumbFor,
 } from './normalize/index.js';
 import { idHelpers } from './ids.js';
 import { signStreamToken, verifyStreamToken } from './token.js';
@@ -26,8 +27,12 @@ import { optionalAuth } from './auth.js';
 import { getUserTrackFields, getUserTrackDataMap } from './db/user-data.js';
 import { saveDbLyricsOverride, saveDbLyricsOffset, deleteDbLyricsOverride, getDbLyricsOverride } from './lyrics.js';
 import { db } from './db/index.js';
-import { playlistTracks } from './db/schema.js';
-import { eq } from 'drizzle-orm';
+import { playlistTracks, artistFollows } from './db/schema.js';
+import { and, eq } from 'drizzle-orm';
+import { LRUCache } from 'lru-cache';
+
+// Stream URL -> working replacement, for URLs the relay found dead (see /stream/:token).
+const replacedStreamUrls = new LRUCache<string, string>({ max: 500, ttl: 3600_000 });
 
 function encodeCursor(nextpage: string | null | undefined): string | undefined {
   if (!nextpage) return undefined;
@@ -41,6 +46,7 @@ function decodeCursor(cursor: any): string | undefined {
 
 interface SelectedStream {
   url: string;
+  itag: number;
   mimeType: string;
   codec: string;
   bitrate: number;
@@ -84,6 +90,7 @@ function selectBestAudioStream(
 
       return {
         url: best.url,
+        itag: best.itag,
         mimeType: best.mimeType,
         codec: mappedCodec || 'OPUS',
         bitrate: best.bitrate,
@@ -111,6 +118,7 @@ function selectBestAudioStream(
       const chosen = sortedMuxed[0];
       return {
         url: chosen.url,
+        itag: chosen.itag,
         mimeType: chosen.mimeType || 'video/mp4',
         codec: 'AAC',
         bitrate: chosen.bitrate || 48_000,
@@ -121,6 +129,40 @@ function selectBestAudioStream(
   }
 
   return null;
+}
+
+// Large thumbnails aren't guaranteed: maxresdefault and hq720 are missing for some videos,
+// and a client (the lock screen especially) can't fall back on its own. Probe once per video.
+const largeThumbs = new LRUCache<string, string>({ max: 5000, ttl: 7 * 24 * 3600_000 });
+
+async function largestThumb(videoId: string): Promise<string> {
+  const known = largeThumbs.get(videoId);
+  if (known) return known;
+  let found = 'mqdefault';
+  for (const name of ['maxresdefault', 'hq720']) {
+    try {
+      const head = await request(`https://i.ytimg.com/vi/${videoId}/${name}.jpg`, { method: 'HEAD' });
+      await head.body.dump();
+      if (head.statusCode === 200) {
+        found = name;
+        break;
+      }
+    } catch {
+      // Network trouble: fall through to the one size that always exists.
+    }
+  }
+  largeThumbs.set(videoId, found);
+  return found;
+}
+
+// Auto-generated "- Topic" artist channels come back from the extractor with no videos
+// and no tabs, so pull the artist's catalog from YouTube Music search instead, keeping
+// only results credited to this exact channel.
+async function searchArtistCatalog(channelId: string, channelName: string | undefined, filter: 'music_songs' | 'music_albums'): Promise<any[]> {
+  const name = (channelName || '').replace(/\s+-\s+Topic$/i, '').trim();
+  if (!name) return [];
+  const page = await CachedPiped.search(name, filter);
+  return (page.items || []).filter((i: any) => i.uploaderUrl === `/channel/${channelId}`);
 }
 
 export function createApp() {
@@ -340,10 +382,10 @@ export function createApp() {
     const { size } = req.query;
     const rawId = idHelpers.extractYtId(req.params.id);
     
-    let thumbRes = 'hqdefault';
-    if (size === '64' || size === '140') thumbRes = 'mqdefault';
-    if (size === '640') thumbRes = 'maxresdefault';
-    
+    // hqdefault is 4:3 with black bars baked in, which shows as letterboxing in square
+    // artwork. mqdefault is 16:9 without bars and exists for every video.
+    const thumbRes = size === '640' ? await largestThumb(rawId) : 'mqdefault';
+
     res.redirect(302, `https://i.ytimg.com/vi/${rawId}/${thumbRes}.jpg`);
   }));
 
@@ -370,12 +412,17 @@ export function createApp() {
 
     try {
       const playlistId = idHelpers.extractYtId(rawId);
-      const playlist = await CachedPiped.playlist(playlistId);
-      if (!playlist.thumbnailUrl) { res.status(404).end(); return; }
-      
-      let thumbUrl = playlist.thumbnailUrl;
+      // Prefer the resizable cover seen in search/artist results over the playlist's
+      // signed full-size one; it also skips a Piped round trip.
+      const known = albumThumbFor(playlistId);
+      const source = known ?? (await CachedPiped.playlist(playlistId)).thumbnailUrl;
+      if (!source) { res.status(404).end(); return; }
+
+      let thumbUrl = source;
       const targetSize = size === '64' ? 64 : size === '140' ? 140 : size === '300' ? 300 : size === '640' ? 640 : null;
-      if (targetSize) {
+      // Album covers are signed (/s_p/...&rs=...); renaming the file breaks the signature.
+      const signed = /[?&]rs=/.test(thumbUrl);
+      if (targetSize && !signed) {
         if (targetSize <= 140) {
           thumbUrl = thumbUrl.replace('/maxresdefault.jpg', '/mqdefault.jpg').replace('/hqdefault.jpg', '/mqdefault.jpg');
         } else if (targetSize <= 300) {
@@ -443,7 +490,7 @@ export function createApp() {
     }
 
     const expiresAt = Date.now() + 3600_000;
-    const token = signStreamToken(best.url, 3600_000);
+    const token = signStreamToken(best.url, 3600_000, { vid: rawId, itag: best.itag });
     
     res.json({
       url: `/api/v1/stream/${token}`,
@@ -583,7 +630,13 @@ export function createApp() {
   v1.get('/artists/:id', asyncHandler(async (req, res) => {
     const rawId = idHelpers.extractYtId(req.params.id);
     const channel = await CachedPiped.channel(rawId);
-    res.json(normalizeChannelToArtist(channel, rawId));
+    const artist = normalizeChannelToArtist(channel, rawId);
+    if (req.user) {
+      const [follow] = await db.select({ artistId: artistFollows.artistId }).from(artistFollows)
+        .where(and(eq(artistFollows.userId, req.user.id), eq(artistFollows.artistId, rawId))).limit(1);
+      artist.following = !!follow;
+    }
+    res.json(artist);
   }));
 
   v1.get('/artists/:id/top-tracks', asyncHandler(async (req, res) => {
@@ -592,7 +645,9 @@ export function createApp() {
     const limit = limitStr ? parseInt(limitStr, 10) : 20;
     
     const channel = await CachedPiped.channel(rawId);
-    const tracks = (channel.relatedStreams || []).slice(0, limit);
+    let tracks = channel.relatedStreams || [];
+    if (tracks.length === 0) tracks = await searchArtistCatalog(rawId, channel.name, 'music_songs');
+    tracks = tracks.slice(0, limit);
     
     res.json({
       items: tracks.map((t: any) => ({ kind: 'track', ...normalizeStreamItemToTrack(t) })),
@@ -620,6 +675,8 @@ export function createApp() {
         const tabData = await Piped.channelTabs(albumsTab.data);
         items = tabData.content || [];
         nextCursor = tabData.nextpage;
+      } else {
+        items = await searchArtistCatalog(rawId, channel.name, 'music_albums');
       }
     }
     
@@ -675,9 +732,24 @@ export function createApp() {
     if (req.headers.range) {
       headers['Range'] = req.headers.range;
     }
-  
-    const upstreamRes = await request(data.url, { headers });
-    
+
+    let url = replacedStreamUrls.get(data.url) ?? data.url;
+    let upstreamRes = await request(url, { headers });
+
+    // YouTube sometimes hands out URLs that serve only the first ~1MB and 403 the rest.
+    // A fresh extraction usually yields a working one, so swap it in once and remember
+    // the swap - the player keeps seeking with the same token.
+    if (upstreamRes.statusCode === 403 && data.vid && data.itag) {
+      await upstreamRes.body.dump();
+      const fresh = await CachedPiped.refreshStream(data.vid);
+      const match = [...(fresh.audioStreams ?? []), ...(fresh.videoStreams ?? [])].find(s => s.itag === data.itag);
+      if (match) {
+        replacedStreamUrls.set(data.url, match.url);
+        url = match.url;
+        upstreamRes = await request(url, { headers });
+      }
+    }
+
     if (upstreamRes.statusCode === 206 || upstreamRes.statusCode === 200) {
       res.status(upstreamRes.statusCode);
       

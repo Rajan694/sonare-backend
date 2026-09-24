@@ -3,6 +3,20 @@ import * as T from '../upstream/piped.types.js';
 import * as M from '../types.js';
 import { UserTrackFields } from '../db/user-data.js';
 import { signStreamToken } from '../token.js';
+import { LRUCache } from 'lru-cache';
+
+// Album covers in search / artist results are resizable googleusercontent urls
+// (`=w544-h544`), while the playlist endpoint only offers a signed full-size one (~2MB).
+// Remember the resizable one per album so the artwork route can serve thumbnails.
+const albumThumbs = new LRUCache<string, string>({ max: 5000, ttl: 7 * 24 * 3600 * 1000 });
+
+function rememberAlbumThumb(rawId: string, url: string | undefined) {
+  if (rawId !== 'unknown' && url && /=w\d+-h\d+/.test(url)) albumThumbs.set(rawId, url);
+}
+
+export function albumThumbFor(rawId: string): string | undefined {
+  return albumThumbs.get(rawId);
+}
 
 export function withUserFields<TObj extends Record<string, any>>(obj: TObj, userFields?: UserTrackFields) {
   return {
@@ -111,6 +125,7 @@ export function normalizeStreamItemToArtist(item: any) {
 export function normalizeStreamItemToAlbum(item: any) {
   const id = idHelpers.extractListIdFromUrl(item.url) || 'unknown';
   const ytid = idHelpers.prefixYt(id);
+  rememberAlbumThumb(id, item.thumbnail);
   return {
     id: ytid,
     title: item.name || item.title || '',
@@ -129,6 +144,7 @@ export function normalizeChannelTabAlbum(item: any) {
   const id = idHelpers.extractListIdFromUrl(item.url) || item.playlistId || 'unknown';
   const ytid = idHelpers.prefixYt(id);
   const thumb = item.thumbnail || item.thumbnails?.[0]?.url;
+  rememberAlbumThumb(id, thumb);
   return {
     id: ytid,
     title: item.name || item.title || '',

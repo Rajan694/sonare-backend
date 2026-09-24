@@ -81,6 +81,13 @@ export const CachedPiped = {
     return res;
   },
 
+  // Bypasses and replaces the cached entry - used when a cached stream URL has gone bad.
+  async refreshStream(videoId: string): Promise<T.Streams> {
+    const res = await Piped.getStream(videoId);
+    await setCached(`stream:${videoId}`, res, TTL.streamsMeta);
+    return res;
+  },
+
   async search(q: string, filter?: string): Promise<T.SearchPage> {
     const key = `search:${q}:${filter || 'all'}`;
     const cached = await getCached<T.SearchPage>(key);
