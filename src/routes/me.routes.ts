@@ -569,18 +569,31 @@ meRouter.post('/sync', async (req, res, next) => {
     const { plays, favourites } = req.body;
 
     // Count a play on sync receipt from client, where playback met client-side duration threshold (≥30s or ≥50%), ensuring honest count instead of stream URL request.
+    // Clients retry a sync whose response they never saw, so this is idempotent: all or
+    // nothing, and a listen (user + track + start time) already recorded is skipped.
     if (Array.isArray(plays)) {
-      for (const p of plays) {
-        if (p.trackRef && p.at) {
-          await db.insert(playHistory).values({
+      await db.transaction(async (tx) => {
+        for (const p of plays) {
+          if (!p.trackRef || !p.at) continue;
+          const trackRefKind = p.trackRef.kind || 'server';
+          const trackRefId = p.trackRef.id || p.trackRef.fingerprint;
+          const playedAt = new Date(p.at);
+          const [seen] = await tx.select({ id: playHistory.id }).from(playHistory).where(and(
+            eq(playHistory.userId, req.user!.id),
+            eq(playHistory.trackRefKind, trackRefKind),
+            eq(playHistory.trackRefId, trackRefId),
+            eq(playHistory.playedAt, playedAt),
+          )).limit(1);
+          if (seen) continue;
+          await tx.insert(playHistory).values({
             userId: req.user!.id,
-            trackRefKind: p.trackRef.kind || 'server',
-            trackRefId: p.trackRef.id || p.trackRef.fingerprint,
-            playedAt: new Date(p.at),
+            trackRefKind,
+            trackRefId,
+            playedAt,
             msPlayed: p.ms || 0,
           });
         }
-      }
+      });
     }
 
     if (Array.isArray(favourites)) {

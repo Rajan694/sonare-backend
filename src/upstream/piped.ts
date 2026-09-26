@@ -1,5 +1,5 @@
 import { request } from 'undici';
-import { config } from '../config.js';
+import { pipedApiUrl } from '../systemConfig.js';
 import * as T from './piped.types.js';
 
 export class UpstreamError extends Error {
@@ -23,13 +23,13 @@ const UNREACHABLE_CODES = new Set([
 
 function networkError(e: any): UpstreamError {
   if (UNREACHABLE_CODES.has(e?.code)) {
-    return new UpstreamError(`Piped is unreachable at ${config.PIPED_API_URL} (${e.code})`, 502, true);
+    return new UpstreamError(`Piped is unreachable at ${pipedApiUrl()} (${e.code})`, 502, true);
   }
   return new UpstreamError(`Piped network error: ${e.message}`, 502);
 }
 
 async function fetchPiped<TRes>(path: string, options: { method?: string; query?: Record<string, string | number> } = {}): Promise<TRes> {
-  const url = new URL(path, config.PIPED_API_URL);
+  const url = new URL(path, pipedApiUrl());
   if (options.query) {
     for (const [key, val] of Object.entries(options.query)) {
       if (val !== undefined && val !== null && val !== '') {
@@ -116,7 +116,7 @@ export const Piped = {
   },
 
   async healthcheck(): Promise<boolean> {
-    const url = new URL('/healthcheck', config.PIPED_API_URL);
+    const url = new URL('/healthcheck', pipedApiUrl());
     let attempt = 0;
     while (attempt < 2) {
       try {

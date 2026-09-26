@@ -1,13 +1,15 @@
 import { createApp } from './app.js';
 import { config } from './config.js';
 import { verifyDatabase } from './db/index.js';
+import { loadSystemConfig, pipedApiUrl } from './systemConfig.js';
 
 async function start() {
   await verifyDatabase();
+  await loadSystemConfig();
   const app = createApp();
   const server = app.listen(config.PORT, () => {
     console.log(`Sonare backend listening on port ${config.PORT}`);
-    console.log(`Piped upstream mapped to ${config.PIPED_API_URL}`);
+    console.log(`Piped upstream mapped to ${pipedApiUrl()}`);
   });
 
   const shutdown = () => {

@@ -8,6 +8,20 @@
       "when": 1790081951948,
       "tag": "0000_breezy_synch",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1790430075616,
+      "tag": "0001_admin",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1790430076103,
+      "tag": "0002_admin_seed",
+      "breakpoints": true
     }
   ]
 }
