@@ -9,7 +9,8 @@ import { db, sql } from '../db/index.js';
 import { adminUsers, errorLogs } from '../db/schema.js';
 import { createRateLimiter } from '../rateLimit.js';
 import {
-  checkSetting, ConfigValidationError, describeSettings, parseSetting, pipedApiUrl, saveSetting, SETTINGS,
+  checkSetting, ConfigValidationError, describeSettings, latestExtractorCommit, parseSetting, pipedApiUrl,
+  saveSetting, SETTINGS,
 } from '../systemConfig.js';
 import { Piped } from '../upstream/piped.js';
 
@@ -142,6 +143,15 @@ const saveSchema = z.object({
   /** Save even though the value's check failed. */
   force: z.boolean().optional(),
 });
+
+/** Suggests a value for piped.extractorCommit; nothing is saved. */
+adminRouter.get('/config/piped.extractorCommit/latest', route(async (req, res) => {
+  try {
+    res.json(await latestExtractorCommit());
+  } catch (e: any) {
+    fail(res, 502, 'UPSTREAM_ERROR', `Could not get the latest commit from GitHub (${e.code || e.message})`);
+  }
+}));
 
 adminRouter.put('/config/:key', route(async (req, res) => {
   const key = req.params.key as string;

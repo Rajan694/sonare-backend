@@ -1,6 +1,8 @@
+import { execFile } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { promisify } from 'node:util';
 import { request } from 'undici';
 import { z } from 'zod';
 import { config } from './config.js';
@@ -99,6 +101,50 @@ async function extractorCommitExists(sha: string): Promise<string | undefined> {
   } catch (e: any) {
     return `Could not reach GitHub to check the commit (${e.code || e.message})`;
   }
+}
+
+export interface LatestCommit {
+  sha: string;
+  /** First line of the commit message; null when only the hash could be found. */
+  message: string | null;
+  date: string | null;
+  url: string;
+}
+
+/**
+ * The newest commit on NewPipeExtractor's default branch (dev), for the admin page's "Fill in
+ * latest" button. Asks the GitHub API first (it has the message and date); unauthenticated it
+ * allows 60 calls an hour, so `git ls-remote` is the fallback, which only gives the hash.
+ */
+export async function latestExtractorCommit(): Promise<LatestCommit> {
+  const url = (sha: string) => `https://github.com/${EXTRACTOR_REPO}/commit/${sha}`;
+  try {
+    const { statusCode, body } = await request(`https://api.github.com/repos/${EXTRACTOR_REPO}/commits/dev`, {
+      headers: { 'User-Agent': 'Sonare/1.0', Accept: 'application/vnd.github+json' },
+      headersTimeout: 8000,
+      bodyTimeout: 8000,
+    });
+    if (statusCode === 200) {
+      const data = await body.json() as { sha: string; commit?: { message?: string; committer?: { date?: string } } };
+      return {
+        sha: data.sha,
+        message: data.commit?.message?.split('\n')[0] ?? null,
+        date: data.commit?.committer?.date ?? null,
+        url: url(data.sha),
+      };
+    }
+    await body.dump();
+  } catch {
+    // Fall through to git.
+  }
+
+  const { stdout } = await promisify(execFile)(
+    'git', ['ls-remote', `https://github.com/${EXTRACTOR_REPO}`, 'refs/heads/dev'],
+    { timeout: 15_000 },
+  );
+  const sha = stdout.match(/^([0-9a-f]{40})\s/)?.[1];
+  if (!sha) throw new Error('git ls-remote returned no commit for dev');
+  return { sha, message: null, date: null, url: url(sha) };
 }
 
 /** Runs the setting's check, if it has one. Returns why the value looks wrong, if it does. */
