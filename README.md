@@ -63,3 +63,12 @@ the `admin_users` table, which is separate from app accounts. The migrations cre
   (build.gradle, config.properties) by its `syncAdminConfig.sh`, which `runPiped.sh` and
   `installPiped.sh` run. The admin page reads those files from `../sonare-piped-backend`,
   or from `PIPED_BACKEND_DIR`.
+
+## Downloads
+
+The apps download audio through the playback endpoints: `GET /tracks/:id/stream` picks the
+stream (`quality`, `format`) and `GET /stream/:token` relays it in `Range` chunks, so paused
+downloads resume where they stopped. CORS exposes `Content-Range` for that. Download quality
+and format are account settings in `user_settings` (`download_quality`, `download_format`,
+and `stream_quality` for playback); run `npm run db:migrate` after pulling to add them.
+Details: `docs/api-contract.md` §8.7 in the `sonare` repo.
