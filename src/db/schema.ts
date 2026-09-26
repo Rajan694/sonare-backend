@@ -83,6 +83,8 @@ export const userSettings = pgTable('user_settings', {
   normalization: boolean('normalization').default(true),
   downloadQuality: text('download_quality').default('high'),
   stayOffline: boolean('stay_offline').default(false),
+  streamQuality: text('stream_quality').default('high'),
+  downloadFormat: text('download_format').default('opus'),
 });
 
 export const playerState = pgTable('player_state', {

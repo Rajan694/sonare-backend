@@ -670,6 +670,24 @@ meRouter.put('/player-state', async (req, res, next) => {
   }
 });
 
+const QUALITIES = ['low', 'normal', 'high'] as const;
+const DOWNLOAD_FORMATS = ['opus', 'm4a'] as const;
+
+const DEFAULT_SETTINGS = {
+  eqPreset: 'Flat',
+  gapless: false,
+  normalization: true,
+  downloadQuality: 'high',
+  stayOffline: false,
+  streamQuality: 'high',
+  downloadFormat: 'opus',
+};
+
+/** Undefined for anything outside `allowed`, so a bad value leaves the stored one alone. */
+function oneOf<T extends string>(value: unknown, allowed: readonly T[]): T | undefined {
+  return allowed.includes(value as T) ? (value as T) : undefined;
+}
+
 meRouter.get('/settings', async (req, res, next) => {
   try {
     const [settings] = await db.select().from(userSettings).where(eq(userSettings.userId, req.user!.id)).limit(1);
@@ -679,13 +697,9 @@ meRouter.get('/settings', async (req, res, next) => {
       normalization: settings.normalization,
       downloadQuality: settings.downloadQuality,
       stayOffline: settings.stayOffline,
-    } : {
-      eqPreset: 'Flat',
-      gapless: false,
-      normalization: true,
-      downloadQuality: 'high',
-      stayOffline: false,
-    });
+      streamQuality: settings.streamQuality ?? DEFAULT_SETTINGS.streamQuality,
+      downloadFormat: settings.downloadFormat ?? DEFAULT_SETTINGS.downloadFormat,
+    } : DEFAULT_SETTINGS);
   } catch (e) {
     next(e);
   }
@@ -693,7 +707,11 @@ meRouter.get('/settings', async (req, res, next) => {
 
 meRouter.put('/settings', async (req, res, next) => {
   try {
-    const { eqPreset, gapless, normalization, downloadQuality, stayOffline } = req.body;
+    const { eqPreset, gapless, normalization, stayOffline } = req.body;
+    // Older app builds don't send the newer fields; undefined keeps the stored value.
+    const downloadQuality = oneOf(req.body.downloadQuality === 'lossless' ? 'high' : req.body.downloadQuality, QUALITIES);
+    const streamQuality = oneOf(req.body.streamQuality, QUALITIES);
+    const downloadFormat = oneOf(req.body.downloadFormat, DOWNLOAD_FORMATS);
     await db.insert(userSettings).values({
       userId: req.user!.id,
       eqPreset,
@@ -701,6 +719,8 @@ meRouter.put('/settings', async (req, res, next) => {
       normalization,
       downloadQuality,
       stayOffline,
+      streamQuality,
+      downloadFormat,
     }).onConflictDoUpdate({
       target: [userSettings.userId],
       set: {
@@ -709,6 +729,8 @@ meRouter.put('/settings', async (req, res, next) => {
         normalization,
         downloadQuality,
         stayOffline,
+        streamQuality,
+        downloadFormat,
       }
     });
 
