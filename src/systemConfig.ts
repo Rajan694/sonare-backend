@@ -1,5 +1,7 @@
 import { readFile } from 'node:fs/promises';
+import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { request } from 'undici';
 import { z } from 'zod';
 import { config } from './config.js';
 import { db } from './db/index.js';
@@ -14,6 +16,7 @@ import { systemConfiguration } from './db/schema.js';
  */
 
 const PIPED_DIR = process.env.PIPED_BACKEND_DIR || fileURLToPath(new URL('../../sonare-piped-backend/', import.meta.url));
+const EXTRACTOR_REPO = 'TeamNewPipe/NewPipeExtractor';
 
 const httpUrl = z.string().trim().url().refine(u => /^https?:\/\//.test(u), 'Must be an http(s) URL')
   .transform(u => u.replace(/\/+$/, ''));
@@ -27,11 +30,13 @@ interface SettingDef {
   fallbackSource: string;
   /** For deploy settings: what the Piped files hold right now. */
   deployed?: () => Promise<string | undefined>;
+  /** Checks a new value against the outside world; returns why it looks wrong, if it does. */
+  check?: (value: string) => Promise<string | undefined>;
 }
 
 async function readPipedFile(name: string): Promise<string | undefined> {
   try {
-    return await readFile(PIPED_DIR + name, 'utf8');
+    return await readFile(path.join(PIPED_DIR, name), 'utf8');
   } catch {
     return undefined;
   }
@@ -44,6 +49,7 @@ export const SETTINGS: Record<string, SettingDef> = {
     schema: httpUrl,
     fallback: () => config.PIPED_API_URL,
     fallbackSource: 'PIPED_API_URL in .env',
+    check: pipedAnswers,
   },
   'piped.proxyUrl': {
     label: 'Piped proxy URL',
@@ -60,8 +66,45 @@ export const SETTINGS: Record<string, SettingDef> = {
     fallback: () => undefined,
     fallbackSource: 'build.gradle',
     deployed: async () => (await readPipedFile('build.gradle'))?.match(/NewPipeExtractor:([0-9a-f]{7,40})/)?.[1],
+    check: extractorCommitExists,
   },
 };
+
+async function pipedAnswers(baseUrl: string): Promise<string | undefined> {
+  try {
+    const { statusCode, body } = await request(new URL('/healthcheck', baseUrl), {
+      headers: { 'User-Agent': 'Sonare/1.0' },
+      headersTimeout: 5000,
+      bodyTimeout: 5000,
+    });
+    await body.dump();
+    if (statusCode < 200 || statusCode >= 300) return `Piped at ${baseUrl} answered /healthcheck with HTTP ${statusCode}`;
+  } catch (e: any) {
+    return `Nothing answered at ${baseUrl} (${e.code || e.message})`;
+  }
+}
+
+// JitPack builds NewPipeExtractor from GitHub by commit, so a hash GitHub doesn't know would
+// only fail later, in the middle of the Piped image build.
+async function extractorCommitExists(sha: string): Promise<string | undefined> {
+  try {
+    const { statusCode, body } = await request(`https://api.github.com/repos/${EXTRACTOR_REPO}/commits/${sha}`, {
+      headers: { 'User-Agent': 'Sonare/1.0', Accept: 'application/vnd.github+json' },
+      headersTimeout: 8000,
+      bodyTimeout: 8000,
+    });
+    await body.dump();
+    if (statusCode === 404 || statusCode === 422) return `${sha} is not a commit in ${EXTRACTOR_REPO}`;
+    if (statusCode !== 200) return `Could not check the commit on GitHub (HTTP ${statusCode})`;
+  } catch (e: any) {
+    return `Could not reach GitHub to check the commit (${e.code || e.message})`;
+  }
+}
+
+/** Runs the setting's check, if it has one. Returns why the value looks wrong, if it does. */
+export async function checkSetting(key: string, value: string): Promise<string | undefined> {
+  return SETTINGS[key]?.check?.(value);
+}
 
 const values = new Map<string, unknown>();
 

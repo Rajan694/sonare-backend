@@ -141,6 +141,8 @@ export const requestLogs = pgTable('request_logs', {
   status: integer('status').notNull(),
   durationMs: integer('duration_ms').notNull(),
   userId: uuid('user_id'),
+  /** web | linux | mobile, from the apps' X-Sonare-Client header; null for anything else. */
+  client: text('client'),
 }, (t) => ({
   atIdx: index('request_logs_at_idx').on(t.at),
 }));

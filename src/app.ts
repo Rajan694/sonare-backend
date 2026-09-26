@@ -23,6 +23,9 @@ import { PermanentCache } from './cache.js';
 import { BadRequestError, NoAudioStreamError } from './errors.js';
 import { authRouter } from './routes/auth.routes.js';
 import { meRouter } from './routes/me.routes.js';
+import { adminRouter } from './routes/admin.routes.js';
+import { clientErrorsRouter } from './routes/clientErrors.routes.js';
+import { requestLogger } from './telemetry.js';
 import { optionalAuth } from './auth.js';
 import { getUserTrackFields, getUserTrackDataMap } from './db/user-data.js';
 import { saveDbLyricsOverride, saveDbLyricsOffset, deleteDbLyricsOverride, getDbLyricsOverride } from './lyrics.js';
@@ -168,7 +171,9 @@ async function searchArtistCatalog(channelId: string, channelName: string | unde
 export function createApp() {
   const app = express();
 
-  app.use(cors({ origin: [/localhost/, /127\.0\.0\.1/] }));
+  // maxAge: the apps' X-Sonare-Client header makes every request preflighted; cache that.
+  app.use(cors({ origin: [/localhost/, /127\.0\.0\.1/], maxAge: 600 }));
+  app.use(requestLogger());
   app.use(pinoHttp({
     level: process.env.NODE_ENV === 'test' ? 'silent' : 'info',
   }));
@@ -182,6 +187,8 @@ export function createApp() {
 
   v1.use('/auth', authRouter);
   v1.use('/me', meRouter);
+  v1.use('/admin', adminRouter);
+  v1.use('/client-errors', clientErrorsRouter);
 
   v1.get('/discover/made-for-you', (req, res) => {
     res.json({ items: [], meta: { total: 0 } });
@@ -796,6 +803,8 @@ export function createApp() {
 
   app.use((err: any, req: Request, res: Response, next: NextFunction) => {
     req.log.error(err);
+    // The request logger records it in error_logs if this ends up a 5xx.
+    res.locals.error = err;
     
     if (err instanceof NoAudioStreamError || err.code === 'NO_AUDIO_STREAM' || err.status === 503) {
       res.status(503).json({
