@@ -235,7 +235,7 @@ meRouter.get('/recently-played', async (req, res, next) => {
       trackRefKind: h.trackRefKind,
       trackRefId: h.trackRefId,
       lastPlayedAt: h.playedAt.getTime(),
-    })));
+    })), { failIfPipedDown: true });
 
     res.json({
       items,
@@ -269,7 +269,7 @@ meRouter.get('/most-played', async (req, res, next) => {
       trackRefKind: p.trackRefKind,
       trackRefId: p.trackRefId,
       playCount: p.count,
-    })));
+    })), { failIfPipedDown: true });
 
     res.json({
       items,

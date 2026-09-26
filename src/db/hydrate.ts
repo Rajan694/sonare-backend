@@ -1,6 +1,7 @@
 import { CachedPiped } from '../cache.js';
 import { normalizeStreamToTrack } from '../normalize/index.js';
 import { idHelpers } from '../ids.js';
+import { UpstreamError } from '../upstream/piped.js';
 import { getUserTrackDataMap, UserTrackFields } from './user-data.js';
 
 export interface TrackRefInput {
@@ -12,9 +13,19 @@ export interface TrackRefInput {
   lastPlayedAt?: number;
 }
 
+export interface HydrateOptions {
+  /**
+   * Fail the request when Piped is unreachable, instead of stubbing every server track.
+   * History shelves want this: a list of "Unknown Title" rows reads as data, not an outage.
+   * Favourites keep the stubs - mobile reads its heart state from them once, at sign-in.
+   */
+  failIfPipedDown?: boolean;
+}
+
 export async function hydrateTracks(
   userId: string | undefined,
-  inputs: TrackRefInput[]
+  inputs: TrackRefInput[],
+  { failIfPipedDown = false }: HydrateOptions = {}
 ) {
   const allIds = inputs.map(i => 
     i.trackRefKind === 'server' ? idHelpers.prefixYt(i.trackRefId) : idHelpers.prefixLocal(i.trackRefId)
@@ -38,6 +49,7 @@ export async function hydrateTracks(
         const streams = await CachedPiped.getStream(input.trackRefId);
         return normalizeStreamToTrack(streams, input.trackRefId, undefined, undefined, userFields);
       } catch (e) {
+        if (failIfPipedDown && e instanceof UpstreamError && e.unreachable) throw e;
         // Degrade to safe stub when Piped is offline or metadata unavailable
         return {
           id: fullId,

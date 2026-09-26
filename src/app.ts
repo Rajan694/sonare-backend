@@ -296,6 +296,8 @@ export function createApp() {
     const limit = limitStr ? parseInt(limitStr, 10) : 50;
 
     let items: any[] = [];
+    // The last upstream failure; reported only if it leaves nothing to show.
+    let failure: unknown;
     try {
       const rawTrending = await CachedPiped.trending(region);
       const isMusicTrack = (t: any) => {
@@ -320,8 +322,8 @@ export function createApp() {
       };
 
       items = rawTrending.filter(isMusicTrack);
-    } catch {
-      // Fallback
+    } catch (e) {
+      failure = e;
     }
 
     // Ensure we always have sufficient high quality musical items for the Home carousel and trending shelf
@@ -337,8 +339,14 @@ export function createApp() {
             items.push(item);
           }
         }
-      } catch {}
+      } catch (e) {
+        failure = e;
+      }
     }
+
+    // Both sources failing is an outage, not an empty chart. Answering 200 with no items
+    // made the apps say "nothing trending" while Piped was down.
+    if (items.length === 0 && failure) throw failure;
 
     res.json({
       items: items.slice(0, limit).map(item => ({ kind: 'track', ...normalizeStreamItemToTrack(item) })),
@@ -805,7 +813,7 @@ export function createApp() {
     
     if (err instanceof UpstreamError) {
       res.status(502).json({
-        error: { code: 'UPSTREAM_ERROR', message: err.message }
+        error: { code: err.unreachable ? 'UPSTREAM_UNAVAILABLE' : 'UPSTREAM_ERROR', message: err.message }
       });
       return;
     }

@@ -4,11 +4,28 @@ import * as T from './piped.types.js';
 
 export class UpstreamError extends Error {
   public status: number;
-  constructor(message: string, status: number) {
+  /** Piped itself could not be reached, as opposed to answering this one request with an error. */
+  public unreachable: boolean;
+  constructor(message: string, status: number, unreachable = false) {
     super(message);
     this.name = 'UpstreamError';
     this.status = status;
+    this.unreachable = unreachable;
   }
+}
+
+// Nothing listening, or the host is gone. A slow answer (headers/body timeout) is a problem
+// with one request - a long extraction - not an outage.
+const UNREACHABLE_CODES = new Set([
+  'ECONNREFUSED', 'ECONNRESET', 'ENOTFOUND', 'EAI_AGAIN', 'EHOSTUNREACH', 'ENETUNREACH',
+  'UND_ERR_CONNECT_TIMEOUT', 'UND_ERR_SOCKET',
+]);
+
+function networkError(e: any): UpstreamError {
+  if (UNREACHABLE_CODES.has(e?.code)) {
+    return new UpstreamError(`Piped is unreachable at ${config.PIPED_API_URL} (${e.code})`, 502, true);
+  }
+  return new UpstreamError(`Piped network error: ${e.message}`, 502);
 }
 
 async function fetchPiped<TRes>(path: string, options: { method?: string; query?: Record<string, string | number> } = {}): Promise<TRes> {
@@ -52,7 +69,7 @@ async function fetchPiped<TRes>(path: string, options: { method?: string; query?
         attempt++;
         continue;
       }
-      throw new UpstreamError(`Piped network error: ${e.message}`, 502);
+      throw networkError(e);
     }
   }
   throw new UpstreamError('Unreachable', 502);
@@ -124,7 +141,7 @@ export const Piped = {
           attempt++;
           continue;
         }
-        throw new UpstreamError(`Piped network error: ${e.message}`, 502);
+        throw networkError(e);
       }
     }
     throw new UpstreamError('Unreachable', 502);
