@@ -172,7 +172,8 @@ export function createApp() {
   const app = express();
 
   // maxAge: the apps' X-Sonare-Client header makes every request preflighted; cache that.
-  app.use(cors({ origin: [/localhost/, /127\.0\.0\.1/], maxAge: 600 }));
+  // Downloads resume with Range requests and read the total size from Content-Range.
+  app.use(cors({ origin: [/localhost/, /127\.0\.0\.1/], maxAge: 600, exposedHeaders: ['Content-Range', 'Content-Length', 'Accept-Ranges'] }));
   app.use(requestLogger());
   app.use(pinoHttp({
     level: process.env.NODE_ENV === 'test' ? 'silent' : 'info',
@@ -515,6 +516,8 @@ export function createApp() {
       contentLength: best.contentLength,
       expiresAt,
       muxed: best.muxed,
+      // Lets a paused download check that a refreshed url still points at the same file.
+      itag: best.itag,
     });
   }));
 

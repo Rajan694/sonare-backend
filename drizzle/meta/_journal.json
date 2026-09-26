@@ -29,6 +29,13 @@
       "when": 1790431654479,
       "tag": "0003_request_log_client",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1790446322955,
+      "tag": "0004_download_settings",
+      "breakpoints": true
     }
   ]
 }
