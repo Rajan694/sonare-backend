@@ -2,10 +2,12 @@ import { createApp } from './app.js';
 import { config } from './config.js';
 import { verifyDatabase } from './db/index.js';
 import { loadSystemConfig, pipedApiUrl } from './systemConfig.js';
+import { flushTelemetry, startTelemetry } from './telemetry.js';
 
 async function start() {
   await verifyDatabase();
   await loadSystemConfig();
+  startTelemetry();
   const app = createApp();
   const server = app.listen(config.PORT, () => {
     console.log(`Sonare backend listening on port ${config.PORT}`);
@@ -16,7 +18,8 @@ async function start() {
     console.log('Shutting down...');
     server.close(() => {
       console.log('HTTP server closed');
-      process.exit(0);
+      // Write out the request and error logs still buffered.
+      void flushTelemetry().finally(() => process.exit(0));
     });
     
     // Force close if lingering

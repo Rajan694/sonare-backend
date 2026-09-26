@@ -48,6 +48,10 @@ redis.on('ready', () => {
   loggedRedisError = false;
 });
 
+export function isRedisAvailable(): boolean {
+  return redisAvailable;
+}
+
 async function getCached<T>(key: string): Promise<T | null> {
   if (!redisAvailable) return null;
   try {
