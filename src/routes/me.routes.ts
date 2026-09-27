@@ -707,32 +707,24 @@ meRouter.get('/settings', async (req, res, next) => {
 
 meRouter.put('/settings', async (req, res, next) => {
   try {
-    const { eqPreset, gapless, normalization, stayOffline } = req.body;
-    // Older app builds don't send the newer fields; undefined keeps the stored value.
-    const downloadQuality = oneOf(req.body.downloadQuality === 'lossless' ? 'high' : req.body.downloadQuality, QUALITIES);
-    const streamQuality = oneOf(req.body.streamQuality, QUALITIES);
-    const downloadFormat = oneOf(req.body.downloadFormat, DOWNLOAD_FORMATS);
-    await db.insert(userSettings).values({
-      userId: req.user!.id,
-      eqPreset,
-      gapless,
-      normalization,
-      downloadQuality,
-      stayOffline,
-      streamQuality,
-      downloadFormat,
-    }).onConflictDoUpdate({
-      target: [userSettings.userId],
-      set: {
-        eqPreset,
-        gapless,
-        normalization,
-        downloadQuality,
-        stayOffline,
-        streamQuality,
-        downloadFormat,
-      }
-    });
+    const body = req.body ?? {};
+    const bool = (v: unknown) => (typeof v === 'boolean' ? v : undefined);
+    // Apps send only what changed; a field that's missing (or invalid) keeps the stored value.
+    const changes = {
+      eqPreset: typeof body.eqPreset === 'string' ? body.eqPreset : undefined,
+      gapless: bool(body.gapless),
+      normalization: bool(body.normalization),
+      stayOffline: bool(body.stayOffline),
+      downloadQuality: oneOf(body.downloadQuality === 'lossless' ? 'high' : body.downloadQuality, QUALITIES),
+      streamQuality: oneOf(body.streamQuality, QUALITIES),
+      downloadFormat: oneOf(body.downloadFormat, DOWNLOAD_FORMATS),
+    };
+    const set = Object.fromEntries(Object.entries(changes).filter(([, v]) => v !== undefined));
+    const insert = db.insert(userSettings).values({ userId: req.user!.id, ...set });
+    // Nothing valid to change: still create the row with defaults, but don't touch an existing one.
+    await (Object.keys(set).length > 0
+      ? insert.onConflictDoUpdate({ target: [userSettings.userId], set })
+      : insert.onConflictDoNothing({ target: [userSettings.userId] }));
 
     res.json({ ok: true });
   } catch (e) {

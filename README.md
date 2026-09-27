@@ -67,8 +67,10 @@ the `admin_users` table, which is separate from app accounts. The migrations cre
 ## Downloads
 
 The apps download audio through the playback endpoints: `GET /tracks/:id/stream` picks the
-stream (`quality`, `format`) and `GET /stream/:token` relays it in `Range` chunks, so paused
-downloads resume where they stopped. CORS exposes `Content-Range` for that. Download quality
-and format are account settings in `user_settings` (`download_quality`, `download_format`,
-and `stream_quality` for playback); run `npm run db:migrate` after pulling to add them.
+stream (`quality` = `low` / `normal` / `high` / `auto`, `format`) and `GET /stream/:token`
+relays it in `Range` chunks, so paused downloads resume where they stopped. CORS exposes
+`Content-Range` for that, and a range past the end of the file gets a 416 with the size.
+Download quality and format are account settings in `user_settings` (`download_quality`,
+`download_format`, and `stream_quality` for playback); run `npm run db:migrate` after
+pulling to add them. `PUT /me/settings` changes only the fields it's sent.
 Details: `docs/api-contract.md` §8.7 in the `sonare` repo.

@@ -65,26 +65,29 @@ function selectBestAudioStream(
 ): SelectedStream | null {
   // If adaptive audio streams exist, adaptive audio must still win
   if (audios && audios.length > 0) {
-    const targets: Record<string, number> = { low: 64_000, auto: 160_000, high: Infinity };
-    const target = targets[quality] || targets.auto;
-    
     const sorted = audios.slice().sort((a, b) => b.bitrate - a.bitrate);
-    let eligible = sorted.filter(a => a.bitrate <= target);
-    if (eligible.length === 0) {
-      eligible = [sorted[sorted.length - 1]];
-    }
+    const isOpus = (s: any) => s.codec?.toLowerCase().includes('opus') || s.format?.toLowerCase().includes('opus') || s.codec?.toLowerCase().includes('webm') || s.format?.toLowerCase().includes('webm');
+    const isAac = (s: any) => s.codec?.toLowerCase().includes('mp4a') || s.format?.toLowerCase().includes('m4a') || s.codec?.toLowerCase().includes('m4a') || s.format?.toLowerCase().includes('mp4a');
 
-    // Contract 8.2 says prefer opus and fall back to mp4a only when there is no opus
-    let best = undefined;
-    if (!format || format === 'opus') {
-      best = eligible.find(s => s.codec?.toLowerCase().includes('opus') || s.format?.toLowerCase().includes('opus') || s.codec?.toLowerCase().includes('webm') || s.format?.toLowerCase().includes('webm'));
-    }
-    if (!best && (!format || format === 'mp4a' || format === 'm4a')) {
-      best = eligible.find(s => s.codec?.toLowerCase().includes('mp4a') || s.format?.toLowerCase().includes('m4a') || s.codec?.toLowerCase().includes('m4a') || s.format?.toLowerCase().includes('mp4a'));
-    }
-    
-    if (!best) best = eligible[0];
-    if (!best) best = sorted[0];
+    // `low`, `auto` and `high` are bitrate ceilings. `normal` is the middle tier of the format:
+    // YouTube's Opus comes in ~60 / ~75 / ~150 kbps and AAC in ~50 / ~128, so a ceiling
+    // can't tell "normal" from "high" (both would be the ~160 kbps Opus).
+    const targets: Record<string, number> = { low: 64_000, auto: 160_000, high: Infinity };
+    const pick = (list: any[]) => {
+      if (list.length === 0) return undefined;
+      if (quality === 'normal') {
+        const tiers = [...new Set(list.map(s => s.itag))].reverse(); // lowest bitrate first
+        const middle = tiers[Math.floor(tiers.length / 2)];
+        return list.find(s => s.itag === middle);
+      }
+      const target = targets[quality] ?? targets.auto;
+      return list.find(s => s.bitrate <= target) ?? list[list.length - 1];
+    };
+
+    // Contract 8.2 says prefer opus and fall back to mp4a only when there is no opus. An
+    // explicit format is tried first at any bitrate before the other one is considered.
+    const order = format === 'mp4a' || format === 'm4a' ? [isAac, isOpus] : [isOpus, isAac];
+    const best = pick(sorted.filter(order[0])) ?? pick(sorted.filter(order[1])) ?? pick(sorted);
 
     if (best) {
       let mappedCodec = best.codec;
@@ -513,7 +516,8 @@ export function createApp() {
       mimeType: best.mimeType,
       codec: best.codec,
       bitrateKbps: Math.floor(best.bitrate / 1000),
-      contentLength: best.contentLength,
+      // 0 when YouTube didn't say (NewPipe reports -1): clients treat it as unknown.
+      contentLength: best.contentLength > 0 ? best.contentLength : 0,
       expiresAt,
       muxed: best.muxed,
       // Lets a paused download check that a refreshed url still points at the same file.
@@ -792,6 +796,22 @@ export function createApp() {
       });
   
       upstreamRes.body.pipe(res);
+    } else if ((upstreamRes.statusCode === 416 || upstreamRes.statusCode === 400) && req.headers.range) {
+      // A range past the end (YouTube says 416, Piped's proxy 400) should come back as 416
+      // with the size rather than look like a dead url, so a download that already has
+      // every byte can finish instead of refreshing its url. Two bytes tell us the size
+      // (Piped's proxy answers `bytes=0-0` with the whole file).
+      await upstreamRes.body.dump();
+      const start = Number(/bytes=(\d+)-/.exec(req.headers.range)?.[1]);
+      const probe = await request(url, { headers: { ...headers, Range: 'bytes=0-1' } });
+      await probe.body.dump();
+      const total = Number(String(probe.headers['content-range'] ?? '').split('/')[1]);
+      if (total > 0 && start >= total) {
+        res.setHeader('Content-Range', `bytes */${total}`);
+        res.status(416).end();
+      } else {
+        res.status(502).json({ error: { code: 'UPSTREAM_ERROR', message: 'Failed to proxy stream' } });
+      }
     } else {
       await upstreamRes.body.dump();
       res.status(502).json({ error: { code: 'UPSTREAM_ERROR', message: 'Failed to proxy stream' } });
