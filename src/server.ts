@@ -21,7 +21,7 @@ async function start() {
       // Write out the request and error logs still buffered.
       void flushTelemetry().finally(() => process.exit(0));
     });
-    
+
     // Force close if lingering
     setTimeout(() => {
       console.error('Forcing exit after 10s timeout');

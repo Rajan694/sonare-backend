@@ -17,8 +17,14 @@ export class UpstreamError extends Error {
 // Nothing listening, or the host is gone. A slow answer (headers/body timeout) is a problem
 // with one request - a long extraction - not an outage.
 const UNREACHABLE_CODES = new Set([
-  'ECONNREFUSED', 'ECONNRESET', 'ENOTFOUND', 'EAI_AGAIN', 'EHOSTUNREACH', 'ENETUNREACH',
-  'UND_ERR_CONNECT_TIMEOUT', 'UND_ERR_SOCKET',
+  'ECONNREFUSED',
+  'ECONNRESET',
+  'ENOTFOUND',
+  'EAI_AGAIN',
+  'EHOSTUNREACH',
+  'ENETUNREACH',
+  'UND_ERR_CONNECT_TIMEOUT',
+  'UND_ERR_SOCKET',
 ]);
 
 function networkError(e: any): UpstreamError {
@@ -28,7 +34,10 @@ function networkError(e: any): UpstreamError {
   return new UpstreamError(`Piped network error: ${e.message}`, 502);
 }
 
-async function fetchPiped<TRes>(path: string, options: { method?: string; query?: Record<string, string | number> } = {}): Promise<TRes> {
+async function fetchPiped<TRes>(
+  path: string,
+  options: { method?: string; query?: Record<string, string | number> } = {},
+): Promise<TRes> {
   const url = new URL(path, pipedApiUrl());
   if (options.query) {
     for (const [key, val] of Object.entries(options.query)) {
@@ -44,7 +53,7 @@ async function fetchPiped<TRes>(path: string, options: { method?: string; query?
       const { statusCode, body } = await request(url, {
         method: (options.method || 'GET') as any,
         headers: {
-          'Accept': 'application/json',
+          Accept: 'application/json',
           'User-Agent': 'Sonare/1.0',
         },
         bodyTimeout: 5000,
@@ -52,7 +61,7 @@ async function fetchPiped<TRes>(path: string, options: { method?: string; query?
       });
 
       if (statusCode >= 200 && statusCode < 300) {
-        return await body.json() as TRes;
+        return (await body.json()) as TRes;
       }
 
       if (statusCode >= 500 && attempt === 0) {
@@ -145,5 +154,5 @@ export const Piped = {
       }
     }
     throw new UpstreamError('Unreachable', 502);
-  }
+  },
 };

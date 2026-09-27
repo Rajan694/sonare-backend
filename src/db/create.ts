@@ -6,7 +6,7 @@ async function createDatabase() {
     ...dbConfig,
     database: 'postgres',
   };
-  
+
   console.log(`Connecting to maintenance database 'postgres' on host ${maintenanceConfig.host}...`);
   const sql = postgres(maintenanceConfig);
 

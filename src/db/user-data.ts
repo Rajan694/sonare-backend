@@ -9,36 +9,36 @@ export interface UserTrackFields {
   lastPlayedAt?: number;
 }
 
-export async function getUserTrackDataMap(userId: string | undefined, trackIds: string[]): Promise<Map<string, UserTrackFields>> {
+export async function getUserTrackDataMap(
+  userId: string | undefined,
+  trackIds: string[],
+): Promise<Map<string, UserTrackFields>> {
   const map = new Map<string, UserTrackFields>();
   if (!userId || trackIds.length === 0) return map;
 
   try {
-    const rawIds = trackIds.map(id => id.startsWith('yt:') ? id.substring(3) : id);
+    const rawIds = trackIds.map((id) => (id.startsWith('yt:') ? id.substring(3) : id));
     const allIds = [...new Set([...trackIds, ...rawIds])];
 
-    const favs = await db.select().from(favouriteTracks).where(
-      and(
-        eq(favouriteTracks.userId, userId),
-        inArray(favouriteTracks.trackRefId, allIds)
-      )
-    );
+    const favs = await db
+      .select()
+      .from(favouriteTracks)
+      .where(and(eq(favouriteTracks.userId, userId), inArray(favouriteTracks.trackRefId, allIds)));
 
     const favMap = new Map<string, Date>();
     for (const f of favs) {
       favMap.set(f.trackRefId, f.addedAt);
     }
 
-    const plays = await db.select({
-      trackRefId: playHistory.trackRefId,
-      count: sql<number>`count(*)::int`,
-      lastPlayed: sql<Date | null>`max(${playHistory.playedAt})`,
-    }).from(playHistory).where(
-      and(
-        eq(playHistory.userId, userId),
-        inArray(playHistory.trackRefId, allIds)
-      )
-    ).groupBy(playHistory.trackRefId);
+    const plays = await db
+      .select({
+        trackRefId: playHistory.trackRefId,
+        count: sql<number>`count(*)::int`,
+        lastPlayed: sql<Date | null>`max(${playHistory.playedAt})`,
+      })
+      .from(playHistory)
+      .where(and(eq(playHistory.userId, userId), inArray(playHistory.trackRefId, allIds)))
+      .groupBy(playHistory.trackRefId);
 
     const playMap = new Map<string, { count: number; lastPlayed?: number }>();
     for (const p of plays) {
@@ -69,10 +69,12 @@ export async function getUserTrackDataMap(userId: string | undefined, trackIds: 
 
 export async function getUserTrackFields(userId: string | undefined, trackId: string): Promise<UserTrackFields> {
   const map = await getUserTrackDataMap(userId, [trackId]);
-  return map.get(trackId) || {
-    playCount: 0,
-    favourite: false,
-    addedAt: Date.now(),
-    lastPlayedAt: undefined,
-  };
+  return (
+    map.get(trackId) || {
+      playCount: 0,
+      favourite: false,
+      addedAt: Date.now(),
+      lastPlayedAt: undefined,
+    }
+  );
 }

@@ -20,11 +20,11 @@ export function signStreamToken(
   const exp = Date.now() + expiresInMs;
   const payload = JSON.stringify({ url, exp, ...source });
   const payloadB64 = Buffer.from(payload).toString('base64url');
-  
+
   const hmac = crypto.createHmac('sha256', STREAM_TOKEN_SECRET);
   hmac.update(payloadB64);
   const signature = hmac.digest('base64url');
-  
+
   return `${payloadB64}.${signature}`;
 }
 
@@ -37,17 +37,17 @@ export function verifyStreamToken(token: string): StreamTokenData {
   const hmac = crypto.createHmac('sha256', STREAM_TOKEN_SECRET);
   hmac.update(payloadB64);
   const expectedSignature = hmac.digest('base64url');
-  
+
   // Constant time comparison
   const sigBuf = Buffer.from(signature, 'ascii');
   const expectedBuf = Buffer.from(expectedSignature, 'ascii');
-  
+
   if (sigBuf.length !== expectedBuf.length || !crypto.timingSafeEqual(sigBuf, expectedBuf)) {
     throw new Error('Invalid signature');
   }
 
   const payload = JSON.parse(Buffer.from(payloadB64, 'base64url').toString('utf8'));
-  
+
   if (Date.now() > payload.exp) {
     throw new Error('Token expired');
   }

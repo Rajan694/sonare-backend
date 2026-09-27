@@ -53,7 +53,11 @@ export async function requireAdmin(req: Request, res: Response, next: NextFuncti
   }
 
   try {
-    const [admin] = await db.select().from(adminUsers).where(eq(adminUsers.id, String(payload.sub))).limit(1);
+    const [admin] = await db
+      .select()
+      .from(adminUsers)
+      .where(eq(adminUsers.id, String(payload.sub)))
+      .limit(1);
     if (!admin || admin.tokenVersion !== payload.ver) {
       return unauthorized(res, 'Your admin session has ended');
     }

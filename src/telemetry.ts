@@ -10,7 +10,7 @@ import { errorLogs, requestLogs } from './db/schema.js';
 // (A column left to defaultNow() gets the database session's local time instead.)
 
 export const CLIENTS = ['web', 'linux', 'mobile'] as const;
-export type ClientName = typeof CLIENTS[number];
+export type ClientName = (typeof CLIENTS)[number];
 export type ErrorSource = 'backend' | ClientName;
 
 const REQUEST_LOG_DAYS = 30;
@@ -45,7 +45,7 @@ function truncate(s: string | null | undefined, max: number): string | null {
 
 export function clientOf(req: Request): ClientName | null {
   const header = req.get('x-sonare-client');
-  return (CLIENTS as readonly string[]).includes(header ?? '') ? header as ClientName : null;
+  return (CLIENTS as readonly string[]).includes(header ?? '') ? (header as ClientName) : null;
 }
 
 const routePatterns = new Map<string, RegExp>();
@@ -63,8 +63,9 @@ function routeOf(req: Request, res: Response): string {
 
   let pattern = routePatterns.get(routePath);
   if (!pattern) {
-    const body = routePath.split('/')
-      .map(seg => seg.startsWith(':') ? '[^/]+' : seg.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+    const body = routePath
+      .split('/')
+      .map((seg) => (seg.startsWith(':') ? '[^/]+' : seg.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
       .join('/');
     pattern = new RegExp(`${body}/?$`);
     routePatterns.set(routePath, pattern);
@@ -152,14 +153,17 @@ async function writeError({ report: r, count, at }: { report: ErrorReport; count
     context: r.context ?? null,
     lastSeenAt: at,
   };
-  const updated = await db.update(errorLogs)
+  const updated = await db
+    .update(errorLogs)
     .set({ ...latest, count: sql`${errorLogs.count} + ${count}` })
-    .where(and(
-      eq(errorLogs.source, r.source),
-      eq(errorLogs.message, r.message),
-      sql`${errorLogs.code} IS NOT DISTINCT FROM ${r.code ?? null}`,
-      sql`${errorLogs.route} IS NOT DISTINCT FROM ${r.route ?? null}`,
-    ))
+    .where(
+      and(
+        eq(errorLogs.source, r.source),
+        eq(errorLogs.message, r.message),
+        sql`${errorLogs.code} IS NOT DISTINCT FROM ${r.code ?? null}`,
+        sql`${errorLogs.route} IS NOT DISTINCT FROM ${r.route ?? null}`,
+      ),
+    )
     .returning({ id: errorLogs.id });
   if (updated.length === 0) {
     await db.insert(errorLogs).values({
@@ -206,7 +210,9 @@ async function prune() {
   try {
     const utcNow = sql`(now() AT TIME ZONE 'UTC')`;
     await db.delete(requestLogs).where(lt(requestLogs.at, sql`${utcNow} - make_interval(days => ${REQUEST_LOG_DAYS})`));
-    await db.delete(errorLogs).where(lt(errorLogs.lastSeenAt, sql`${utcNow} - make_interval(days => ${ERROR_LOG_DAYS})`));
+    await db
+      .delete(errorLogs)
+      .where(lt(errorLogs.lastSeenAt, sql`${utcNow} - make_interval(days => ${ERROR_LOG_DAYS})`));
   } catch (err: any) {
     console.warn('[telemetry] could not prune old logs:', err.message);
   }

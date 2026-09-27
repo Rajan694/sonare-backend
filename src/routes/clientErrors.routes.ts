@@ -17,8 +17,9 @@ const reportSchema = z.object({
   /** The app screen or page the error happened on. */
   page: z.string().max(500).optional(),
   appVersion: z.string().max(50).optional(),
-  context: z.record(z.string(), z.union([z.string().max(500), z.number(), z.boolean(), z.null()]))
-    .refine(c => Object.keys(c).length <= 20, 'At most 20 context fields')
+  context: z
+    .record(z.string(), z.union([z.string().max(500), z.number(), z.boolean(), z.null()]))
+    .refine((c) => Object.keys(c).length <= 20, 'At most 20 context fields')
     .optional(),
 });
 
@@ -32,7 +33,9 @@ clientErrorsRouter.post('/', (req, res) => {
 
   const parsed = reportSchema.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: { code: 'BAD_REQUEST', message: parsed.error.issues[0]?.message ?? 'Invalid report' } });
+    res
+      .status(400)
+      .json({ error: { code: 'BAD_REQUEST', message: parsed.error.issues[0]?.message ?? 'Invalid report' } });
     return;
   }
 

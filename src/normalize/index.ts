@@ -64,25 +64,37 @@ export function proxyImageUrl(url: string | undefined): string | undefined {
   return `/api/v1/image/${signStreamToken(url, 30 * 24 * 3600 * 1000)}`;
 }
 
-export function normalizeStreamToTrack(streams: T.Streams, videoId: string, codecStr?: string, bitrate?: number, userFields?: UserTrackFields): M.Track & { thumbnail: string } {
+export function normalizeStreamToTrack(
+  streams: T.Streams,
+  videoId: string,
+  codecStr?: string,
+  bitrate?: number,
+  userFields?: UserTrackFields,
+): M.Track & { thumbnail: string } {
   const durationSec = sanitizeCount(streams.duration);
-  return withUserFields({
-    id: idHelpers.prefixYt(videoId),
-    title: stripTitle(streams.title),
-    artistId: idHelpers.artistIdFromUrl(streams.uploaderUrl),
-    artist: stripArtist(streams.uploader),
-    albumId: null as any,
-    album: null as any,
-    durationMs: durationSec !== null ? durationSec * 1000 : null,
-    source: 'server',
-    codec: codecStr ? mapCodec(codecStr) : null,
-    bitrateKbps: bitrate ? Math.floor(bitrate / 1000) : null,
-    bitDepth: undefined,
-    thumbnail: `/api/v1/tracks/${idHelpers.prefixYt(videoId)}/artwork`
-  }, userFields);
+  return withUserFields(
+    {
+      id: idHelpers.prefixYt(videoId),
+      title: stripTitle(streams.title),
+      artistId: idHelpers.artistIdFromUrl(streams.uploaderUrl),
+      artist: stripArtist(streams.uploader),
+      albumId: null as any,
+      album: null as any,
+      durationMs: durationSec !== null ? durationSec * 1000 : null,
+      source: 'server',
+      codec: codecStr ? mapCodec(codecStr) : null,
+      bitrateKbps: bitrate ? Math.floor(bitrate / 1000) : null,
+      bitDepth: undefined,
+      thumbnail: `/api/v1/tracks/${idHelpers.prefixYt(videoId)}/artwork`,
+    },
+    userFields,
+  );
 }
 
-export function normalizeStreamItemToTrack(item: T.StreamItem, userFields?: UserTrackFields): M.Track & { thumbnail: string } {
+export function normalizeStreamItemToTrack(
+  item: T.StreamItem,
+  userFields?: UserTrackFields,
+): M.Track & { thumbnail: string } {
   let id = 'unknown';
   if (item.url?.startsWith('/watch?v=')) {
     id = item.url.substring(9);
@@ -90,20 +102,23 @@ export function normalizeStreamItemToTrack(item: T.StreamItem, userFields?: User
 
   const durationSec = sanitizeCount(item.duration);
 
-  return withUserFields({
-    id: idHelpers.prefixYt(id),
-    title: stripTitle(item.title || item.name || ''),
-    artistId: idHelpers.artistIdFromUrl(item.uploaderUrl),
-    artist: stripArtist(item.uploaderName || item.uploader || item.author),
-    albumId: null as any,
-    album: null as any,
-    durationMs: durationSec !== null ? durationSec * 1000 : null,
-    source: 'server',
-    codec: null as any,
-    bitrateKbps: null as any,
-    bitDepth: undefined,
-    thumbnail: `/api/v1/tracks/${idHelpers.prefixYt(id)}/artwork`
-  }, userFields);
+  return withUserFields(
+    {
+      id: idHelpers.prefixYt(id),
+      title: stripTitle(item.title || item.name || ''),
+      artistId: idHelpers.artistIdFromUrl(item.uploaderUrl),
+      artist: stripArtist(item.uploaderName || item.uploader || item.author),
+      albumId: null as any,
+      album: null as any,
+      durationMs: durationSec !== null ? durationSec * 1000 : null,
+      source: 'server',
+      codec: null as any,
+      bitrateKbps: null as any,
+      bitDepth: undefined,
+      thumbnail: `/api/v1/tracks/${idHelpers.prefixYt(id)}/artwork`,
+    },
+    userFields,
+  );
 }
 
 export function normalizeStreamItemToArtist(item: any) {
@@ -118,7 +133,7 @@ export function normalizeStreamItemToArtist(item: any) {
     localTrackCount: 0,
     following: false,
     monthlyListeners: sanitizeCount(item.views) ?? sanitizeCount(item.subscriberCount),
-    thumbnail: id !== 'unknown' ? `/api/v1/artists/${ytid}/artwork` : proxyImageUrl(item.thumbnail)
+    thumbnail: id !== 'unknown' ? `/api/v1/artists/${ytid}/artwork` : proxyImageUrl(item.thumbnail),
   };
 }
 
@@ -136,7 +151,7 @@ export function normalizeStreamItemToAlbum(item: any) {
     genre: null,
     source: 'server',
     downloaded: false,
-    thumbnail: id !== 'unknown' ? `/api/v1/albums/${ytid}/artwork` : proxyImageUrl(item.thumbnail)
+    thumbnail: id !== 'unknown' ? `/api/v1/albums/${ytid}/artwork` : proxyImageUrl(item.thumbnail),
   };
 }
 
@@ -155,11 +170,14 @@ export function normalizeChannelTabAlbum(item: any) {
     genre: null,
     source: 'server',
     downloaded: false,
-    thumbnail: id !== 'unknown' ? `/api/v1/albums/${ytid}/artwork` : proxyImageUrl(thumb)
+    thumbnail: id !== 'unknown' ? `/api/v1/albums/${ytid}/artwork` : proxyImageUrl(thumb),
   };
 }
 
-export function normalizeChannelToArtist(channel: T.Channel, channelId: string): M.Artist & { thumbnail: string | undefined } {
+export function normalizeChannelToArtist(
+  channel: T.Channel,
+  channelId: string,
+): M.Artist & { thumbnail: string | undefined } {
   const ytid = idHelpers.prefixYt(channelId);
   return {
     id: ytid,
@@ -168,11 +186,14 @@ export function normalizeChannelToArtist(channel: T.Channel, channelId: string):
     localTrackCount: 0,
     following: false,
     monthlyListeners: sanitizeCount(channel.subscriberCount),
-    thumbnail: `/api/v1/artists/${ytid}/artwork`
+    thumbnail: `/api/v1/artists/${ytid}/artwork`,
   };
 }
 
-export function normalizePlaylistToAlbum(playlist: T.Playlist, playlistId: string): M.Album & { thumbnail: string | undefined } {
+export function normalizePlaylistToAlbum(
+  playlist: T.Playlist,
+  playlistId: string,
+): M.Album & { thumbnail: string | undefined } {
   let year = null;
   if (playlist.description) {
     const match = playlist.description.match(/\b(19|20)\d{2}\b/);
@@ -204,6 +225,6 @@ export function normalizePlaylistToAlbum(playlist: T.Playlist, playlistId: strin
     genre: null,
     source: 'server',
     downloaded: false,
-    thumbnail: `/api/v1/albums/${ytid}/artwork`
+    thumbnail: `/api/v1/albums/${ytid}/artwork`,
   };
 }

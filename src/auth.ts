@@ -49,7 +49,7 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
     res.status(401).json({
-      error: { code: 'UNAUTHORIZED', message: 'Missing or malformed Authorization header' }
+      error: { code: 'UNAUTHORIZED', message: 'Missing or malformed Authorization header' },
     });
     return;
   }
@@ -61,7 +61,7 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
     const [user] = await db.select().from(users).where(eq(users.id, decoded.id)).limit(1);
     if (!user) {
       res.status(401).json({
-        error: { code: 'UNAUTHORIZED', message: 'User no longer exists' }
+        error: { code: 'UNAUTHORIZED', message: 'User no longer exists' },
       });
       return;
     }
@@ -69,7 +69,7 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
     next();
   } catch (err: any) {
     res.status(401).json({
-      error: { code: 'UNAUTHORIZED', message: 'Token is invalid or expired' }
+      error: { code: 'UNAUTHORIZED', message: 'Token is invalid or expired' },
     });
   }
 }

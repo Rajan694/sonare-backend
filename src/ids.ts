@@ -6,7 +6,7 @@ export const idHelpers = {
   prefixYt(id: string): `yt:${string}` {
     return `yt:${id}`;
   },
-  
+
   prefixLocal(hash: string): `local:${string}` {
     return `local:${hash}`;
   },
@@ -42,5 +42,5 @@ export const idHelpers = {
     const match = url.match(/[?&]list=([a-zA-Z0-9_-]+)/);
     if (match) return match[1];
     return null;
-  }
+  },
 };

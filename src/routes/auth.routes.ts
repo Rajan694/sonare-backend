@@ -22,11 +22,14 @@ authRouter.post('/register', async (req, res, next) => {
     }
 
     const passwordHash = await bcrypt.hash(password, 10);
-    const [user] = await db.insert(users).values({
-      email,
-      passwordHash,
-      displayName,
-    }).returning();
+    const [user] = await db
+      .insert(users)
+      .values({
+        email,
+        passwordHash,
+        displayName,
+      })
+      .returning();
 
     const authUser = { id: user.id, email: user.email };
     const accessToken = signAccessToken(authUser);
@@ -102,9 +105,11 @@ authRouter.post('/refresh', async (req, res, next) => {
       throw new BadRequestError('Missing refreshToken');
     }
 
-    const [stored] = await db.select().from(refreshTokens).where(
-      and(eq(refreshTokens.token, refreshToken), eq(refreshTokens.revoked, false))
-    ).limit(1);
+    const [stored] = await db
+      .select()
+      .from(refreshTokens)
+      .where(and(eq(refreshTokens.token, refreshToken), eq(refreshTokens.revoked, false)))
+      .limit(1);
 
     if (!stored) {
       res.status(401).json({ error: { code: 'UNAUTHORIZED', message: 'Invalid or revoked refresh token' } });

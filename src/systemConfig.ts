@@ -17,11 +17,16 @@ import { systemConfiguration } from './db/schema.js';
  * copies them into build.gradle / config.properties on the next `./runPiped.sh up`.
  */
 
-const PIPED_DIR = process.env.PIPED_BACKEND_DIR || fileURLToPath(new URL('../../sonare-piped-backend/', import.meta.url));
+const PIPED_DIR =
+  process.env.PIPED_BACKEND_DIR || fileURLToPath(new URL('../../sonare-piped-backend/', import.meta.url));
 const EXTRACTOR_REPO = 'TeamNewPipe/NewPipeExtractor';
 
-const httpUrl = z.string().trim().url().refine(u => /^https?:\/\//.test(u), 'Must be an http(s) URL')
-  .transform(u => u.replace(/\/+$/, ''));
+const httpUrl = z
+  .string()
+  .trim()
+  .url()
+  .refine((u) => /^https?:\/\//.test(u), 'Must be an http(s) URL')
+  .transform((u) => u.replace(/\/+$/, ''));
 
 interface SettingDef {
   label: string;
@@ -64,7 +69,11 @@ export const SETTINGS: Record<string, SettingDef> = {
   'piped.extractorCommit': {
     label: 'NewPipeExtractor commit',
     applies: 'deploy',
-    schema: z.string().trim().toLowerCase().regex(/^[0-9a-f]{40}$/, 'Must be a full 40-character commit hash'),
+    schema: z
+      .string()
+      .trim()
+      .toLowerCase()
+      .regex(/^[0-9a-f]{40}$/, 'Must be a full 40-character commit hash'),
     fallback: () => undefined,
     fallbackSource: 'build.gradle',
     deployed: async () => (await readPipedFile('build.gradle'))?.match(/NewPipeExtractor:([0-9a-f]{7,40})/)?.[1],
@@ -80,7 +89,8 @@ async function pipedAnswers(baseUrl: string): Promise<string | undefined> {
       bodyTimeout: 5000,
     });
     await body.dump();
-    if (statusCode < 200 || statusCode >= 300) return `Piped at ${baseUrl} answered /healthcheck with HTTP ${statusCode}`;
+    if (statusCode < 200 || statusCode >= 300)
+      return `Piped at ${baseUrl} answered /healthcheck with HTTP ${statusCode}`;
   } catch (e: any) {
     return `Nothing answered at ${baseUrl} (${e.code || e.message})`;
   }
@@ -125,7 +135,7 @@ export async function latestExtractorCommit(): Promise<LatestCommit> {
       bodyTimeout: 8000,
     });
     if (statusCode === 200) {
-      const data = await body.json() as { sha: string; commit?: { message?: string; committer?: { date?: string } } };
+      const data = (await body.json()) as { sha: string; commit?: { message?: string; committer?: { date?: string } } };
       return {
         sha: data.sha,
         message: data.commit?.message?.split('\n')[0] ?? null,
@@ -139,7 +149,8 @@ export async function latestExtractorCommit(): Promise<LatestCommit> {
   }
 
   const { stdout } = await promisify(execFile)(
-    'git', ['ls-remote', `https://github.com/${EXTRACTOR_REPO}`, 'refs/heads/dev'],
+    'git',
+    ['ls-remote', `https://github.com/${EXTRACTOR_REPO}`, 'refs/heads/dev'],
     { timeout: 15_000 },
   );
   const sha = stdout.match(/^([0-9a-f]{40})\s/)?.[1];
@@ -184,7 +195,8 @@ export function parseSetting(key: string, value: unknown): string | null {
 }
 
 export async function saveSetting(key: string, value: string | null, updatedBy: string) {
-  await db.insert(systemConfiguration)
+  await db
+    .insert(systemConfiguration)
     .values({ key, value, updatedBy, updatedAt: new Date() })
     .onConflictDoUpdate({
       target: systemConfiguration.key,
@@ -196,25 +208,27 @@ export async function saveSetting(key: string, value: string | null, updatedBy: 
 /** Everything the admin page shows for each setting. */
 export async function describeSettings() {
   const rows = await db.select().from(systemConfiguration);
-  const byKey = new Map(rows.map(r => [r.key, r]));
-  return Promise.all(Object.entries(SETTINGS).map(async ([key, def]) => {
-    const row = byKey.get(key);
-    const value = typeof row?.value === 'string' && row.value ? row.value : null;
-    const deployed = def.deployed ? await def.deployed() : undefined;
-    return {
-      key,
-      label: def.label,
-      description: row?.description ?? null,
-      applies: def.applies,
-      value,
-      fallback: def.fallback() ?? deployed ?? null,
-      fallbackSource: def.fallbackSource,
-      /** What is in effect right now. */
-      effective: def.applies === 'live' ? (value ?? def.fallback() ?? null) : (deployed ?? null),
-      /** A deploy setting whose saved value is not in the Piped files yet. */
-      pending: def.applies === 'deploy' && value !== null && value !== deployed,
-      updatedAt: row?.updatedAt ?? null,
-      updatedBy: row?.updatedBy ?? null,
-    };
-  }));
+  const byKey = new Map(rows.map((r) => [r.key, r]));
+  return Promise.all(
+    Object.entries(SETTINGS).map(async ([key, def]) => {
+      const row = byKey.get(key);
+      const value = typeof row?.value === 'string' && row.value ? row.value : null;
+      const deployed = def.deployed ? await def.deployed() : undefined;
+      return {
+        key,
+        label: def.label,
+        description: row?.description ?? null,
+        applies: def.applies,
+        value,
+        fallback: def.fallback() ?? deployed ?? null,
+        fallbackSource: def.fallbackSource,
+        /** What is in effect right now. */
+        effective: def.applies === 'live' ? (value ?? def.fallback() ?? null) : (deployed ?? null),
+        /** A deploy setting whose saved value is not in the Piped files yet. */
+        pending: def.applies === 'deploy' && value !== null && value !== deployed,
+        updatedAt: row?.updatedAt ?? null,
+        updatedBy: row?.updatedBy ?? null,
+      };
+    }),
+  );
 }

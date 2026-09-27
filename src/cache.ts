@@ -26,14 +26,17 @@ const redis = new Redis(config.REDIS_URL, {
 });
 
 // Non-blocking connection attempt
-redis.connect().then(() => {
-  redisAvailable = true;
-}).catch((err: any) => {
-  if (!loggedRedisError) {
-    console.warn('[Cache] Redis unreachable at', config.REDIS_URL, '— degrading to cache passthrough.');
-    loggedRedisError = true;
-  }
-});
+redis
+  .connect()
+  .then(() => {
+    redisAvailable = true;
+  })
+  .catch((err: any) => {
+    if (!loggedRedisError) {
+      console.warn('[Cache] Redis unreachable at', config.REDIS_URL, '— degrading to cache passthrough.');
+      loggedRedisError = true;
+    }
+  });
 
 redis.on('error', (err: any) => {
   redisAvailable = false;
@@ -79,7 +82,7 @@ export const CachedPiped = {
     const key = `stream:${videoId}`;
     const cached = await getCached<T.Streams>(key);
     if (cached) return cached;
-    
+
     const res = await Piped.getStream(videoId);
     await setCached(key, res, TTL.streamsMeta);
     return res;
@@ -150,7 +153,7 @@ export const CachedPiped = {
     const res = await Piped.playlist(id);
     // A playlist that reports videos but lists none is an extraction failure upstream
     // (e.g. YouTube's lockupViewModel change); caching it would pin empty albums for hours.
-    const failed = (res.videos ?? 0) > 0 && !(res.relatedStreams?.length);
+    const failed = (res.videos ?? 0) > 0 && !res.relatedStreams?.length;
     if (!failed) await setCached(key, res, TTL.albumDetail);
     return res;
   },
@@ -167,8 +170,16 @@ export const CachedPiped = {
 };
 
 export const PermanentCache = {
-  async getLyrics(key: string) { return getCached(`lyrics:${key}`); },
-  async setLyrics(key: string, data: any) { return setCached(`lyrics:${key}`, data); },
-  async getPeaks(key: string) { return getCached<number[]>(`peaks:${key}`); },
-  async setPeaks(key: string, data: number[]) { return setCached(`peaks:${key}`, data); },
+  async getLyrics(key: string) {
+    return getCached(`lyrics:${key}`);
+  },
+  async setLyrics(key: string, data: any) {
+    return setCached(`lyrics:${key}`, data);
+  },
+  async getPeaks(key: string) {
+    return getCached<number[]>(`peaks:${key}`);
+  },
+  async setPeaks(key: string, data: number[]) {
+    return setCached(`peaks:${key}`, data);
+  },
 };

@@ -11,7 +11,9 @@
     "typecheck": "tsc --noEmit",
     "db:create": "tsx src/db/create.ts",
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "drizzle-kit migrate"
+    "db:migrate": "drizzle-kit migrate",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
   },
   "dependencies": {
     "bcrypt": "^6.0.0",
@@ -37,6 +39,7 @@
     "@types/pino": "^7.0.5",
     "drizzle-kit": "^0.31.11",
     "pino-pretty": "^11.0.0",
+    "prettier": "^3.9.9",
     "tsx": "^4.7.1",
     "typescript": "^5.4.3"
   }
