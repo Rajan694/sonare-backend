@@ -46,7 +46,7 @@ function parseBody<T>(schema: z.ZodType<T>, req: Request, res: Response): T | un
 
 const BCRYPT_COST = 12;
 // Five wrong passwords from one address lock it out for 15 minutes.
-const signInLimiter = createRateLimiter({ max: 5, windowMs: 15 * 60_000 });
+const signInLimiter = createRateLimiter({ name: 'admin', max: 5, windowMs: 15 * 60_000 });
 // Compared against when the username doesn't exist, so both failures take as long.
 const dummyHash = bcrypt.hash(crypto.randomUUID(), BCRYPT_COST);
 
@@ -68,7 +68,7 @@ adminRouter.post(
   '/login',
   route(async (req, res) => {
     const ip = req.ip ?? 'unknown';
-    const lockout = signInLimiter.blocked(ip);
+    const lockout = await signInLimiter.blocked(ip);
     if (lockout.blocked) {
       res.setHeader('Retry-After', String(lockout.retryAfterSec));
       return fail(
@@ -85,11 +85,11 @@ adminRouter.post(
     const [admin] = await db.select().from(adminUsers).where(eq(adminUsers.username, body.username)).limit(1);
     const valid = await bcrypt.compare(body.password, admin?.passwordHash ?? (await dummyHash));
     if (!admin || !valid) {
-      signInLimiter.hit(ip);
+      await signInLimiter.hit(ip);
       return fail(res, 401, 'INVALID_CREDENTIALS', 'Wrong username or password');
     }
 
-    signInLimiter.reset(ip);
+    await signInLimiter.reset(ip);
     const [signedIn] = await db
       .update(adminUsers)
       .set({ lastLoginAt: new Date() })
@@ -122,7 +122,7 @@ adminRouter.post(
   '/password',
   route(async (req, res) => {
     const limitKey = `password:${req.admin!.id}`;
-    const lockout = signInLimiter.blocked(limitKey);
+    const lockout = await signInLimiter.blocked(limitKey);
     if (lockout.blocked) {
       res.setHeader('Retry-After', String(lockout.retryAfterSec));
       return fail(
@@ -138,14 +138,14 @@ adminRouter.post(
 
     const [admin] = await db.select().from(adminUsers).where(eq(adminUsers.id, req.admin!.id)).limit(1);
     if (!(await bcrypt.compare(body.currentPassword, admin.passwordHash))) {
-      signInLimiter.hit(limitKey);
+      await signInLimiter.hit(limitKey);
       return fail(res, 400, 'WRONG_PASSWORD', 'The current password is wrong');
     }
     if (body.newPassword === body.currentPassword) {
       return fail(res, 400, 'BAD_REQUEST', 'The new password is the same as the current one');
     }
 
-    signInLimiter.reset(limitKey);
+    await signInLimiter.reset(limitKey);
     // A new token version signs out every other admin session; this one gets a fresh token.
     const [updated] = await db
       .update(adminUsers)

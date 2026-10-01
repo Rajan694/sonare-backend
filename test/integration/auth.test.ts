@@ -2,10 +2,10 @@ import { describe, expect, it } from 'vitest';
 import request from 'supertest';
 import { createApp } from '../../src/app.js';
 import { db } from '../../src/db/index.js';
-import { users } from '../../src/db/schema.js';
+import { users, refreshTokens } from '../../src/db/schema.js';
 import { eq } from 'drizzle-orm';
 import { createUser } from '../factories.js';
-import { generateRefreshToken, signAccessToken } from '../../src/auth.js';
+import { generateRefreshToken, signAccessToken, hashToken } from '../../src/auth.js';
 import jwt from 'jsonwebtoken';
 import { config } from '../../src/config.js';
 
@@ -266,5 +266,97 @@ describe('Auth routes: error branches', () => {
     const res = await request(app).get('/api/v1/me').set('Authorization', `Bearer ${token}`);
     expect(res.status).toBe(200);
     expect(res.body.id).toBe(user.id);
+  });
+});
+
+describe('Auth: refresh token hashing and rate limiting', () => {
+  const app = createApp();
+
+  it('stores hashed refresh token in database matching sha256 of returned token', async () => {
+    const res = await request(app).post('/api/v1/auth/register').send({
+      email: 'hash_test@example.com',
+      displayName: 'Hash Test User',
+      password: 'password123',
+    });
+    expect(res.status).toBe(201);
+    const { refreshToken, user } = res.body;
+
+    const [stored] = await db.select().from(refreshTokens).where(eq(refreshTokens.userId, user.id));
+    expect(stored).toBeDefined();
+    expect(stored.token).not.toBe(refreshToken);
+    expect(stored.token).toBe(hashToken(refreshToken));
+
+    // Refresh with returned token still works
+    const refreshRes = await request(app).post('/api/v1/auth/refresh').send({ refreshToken });
+    expect(refreshRes.status).toBe(200);
+    expect(refreshRes.body).toHaveProperty('refreshToken');
+
+    // Logout revokes it
+    const logoutRes = await request(app)
+      .post('/api/v1/auth/logout')
+      .send({ refreshToken: refreshRes.body.refreshToken });
+    expect(logoutRes.status).toBe(200);
+
+    const revokedRefreshRes = await request(app)
+      .post('/api/v1/auth/refresh')
+      .send({ refreshToken: refreshRes.body.refreshToken });
+    expect(revokedRefreshRes.status).toBe(401);
+  });
+
+  it('rate limits login after 5 failed attempts and returns 429 on 6th attempt', async () => {
+    const { user, rawPassword } = await createUser({ email: 'ratelimit_login@example.com' });
+
+    // 5 failed attempts
+    for (let i = 0; i < 5; i++) {
+      const failRes = await request(app).post('/api/v1/auth/login').send({
+        email: user.email,
+        password: 'wrong_password',
+      });
+      expect(failRes.status).toBe(401);
+    }
+
+    // 6th attempt is rate limited
+    const blockedRes = await request(app).post('/api/v1/auth/login').send({
+      email: user.email,
+      password: 'wrong_password',
+    });
+    expect(blockedRes.status).toBe(429);
+    expect(blockedRes.body.error.code).toBe('RATE_LIMITED');
+    expect(blockedRes.headers['retry-after']).toBeDefined();
+
+    // Even with correct password, still blocked while locked out
+    const blockedCorrectRes = await request(app).post('/api/v1/auth/login').send({
+      email: user.email,
+      password: rawPassword,
+    });
+    expect(blockedCorrectRes.status).toBe(429);
+    expect(blockedCorrectRes.body.error.code).toBe('RATE_LIMITED');
+  });
+
+  it('successful login resets failed login attempt counter', async () => {
+    const { user, rawPassword } = await createUser({ email: 'ratelimit_reset@example.com' });
+
+    // 4 failed attempts
+    for (let i = 0; i < 4; i++) {
+      const failRes = await request(app).post('/api/v1/auth/login').send({
+        email: user.email,
+        password: 'wrong_password',
+      });
+      expect(failRes.status).toBe(401);
+    }
+
+    // 5th attempt succeeds and resets counter
+    const successRes = await request(app).post('/api/v1/auth/login').send({
+      email: user.email,
+      password: rawPassword,
+    });
+    expect(successRes.status).toBe(200);
+
+    // Another wrong attempt should only be 1st failed attempt, not blocked
+    const afterRes = await request(app).post('/api/v1/auth/login').send({
+      email: user.email,
+      password: 'wrong_password',
+    });
+    expect(afterRes.status).toBe(401);
   });
 });

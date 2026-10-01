@@ -17,3 +17,14 @@ export class NoAudioStreamError extends Error {
     this.code = 'NO_AUDIO_STREAM';
   }
 }
+
+export class StreamTokenError extends Error {
+  public status: number;
+  public code: string;
+  constructor(message: string) {
+    super(message);
+    this.name = 'StreamTokenError';
+    this.status = 403;
+    this.code = 'FORBIDDEN';
+  }
+}

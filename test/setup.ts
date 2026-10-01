@@ -37,8 +37,8 @@ beforeEach(async () => {
     CASCADE;
   `);
 
-  // Flush keys prefixed sonare: on db15
-  const keys = await redis.keys('sonare:*');
+  // Flush all keys on test db15
+  const keys = await redis.keys('*');
   if (keys.length > 0) {
     await redis.del(...keys);
   }

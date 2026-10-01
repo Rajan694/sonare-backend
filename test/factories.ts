@@ -16,7 +16,7 @@ import {
   errorLogs,
   requestLogs,
 } from '../src/db/schema.js';
-import { signAccessToken, generateRefreshToken } from '../src/auth.js';
+import { signAccessToken, generateRefreshToken, hashToken } from '../src/auth.js';
 import { signAdminToken } from '../src/adminAuth.js';
 import crypto from 'node:crypto';
 
@@ -41,7 +41,7 @@ export async function createUser(override: Partial<typeof users.$inferInsert> = 
 
   await db.insert(refreshTokens).values({
     userId: user.id,
-    token: refreshToken,
+    token: hashToken(refreshToken),
   });
 
   return { user, token, refreshToken, rawPassword: password };

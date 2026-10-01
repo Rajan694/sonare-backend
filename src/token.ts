@@ -1,7 +1,8 @@
 import crypto from 'node:crypto';
 import { config } from './config.js';
+import { StreamTokenError } from './errors.js';
 
-const STREAM_TOKEN_SECRET = config.JWT_SECRET || crypto.randomBytes(32).toString('hex');
+const STREAM_TOKEN_SECRET = config.JWT_SECRET;
 
 export interface StreamTokenData {
   url: string;
@@ -31,7 +32,7 @@ export function signStreamToken(
 export function verifyStreamToken(token: string): StreamTokenData {
   const [payloadB64, signature] = token.split('.');
   if (!payloadB64 || !signature) {
-    throw new Error('Invalid token format');
+    throw new StreamTokenError('Invalid token format');
   }
 
   const hmac = crypto.createHmac('sha256', STREAM_TOKEN_SECRET);
@@ -43,13 +44,13 @@ export function verifyStreamToken(token: string): StreamTokenData {
   const expectedBuf = Buffer.from(expectedSignature, 'ascii');
 
   if (sigBuf.length !== expectedBuf.length || !crypto.timingSafeEqual(sigBuf, expectedBuf)) {
-    throw new Error('Invalid signature');
+    throw new StreamTokenError('Invalid signature');
   }
 
   const payload = JSON.parse(Buffer.from(payloadB64, 'base64url').toString('utf8'));
 
   if (Date.now() > payload.exp) {
-    throw new Error('Token expired');
+    throw new StreamTokenError('Token expired');
   }
 
   return payload;

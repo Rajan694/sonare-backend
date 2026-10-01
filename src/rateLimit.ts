@@ -1,30 +1,93 @@
-import { LRUCache } from 'lru-cache';
+import { redis, isRedisAvailable } from './cache.js';
 
-/** Fixed-window counter per key (an IP, or IP + username). In memory: one backend process. */
-export function createRateLimiter({ max, windowMs }: { max: number; windowMs: number }) {
-  const windows = new LRUCache<string, { count: number; resetAt: number }>({ max: 10_000, ttl: windowMs });
+export interface RateLimitResult {
+  allowed: boolean;
+  retryAfterSec: number;
+}
+
+export interface RateLimitBlockedResult {
+  blocked: boolean;
+  retryAfterSec: number;
+}
+
+let loggedRateLimitRedisWarning = false;
+
+function warnRedisDown() {
+  if (!loggedRateLimitRedisWarning) {
+    console.warn('[RateLimit] Redis unreachable — failing open.');
+    loggedRateLimitRedisWarning = true;
+  }
+}
+
+/** Fixed-window counter per key backed by Redis. */
+export function createRateLimiter({
+  name = 'default',
+  max,
+  windowMs,
+}: {
+  name?: string;
+  max: number;
+  windowMs: number;
+}) {
+  const prefix = `rl:${name}:`;
 
   return {
     /** Counts a hit; `allowed` is false once the key has used up its window. */
-    hit(key: string): { allowed: boolean; retryAfterSec: number } {
-      const now = Date.now();
-      let w = windows.get(key);
-      if (!w || w.resetAt <= now) {
-        w = { count: 0, resetAt: now + windowMs };
-        windows.set(key, w);
+    async hit(key: string): Promise<RateLimitResult> {
+      const fullKey = `${prefix}${key}`;
+      if (!isRedisAvailable()) {
+        warnRedisDown();
+        return { allowed: true, retryAfterSec: 0 };
       }
-      w.count++;
-      return { allowed: w.count <= max, retryAfterSec: Math.ceil((w.resetAt - now) / 1000) };
+      try {
+        const count = await redis.incr(fullKey);
+        if (count === 1) {
+          await redis.pexpire(fullKey, windowMs);
+        }
+        const pttl = await redis.pttl(fullKey);
+        if (pttl === -1) {
+          await redis.pexpire(fullKey, windowMs);
+        }
+        const retryAfterSec = pttl > 0 ? Math.ceil(pttl / 1000) : Math.ceil(windowMs / 1000);
+        return { allowed: count <= max, retryAfterSec };
+      } catch (err) {
+        warnRedisDown();
+        return { allowed: true, retryAfterSec: 0 };
+      }
     },
+
     /** True when the key has no hits left, without counting one. */
-    blocked(key: string): { blocked: boolean; retryAfterSec: number } {
-      const w = windows.get(key);
-      const now = Date.now();
-      if (!w || w.resetAt <= now || w.count < max) return { blocked: false, retryAfterSec: 0 };
-      return { blocked: true, retryAfterSec: Math.ceil((w.resetAt - now) / 1000) };
+    async blocked(key: string): Promise<RateLimitBlockedResult> {
+      const fullKey = `${prefix}${key}`;
+      if (!isRedisAvailable()) {
+        warnRedisDown();
+        return { blocked: false, retryAfterSec: 0 };
+      }
+      try {
+        const countStr = await redis.get(fullKey);
+        const count = countStr ? parseInt(countStr, 10) : 0;
+        if (count < max) {
+          return { blocked: false, retryAfterSec: 0 };
+        }
+        const pttl = await redis.pttl(fullKey);
+        const retryAfterSec = pttl > 0 ? Math.ceil(pttl / 1000) : Math.ceil(windowMs / 1000);
+        return { blocked: true, retryAfterSec };
+      } catch (err) {
+        warnRedisDown();
+        return { blocked: false, retryAfterSec: 0 };
+      }
     },
-    reset(key: string) {
-      windows.delete(key);
+
+    async reset(key: string): Promise<void> {
+      const fullKey = `${prefix}${key}`;
+      if (!isRedisAvailable()) {
+        return;
+      }
+      try {
+        await redis.del(fullKey);
+      } catch (err) {
+        warnRedisDown();
+      }
     },
   };
 }

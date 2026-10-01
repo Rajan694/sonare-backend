@@ -55,6 +55,8 @@ export function isRedisAvailable(): boolean {
   return redisAvailable;
 }
 
+export { redis };
+
 async function getCached<T>(key: string): Promise<T | null> {
   if (!redisAvailable) return null;
   try {
