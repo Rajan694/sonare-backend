@@ -36,6 +36,7 @@ meRouter.get('/', async (req, res, next) => {
       id: user.id,
       email: user.email,
       displayName: user.displayName,
+      emailVerified: user.emailVerifiedAt !== null,
       createdAt: user.createdAt,
     });
   } catch (e) {

@@ -28,20 +28,24 @@ const envSchema = z.object({
   APP_URL: z.string().url().default('http://localhost:5183'),
 });
 
-export const config = envSchema.parse(process.env);
+export type Config = z.infer<typeof envSchema>;
 
-if (config.NODE_ENV === 'production' && (config.JWT_SECRET === DEV_JWT_SECRET || config.JWT_SECRET.length < 32)) {
-  throw new Error('JWT_SECRET must be set to a non-default value of at least 32 characters in production');
-}
-
-if (config.NODE_ENV === 'production') {
-  if (!config.SMTP_USER || !config.SMTP_PASS) {
+/** Development defaults are unsafe in production; refuse to start with them. */
+export function assertProductionConfig(cfg: Config): void {
+  if (cfg.NODE_ENV !== 'production') return;
+  if (cfg.JWT_SECRET === DEV_JWT_SECRET || cfg.JWT_SECRET.length < 32) {
+    throw new Error('JWT_SECRET must be set to a non-default value of at least 32 characters in production');
+  }
+  if (!cfg.SMTP_USER || !cfg.SMTP_PASS) {
     throw new Error('SMTP_USER and SMTP_PASS must be set in production');
   }
-  if (!config.APP_URL.startsWith('https://')) {
+  if (!cfg.APP_URL.startsWith('https://')) {
     throw new Error('APP_URL must be an https URL in production');
   }
 }
+
+export const config = envSchema.parse(process.env);
+assertProductionConfig(config);
 
 export const corsOrigins: string[] = config.CORS_ORIGINS.split(',')
   .map((s) => s.trim())

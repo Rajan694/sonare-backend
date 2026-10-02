@@ -33,6 +33,7 @@ beforeEach(async () => {
       player_state,
       user_settings,
       refresh_tokens,
+      email_tokens,
       users
     CASCADE;
   `);

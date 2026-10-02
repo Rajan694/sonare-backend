@@ -16,6 +16,7 @@ export const users = pgTable('users', {
   email: text('email').notNull().unique(),
   passwordHash: text('password_hash').notNull(),
   displayName: text('display_name').notNull(),
+  emailVerifiedAt: timestamp('email_verified_at'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
 });
 
@@ -118,6 +119,24 @@ export const playlistTracks = pgTable(
   },
   (t) => ({
     playlistPositionIdx: index('playlist_tracks_playlist_position_idx').on(t.playlistId, t.position),
+  }),
+);
+
+export const emailTokens = pgTable(
+  'email_tokens',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    userId: uuid('user_id')
+      .references(() => users.id, { onDelete: 'cascade' })
+      .notNull(),
+    purpose: text('purpose').notNull(),
+    tokenHash: text('token_hash').notNull().unique(),
+    expiresAt: timestamp('expires_at').notNull(),
+    usedAt: timestamp('used_at'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (t) => ({
+    userIdIdx: index('email_tokens_user_id_idx').on(t.userId),
   }),
 );
 

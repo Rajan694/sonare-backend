@@ -37,12 +37,8 @@ if [ ! -f .env ]; then
 fi
 
 if command -v docker >/dev/null 2>&1; then
-    if docker compose -f docker-compose.dev.yml ps mailpit >/dev/null 2>&1; then
-        :
-    else
-        docker compose -f docker-compose.dev.yml up -d mailpit
-        echo "Mailpit inbox: http://localhost:8025"
-    fi
+    docker compose -f docker-compose.dev.yml up -d mailpit
+    echo "Mailpit inbox: http://localhost:8025"
 else
     echo "Warning: docker not found - Mailpit will not start. SMTP will fail."
 fi
