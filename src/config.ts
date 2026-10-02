@@ -16,12 +16,31 @@ const envSchema = z.object({
   DATABASE_URL: z.string(),
   REDIS_URL: z.string().url().default('redis://127.0.0.1:6379/1'),
   CORS_ORIGINS: z.string().default(''),
+  SMTP_HOST: z.string().default('127.0.0.1'),
+  SMTP_PORT: z.coerce.number().default(1025),
+  SMTP_SECURE: z
+    .string()
+    .default('false')
+    .transform((v) => v === 'true'),
+  SMTP_USER: z.string().optional(),
+  SMTP_PASS: z.string().optional(),
+  MAIL_FROM: z.string().default('Sonare <no-reply@sonare.dev>'),
+  APP_URL: z.string().url().default('http://localhost:5183'),
 });
 
 export const config = envSchema.parse(process.env);
 
 if (config.NODE_ENV === 'production' && (config.JWT_SECRET === DEV_JWT_SECRET || config.JWT_SECRET.length < 32)) {
   throw new Error('JWT_SECRET must be set to a non-default value of at least 32 characters in production');
+}
+
+if (config.NODE_ENV === 'production') {
+  if (!config.SMTP_USER || !config.SMTP_PASS) {
+    throw new Error('SMTP_USER and SMTP_PASS must be set in production');
+  }
+  if (!config.APP_URL.startsWith('https://')) {
+    throw new Error('APP_URL must be an https URL in production');
+  }
 }
 
 export const corsOrigins: string[] = config.CORS_ORIGINS.split(',')
