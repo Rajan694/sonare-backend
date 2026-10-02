@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { config, parseDatabaseUrl } from '../../src/config.js';
+import { config, corsOrigins, parseDatabaseUrl } from '../../src/config.js';
 import { z } from 'zod';
 
 describe('config.ts Configuration Parsing', () => {
@@ -30,5 +30,6 @@ describe('config.ts Configuration Parsing', () => {
     expect(config.DATABASE_URL).toBeDefined();
     expect(config.REDIS_URL).toBeDefined();
     expect(config.PORT).toBeDefined();
+    expect(Array.isArray(corsOrigins)).toBe(true);
   });
 });

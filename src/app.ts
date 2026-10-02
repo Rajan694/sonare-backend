@@ -1,6 +1,7 @@
 import express, { Request, Response, NextFunction, RequestHandler } from 'express';
 import { pinoHttp } from 'pino-http';
 import cors from 'cors';
+import helmet from 'helmet';
 import { Piped, UpstreamError } from './upstream/piped.js';
 import { CachedPiped } from './cache.js';
 import {
@@ -20,7 +21,7 @@ import { LyricsResolver } from './lyrics.js';
 import { Lrclib } from './upstream/lrclib.js';
 import { extractPeaks } from './peaks.js';
 import { PermanentCache } from './cache.js';
-import { BadRequestError, NoAudioStreamError } from './errors.js';
+import { BadRequestError, NoAudioStreamError, StreamTokenError } from './errors.js';
 import { authRouter } from './routes/auth.routes.js';
 import { meRouter } from './routes/me.routes.js';
 import { adminRouter } from './routes/admin.routes.js';
@@ -33,6 +34,9 @@ import { db } from './db/index.js';
 import { playlistTracks, artistFollows } from './db/schema.js';
 import { and, eq } from 'drizzle-orm';
 import { LRUCache } from 'lru-cache';
+import { config, corsOrigins } from './config.js';
+
+const LOCALHOST_ORIGIN_REGEX = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
 
 // Stream URL -> working replacement, for URLs the relay found dead (see /stream/:token).
 const replacedStreamUrls = new LRUCache<string, string>({ max: 500, ttl: 3600_000 });
@@ -193,11 +197,30 @@ async function searchArtistCatalog(
 export function createApp() {
   const app = express();
 
+  app.use(
+    helmet({
+      crossOriginResourcePolicy: { policy: 'cross-origin' },
+    }),
+  );
+
   // maxAge: the apps' X-Sonare-Client header makes every request preflighted; cache that.
   // Downloads resume with Range requests and read the total size from Content-Range.
   app.use(
     cors({
-      origin: [/localhost/, /127\.0\.0\.1/],
+      origin: (origin, callback) => {
+        // Allow requests with no origin (like mobile apps or curl)
+        if (!origin) return callback(null, true);
+
+        if (config.NODE_ENV !== 'production' && LOCALHOST_ORIGIN_REGEX.test(origin)) {
+          return callback(null, true);
+        }
+
+        if (corsOrigins.includes(origin)) {
+          return callback(null, true);
+        }
+
+        callback(null, false);
+      },
       maxAge: 600,
       exposedHeaders: ['Content-Range', 'Content-Length', 'Accept-Ranges'],
     }),
@@ -981,7 +1004,7 @@ export function createApp() {
     // The request logger records it in error_logs if this ends up a 5xx.
     res.locals.error = err;
 
-    if (err instanceof NoAudioStreamError || err.code === 'NO_AUDIO_STREAM' || err.status === 503) {
+    if (err instanceof NoAudioStreamError || err.code === 'NO_AUDIO_STREAM') {
       res.status(503).json({
         error: { code: 'NO_AUDIO_STREAM', message: err.message },
       });
@@ -1002,11 +1025,7 @@ export function createApp() {
       return;
     }
 
-    if (
-      err.message === 'Token expired' ||
-      err.message === 'Invalid signature' ||
-      err.message === 'Invalid token format'
-    ) {
+    if (err instanceof StreamTokenError) {
       res.status(403).json({
         error: { code: 'FORBIDDEN', message: err.message },
       });
@@ -1016,7 +1035,7 @@ export function createApp() {
     res.status(500).json({
       error: {
         code: 'INTERNAL_ERROR',
-        message: err.message || 'Internal server error',
+        message: 'Internal server error',
       },
     });
   });

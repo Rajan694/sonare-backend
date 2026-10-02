@@ -3,13 +3,30 @@ import bcrypt from 'bcrypt';
 import { db } from '../db/index.js';
 import { users, refreshTokens } from '../db/schema.js';
 import { eq, and } from 'drizzle-orm';
-import { signAccessToken, generateRefreshToken, requireAuth } from '../auth.js';
+import { signAccessToken, generateRefreshToken, hashToken, requireAuth } from '../auth.js';
 import { BadRequestError } from '../errors.js';
+import { createRateLimiter } from '../rateLimit.js';
 
 export const authRouter = Router();
 
+const loginLimiter = createRateLimiter({ name: 'login', max: 5, windowMs: 15 * 60_000 });
+const registerLimiter = createRateLimiter({ name: 'register', max: 10, windowMs: 60 * 60_000 });
+
 authRouter.post('/register', async (req, res, next) => {
   try {
+    const ip = req.ip ?? 'unknown';
+    const limit = await registerLimiter.hit(ip);
+    if (!limit.allowed) {
+      res.setHeader('Retry-After', String(limit.retryAfterSec));
+      res.status(429).json({
+        error: {
+          code: 'RATE_LIMITED',
+          message: `Too many attempts. Try again in ${Math.ceil(limit.retryAfterSec / 60)} min.`,
+        },
+      });
+      return;
+    }
+
     const { email, password, displayName } = req.body;
     if (!email || !password || !displayName) {
       throw new BadRequestError('Missing required fields: email, password, displayName');
@@ -37,7 +54,7 @@ authRouter.post('/register', async (req, res, next) => {
 
     await db.insert(refreshTokens).values({
       userId: user.id,
-      token: refreshToken,
+      token: hashToken(refreshToken),
     });
 
     res.status(201).json({
@@ -62,17 +79,35 @@ authRouter.post('/login', async (req, res, next) => {
       throw new BadRequestError('Missing email or password');
     }
 
+    const ip = req.ip ?? 'unknown';
+    const rateLimitKey = `${ip}:${email.toLowerCase()}`;
+    const lockout = await loginLimiter.blocked(rateLimitKey);
+    if (lockout.blocked) {
+      res.setHeader('Retry-After', String(lockout.retryAfterSec));
+      res.status(429).json({
+        error: {
+          code: 'RATE_LIMITED',
+          message: `Too many attempts. Try again in ${Math.ceil(lockout.retryAfterSec / 60)} min.`,
+        },
+      });
+      return;
+    }
+
     const [user] = await db.select().from(users).where(eq(users.email, email)).limit(1);
     if (!user) {
+      await loginLimiter.hit(rateLimitKey);
       res.status(401).json({ error: { code: 'UNAUTHORIZED', message: 'Invalid credentials' } });
       return;
     }
 
     const valid = await bcrypt.compare(password, user.passwordHash);
     if (!valid) {
+      await loginLimiter.hit(rateLimitKey);
       res.status(401).json({ error: { code: 'UNAUTHORIZED', message: 'Invalid credentials' } });
       return;
     }
+
+    await loginLimiter.reset(rateLimitKey);
 
     const authUser = { id: user.id, email: user.email };
     const accessToken = signAccessToken(authUser);
@@ -80,7 +115,7 @@ authRouter.post('/login', async (req, res, next) => {
 
     await db.insert(refreshTokens).values({
       userId: user.id,
-      token: refreshToken,
+      token: hashToken(refreshToken),
     });
 
     res.json({
@@ -108,7 +143,7 @@ authRouter.post('/refresh', async (req, res, next) => {
     const [stored] = await db
       .select()
       .from(refreshTokens)
-      .where(and(eq(refreshTokens.token, refreshToken), eq(refreshTokens.revoked, false)))
+      .where(and(eq(refreshTokens.token, hashToken(refreshToken)), eq(refreshTokens.revoked, false)))
       .limit(1);
 
     if (!stored) {
@@ -130,7 +165,7 @@ authRouter.post('/refresh', async (req, res, next) => {
     await db.update(refreshTokens).set({ revoked: true }).where(eq(refreshTokens.id, stored.id));
     await db.insert(refreshTokens).values({
       userId: user.id,
-      token: newRefreshToken,
+      token: hashToken(newRefreshToken),
     });
 
     res.json({
@@ -146,7 +181,10 @@ authRouter.post('/logout', async (req, res, next) => {
   try {
     const { refreshToken } = req.body;
     if (refreshToken) {
-      await db.update(refreshTokens).set({ revoked: true }).where(eq(refreshTokens.token, refreshToken));
+      await db
+        .update(refreshTokens)
+        .set({ revoked: true })
+        .where(eq(refreshTokens.token, hashToken(refreshToken)));
     }
     res.json({ ok: true });
   } catch (e) {

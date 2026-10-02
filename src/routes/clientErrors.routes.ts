@@ -7,7 +7,7 @@ import { CLIENTS, recordError } from '../telemetry.js';
 // per IP and every field is capped.
 export const clientErrorsRouter = Router();
 
-const limiter = createRateLimiter({ max: 30, windowMs: 60_000 });
+const limiter = createRateLimiter({ name: 'client-errors', max: 30, windowMs: 60_000 });
 
 const reportSchema = z.object({
   source: z.enum(CLIENTS),
@@ -23,8 +23,8 @@ const reportSchema = z.object({
     .optional(),
 });
 
-clientErrorsRouter.post('/', (req, res) => {
-  const limit = limiter.hit(req.ip ?? 'unknown');
+clientErrorsRouter.post('/', async (req, res) => {
+  const limit = await limiter.hit(req.ip ?? 'unknown');
   if (!limit.allowed) {
     res.setHeader('Retry-After', String(limit.retryAfterSec));
     res.status(429).json({ error: { code: 'RATE_LIMITED', message: 'Too many error reports' } });

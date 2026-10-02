@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { db, verifyDatabase } from '../../src/db/index.js';
+import { hashToken } from '../../src/auth.js';
 import {
   adminUsers,
   artistFollows,
@@ -31,7 +32,10 @@ describe('db: models & helpers', () => {
 
   it('BE-DB-002: inserts and cascades delete on user refresh tokens', async () => {
     const { user, refreshToken } = await createUser();
-    const [rt] = await db.select().from(refreshTokens).where(eq(refreshTokens.token, refreshToken));
+    const [rt] = await db
+      .select()
+      .from(refreshTokens)
+      .where(eq(refreshTokens.token, hashToken(refreshToken)));
     expect(rt.userId).toBe(user.id);
 
     await db.delete(users).where(eq(users.id, user.id));

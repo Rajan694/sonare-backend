@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { BadRequestError, NoAudioStreamError } from '../../src/errors.js';
+import { BadRequestError, NoAudioStreamError, StreamTokenError } from '../../src/errors.js';
 import { UpstreamError } from '../../src/upstream/piped.js';
 
 describe('errors.ts: error hierarchy', () => {
@@ -47,6 +47,15 @@ describe('errors.ts: error hierarchy', () => {
     expect(new BadRequestError('test') instanceof Error).toBe(true);
     expect(new NoAudioStreamError() instanceof Error).toBe(true);
     expect(new UpstreamError('test', 502) instanceof Error).toBe(true);
+    expect(new StreamTokenError('test') instanceof Error).toBe(true);
+  });
+
+  it('StreamTokenError instantiates with 403 status and FORBIDDEN code', () => {
+    const err = new StreamTokenError('Token expired');
+    expect(err.status).toBe(403);
+    expect(err.code).toBe('FORBIDDEN');
+    expect(err.name).toBe('StreamTokenError');
+    expect(err.message).toBe('Token expired');
   });
 });
 
