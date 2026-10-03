@@ -50,7 +50,7 @@ describe('errors.ts: error hierarchy', () => {
     expect(new StreamTokenError('test') instanceof Error).toBe(true);
   });
 
-  it('StreamTokenError instantiates with 403 status and FORBIDDEN code', () => {
+  it('BE-ERR-CLASS-009: StreamTokenError instantiates with 403 status and FORBIDDEN code', () => {
     const err = new StreamTokenError('Token expired');
     expect(err.status).toBe(403);
     expect(err.code).toBe('FORBIDDEN');

@@ -6,35 +6,45 @@ This document maps all backend test IDs to their specifications, assertions, and
 
 ## 1. Authentication & Session Management
 
-| Test ID             | Method / Scope               | Description & Assertions                                                         |
-| :------------------ | :--------------------------- | :------------------------------------------------------------------------------- |
-| `BE-AUTH-001`       | `POST /api/v1/auth/register` | Registers new user; returns 201 with accessToken, refreshToken, and user object. |
-| `BE-AUTH-002`       | `POST /api/v1/auth/register` | Rejects registration with missing email (400 BAD_REQUEST).                       |
-| `BE-AUTH-003`       | `POST /api/v1/auth/register` | Rejects registration with missing password (400 BAD_REQUEST).                    |
-| `BE-AUTH-004`       | `POST /api/v1/auth/register` | Rejects registration with missing displayName (400 BAD_REQUEST).                 |
-| `BE-AUTH-005`       | `POST /api/v1/auth/register` | Rejects duplicate email registration with 409 CONFLICT.                          |
-| `BE-AUTH-006`       | `POST /api/v1/auth/login`    | Validates credentials; returns 200 with tokens and user profile.                 |
-| `BE-AUTH-007`       | `POST /api/v1/auth/login`    | Rejects non-existent email with 401 UNAUTHORIZED.                                |
-| `BE-AUTH-008`       | `POST /api/v1/auth/login`    | Rejects invalid password with 401 UNAUTHORIZED.                                  |
-| `BE-AUTH-009`       | `POST /api/v1/auth/login`    | Rejects login missing email with 400 BAD_REQUEST.                                |
-| `BE-AUTH-010`       | `POST /api/v1/auth/login`    | Rejects login missing password with 400 BAD_REQUEST.                             |
-| `BE-AUTH-011`       | `POST /api/v1/auth/refresh`  | Rotates refreshToken, issues new accessToken, revokes previous refreshToken.     |
-| `BE-AUTH-012`       | `POST /api/v1/auth/refresh`  | Rejects refresh request missing refreshToken with 400 BAD_REQUEST.               |
-| `BE-AUTH-013`       | `POST /api/v1/auth/refresh`  | Rejects invalid or expired refresh token with 401 UNAUTHORIZED.                  |
-| `BE-AUTH-014`       | `POST /api/v1/auth/refresh`  | Rejects refresh attempt for deleted user with 401 UNAUTHORIZED.                  |
-| `BE-AUTH-015`       | `POST /api/v1/auth/logout`   | Revokes refresh token in database and returns ok: true.                          |
-| `BE-AUTH-016`       | `POST /api/v1/auth/logout`   | Gracefully handles empty logout request without error.                           |
-| `BE-AUTH-017`       | `requireAuth` middleware     | Rejects requests with missing Authorization header (401 UNAUTHORIZED).           |
-| `BE-AUTH-018`       | `requireAuth` middleware     | Rejects requests with non-Bearer Authorization scheme (401 UNAUTHORIZED).        |
-| `BE-AUTH-019`       | `requireAuth` middleware     | Rejects requests with invalid JWT structure or signature (401 UNAUTHORIZED).     |
-| `BE-AUTH-020`       | `signAccessToken`            | Generates valid signed JWT access token.                                         |
-| `BE-AUTH-021`       | `generateRefreshToken`       | Generates cryptographically strong random hex refresh token string.              |
-| `BE-AUTH-EXTRA-001` | `POST /api/v1/auth/login`    | Handles corrupted password hash in DB gracefully with 401 UNAUTHORIZED.          |
-| `BE-AUTH-EXTRA-002` | `requireAuth` middleware     | Rejects expired access token with 401 UNAUTHORIZED.                              |
-| `BE-AUTH-EXTRA-003` | `requireAuth` middleware     | Rejects token signed with unrecognized secret with 401 UNAUTHORIZED.             |
-| `BE-AUTH-EXTRA-004` | `POST /api/v1/auth/logout`   | Handles empty request body idempotently.                                         |
-| `BE-AUTH-BR-001`    | `POST /api/v1/auth/refresh`  | Verifies user lookup failure path during refresh rotation.                       |
-| `BE-AUTH-BR-002`    | `requireAuth` middleware     | Verifies user payload attachment to Express request object.                      |
+| Test ID             | Method / Scope               | Description & Assertions                                                          |
+| :------------------ | :--------------------------- | :-------------------------------------------------------------------------------- |
+| `BE-AUTH-001`       | `POST /api/v1/auth/register` | Registers new user; returns 201 with accessToken, refreshToken, and user object.  |
+| `BE-AUTH-002`       | `POST /api/v1/auth/register` | Rejects registration with missing email (400 BAD_REQUEST).                        |
+| `BE-AUTH-003`       | `POST /api/v1/auth/register` | Rejects registration with missing password (400 BAD_REQUEST).                     |
+| `BE-AUTH-004`       | `POST /api/v1/auth/register` | Rejects registration with missing displayName (400 BAD_REQUEST).                  |
+| `BE-AUTH-005`       | `POST /api/v1/auth/register` | Rejects duplicate email registration with 409 CONFLICT.                           |
+| `BE-AUTH-006`       | `POST /api/v1/auth/login`    | Validates credentials; returns 200 with tokens and user profile.                  |
+| `BE-AUTH-007`       | `POST /api/v1/auth/login`    | Rejects non-existent email with 401 UNAUTHORIZED.                                 |
+| `BE-AUTH-008`       | `POST /api/v1/auth/login`    | Rejects invalid password with 401 UNAUTHORIZED.                                   |
+| `BE-AUTH-009`       | `POST /api/v1/auth/login`    | Rejects login missing email with 400 BAD_REQUEST.                                 |
+| `BE-AUTH-010`       | `POST /api/v1/auth/login`    | Rejects login missing password with 400 BAD_REQUEST.                              |
+| `BE-AUTH-011`       | `POST /api/v1/auth/refresh`  | Rotates refreshToken, issues new accessToken, revokes previous refreshToken.      |
+| `BE-AUTH-012`       | `POST /api/v1/auth/refresh`  | Rejects refresh request missing refreshToken with 400 BAD_REQUEST.                |
+| `BE-AUTH-013`       | `POST /api/v1/auth/refresh`  | Rejects invalid or expired refresh token with 401 UNAUTHORIZED.                   |
+| `BE-AUTH-014`       | `POST /api/v1/auth/refresh`  | Rejects refresh attempt for deleted user with 401 UNAUTHORIZED.                   |
+| `BE-AUTH-015`       | `POST /api/v1/auth/logout`   | Revokes refresh token in database and returns ok: true.                           |
+| `BE-AUTH-016`       | `POST /api/v1/auth/logout`   | Gracefully handles empty logout request without error.                            |
+| `BE-AUTH-017`       | `requireAuth` middleware     | Rejects requests with missing Authorization header (401 UNAUTHORIZED).            |
+| `BE-AUTH-018`       | `requireAuth` middleware     | Rejects requests with non-Bearer Authorization scheme (401 UNAUTHORIZED).         |
+| `BE-AUTH-019`       | `requireAuth` middleware     | Rejects requests with invalid JWT structure or signature (401 UNAUTHORIZED).      |
+| `BE-AUTH-020`       | `signAccessToken`            | Generates valid signed JWT access token.                                          |
+| `BE-AUTH-021`       | `generateRefreshToken`       | Generates cryptographically strong random hex refresh token string.               |
+| `BE-AUTH-EXTRA-001` | `POST /api/v1/auth/login`    | Handles corrupted password hash in DB gracefully with 401 UNAUTHORIZED.           |
+| `BE-AUTH-EXTRA-002` | `requireAuth` middleware     | Rejects expired access token with 401 UNAUTHORIZED.                               |
+| `BE-AUTH-EXTRA-003` | `requireAuth` middleware     | Rejects token signed with unrecognized secret with 401 UNAUTHORIZED.              |
+| `BE-AUTH-EXTRA-004` | `POST /api/v1/auth/logout`   | Handles empty request body idempotently.                                          |
+| `BE-AUTH-BR-001`    | `POST /api/v1/auth/refresh`  | Verifies user lookup failure path during refresh rotation.                        |
+| `BE-AUTH-BR-002`    | `requireAuth` middleware     | Verifies user payload attachment to Express request object.                       |
+| `BE-AUTH-SEC-001`   | `POST /api/v1/auth/register` | Stored refresh token is the sha256 of the one returned to the client.             |
+| `BE-AUTH-SEC-002`   | `POST /api/v1/auth/login`    | Sixth wrong password for the same email in 15 minutes gives 429 with Retry-After. |
+| `BE-AUTH-SEC-003`   | `POST /api/v1/auth/login`    | A successful login resets the failed-attempt counter.                             |
+| `BE-SEC-001`        | CORS                         | Allows `http://localhost:<port>` origins outside production.                      |
+| `BE-SEC-002`        | CORS                         | `http://localhost.evil.com` gets no CORS header and no 500.                       |
+| `BE-SEC-003`        | CORS                         | Requests without an Origin header (mobile, curl) work.                            |
+| `BE-SEC-004`        | helmet                       | Security headers are set; cross-origin resource policy stays open for media.      |
+| `BE-SEC-005`        | error handler                | Unexpected errors return a generic 500 message, never the internal one.           |
+| `BE-SEC-006`        | error handler                | A malformed JSON body gets 400 BAD_REQUEST.                                       |
+| `BE-SEC-007`        | `GET /api/v1/healthz`        | Answers within 4 s with `piped: down` when Piped hangs.                           |
 
 ### Email verification & password reset
 
@@ -73,7 +83,8 @@ This document maps all backend test IDs to their specifications, assertions, and
 | `BE-CATALOG-012`  | `GET /api/v1/search`                 | Validates missing q query parameter with 400 BAD_REQUEST.                                  |
 | `BE-CATALOG-013`  | `GET /api/v1/tracks/:id`             | Returns normalized track details with authenticated user favourite states.                 |
 | `BE-CATALOG-014`  | `GET /api/v1/tracks/:id`             | Handles guest requests with default user state flags.                                      |
-| `BE-CATALOG-015`  | `GET /api/v1/tracks/:id`             | Returns 502 UPSTREAM_UNAVAILABLE on upstream service failure.                              |
+| `BE-CATALOG-015`  | `GET /api/v1/tracks/:id`             | Piped failing twice (5xx is retried once) gives 502 UPSTREAM_ERROR.                        |
+| `BE-CATALOG-015B` | `GET /api/v1/tracks/:id`             | Piped unreachable (connection refused) gives 502 UPSTREAM_UNAVAILABLE.                     |
 | `BE-CATALOG-016`  | `GET /api/v1/tracks/:id/peaks`       | Returns audio waveform peak levels array.                                                  |
 | `BE-CATALOG-017`  | `GET /api/v1/albums/:id`             | Returns normalized album details.                                                          |
 | `BE-CATALOG-018`  | `GET /api/v1/albums/:id/tracks`      | Returns track list inside playlist/album.                                                  |
@@ -308,6 +319,7 @@ This document maps all backend test IDs to their specifications, assertions, and
 | `BE-ERR-CLASS-006` | UpstreamError unreachable flag.          |
 | `BE-ERR-CLASS-007` | UpstreamError name check.                |
 | `BE-ERR-CLASS-008` | Error inheritance checks.                |
+| `BE-ERR-CLASS-009` | `StreamTokenError`                       | Has status 403 and code FORBIDDEN. |
 | `BE-RATE-001`      | Rate limiter allows hits under limit.    |
 | `BE-RATE-002`      | Rate limiter blocks hits over limit.     |
 | `BE-RATE-003`      | Rate limiter reset method.               |

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import request from 'supertest';
 import { createApp } from '../../src/app.js';
-import { createAdminUser, createUser } from '../factories.js';
+import { createAdminUser, createUser, isLocalTestHost } from '../factories.js';
 import { db } from '../../src/db/index.js';
 import { errorLogs } from '../../src/db/schema.js';
 import { MockAgent, getGlobalDispatcher, setGlobalDispatcher, type Dispatcher } from 'undici';
@@ -228,7 +228,7 @@ describe('Admin: config & extractor commit', () => {
     originalDispatcher = getGlobalDispatcher();
     mockAgent = new MockAgent();
     mockAgent.disableNetConnect();
-    mockAgent.enableNetConnect((host) => host.includes('127.0.0.1') || host.includes('localhost'));
+    mockAgent.enableNetConnect(isLocalTestHost);
     setGlobalDispatcher(mockAgent);
   });
 

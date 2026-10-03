@@ -191,3 +191,11 @@ export function samplePipedChannel(id: string = 'UCuAXFkgsw1L7xaCfnd5JJOw') {
     nextpage: null,
   };
 }
+
+/**
+ * For MockAgent.enableNetConnect: lets tests reach servers they start themselves on localhost,
+ * but never a real Piped (8090/8091) that may be running on the developer's machine.
+ */
+export function isLocalTestHost(host: string): boolean {
+  return /^(127\.0\.0\.1|localhost)(:\d+)?$/.test(host) && !/:(8090|8091)$/.test(host);
+}

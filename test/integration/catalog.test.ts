@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import net from 'node:net';
 import request from 'supertest';
+import { saveSetting } from '../../src/services/systemConfig.js';
 import { createApp } from '../../src/app.js';
 import { MockAgent, getGlobalDispatcher, setGlobalDispatcher, type Dispatcher } from 'undici';
 import {
@@ -8,6 +10,7 @@ import {
   samplePipedPlaylist,
   samplePipedSearchItem,
   samplePipedStream,
+  isLocalTestHost,
 } from '../factories.js';
 import { db } from '../../src/db/index.js';
 import { artistFollows, favouriteTracks } from '../../src/db/schema.js';
@@ -22,7 +25,7 @@ describe('Catalog & public endpoints', () => {
     originalDispatcher = getGlobalDispatcher();
     mockAgent = new MockAgent();
     mockAgent.disableNetConnect();
-    mockAgent.enableNetConnect((host) => host.includes('127.0.0.1') || host.includes('localhost'));
+    mockAgent.enableNetConnect(isLocalTestHost);
     setGlobalDispatcher(mockAgent);
   });
 
@@ -251,13 +254,33 @@ describe('Catalog & public endpoints', () => {
     expect(res.body.favourite).toBe(false);
   });
 
-  it('BE-CATALOG-015: GET /api/v1/tracks/:id returns 502 for upstream errors', async () => {
+  it('BE-CATALOG-015: GET /api/v1/tracks/:id returns 502 UPSTREAM_ERROR when Piped keeps failing', async () => {
     const pipedMock = mockAgent!.get('http://localhost:8090');
-    pipedMock.intercept({ path: '/streams/missing123', method: 'GET' }).reply(500, { message: 'Internal error' });
+    // The client retries a 5xx once, so both attempts fail.
+    pipedMock
+      .intercept({ path: '/streams/missing123', method: 'GET' })
+      .reply(500, { message: 'Internal error' })
+      .times(2);
 
     const res = await request(app).get('/api/v1/tracks/yt:missing123');
     expect(res.status).toBe(502);
-    expect(res.body.error.code).toBe('UPSTREAM_UNAVAILABLE');
+    expect(res.body.error.code).toBe('UPSTREAM_ERROR');
+  });
+
+  it('BE-CATALOG-015B: GET /api/v1/tracks/:id returns 502 UPSTREAM_UNAVAILABLE when Piped cannot be reached', async () => {
+    // A port nothing listens on: grab a free one, then close it.
+    const probe = net.createServer();
+    await new Promise<void>((resolve) => probe.listen(0, '127.0.0.1', resolve));
+    const { port } = probe.address() as net.AddressInfo;
+    await new Promise((resolve) => probe.close(resolve));
+    await saveSetting('piped.apiUrl', `http://127.0.0.1:${port}`, 'test');
+    try {
+      const res = await request(app).get('/api/v1/tracks/yt:offline123');
+      expect(res.status).toBe(502);
+      expect(res.body.error.code).toBe('UPSTREAM_UNAVAILABLE');
+    } finally {
+      await saveSetting('piped.apiUrl', null, 'test');
+    }
   });
 
   it('BE-CATALOG-016: GET /api/v1/tracks/:id/peaks returns audio peaks array', async () => {
@@ -378,7 +401,7 @@ describe('Catalog: edge cases & upstream errors', () => {
     originalDispatcher = getGlobalDispatcher();
     mockAgent = new MockAgent();
     mockAgent.disableNetConnect();
-    mockAgent.enableNetConnect((host) => host.includes('127.0.0.1') || host.includes('localhost'));
+    mockAgent.enableNetConnect(isLocalTestHost);
     setGlobalDispatcher(mockAgent);
   });
 
@@ -478,7 +501,7 @@ describe('Catalog: trending, artwork & image proxy', () => {
     originalDispatcher = getGlobalDispatcher();
     mockAgent = new MockAgent();
     mockAgent.disableNetConnect();
-    mockAgent.enableNetConnect((host) => host.includes('127.0.0.1') || host.includes('localhost'));
+    mockAgent.enableNetConnect(isLocalTestHost);
     setGlobalDispatcher(mockAgent);
   });
 
@@ -596,7 +619,7 @@ describe('Catalog: track formats & artist album fallback', () => {
     originalDispatcher = getGlobalDispatcher();
     mockAgent = new MockAgent();
     mockAgent.disableNetConnect();
-    mockAgent.enableNetConnect((host) => host.includes('127.0.0.1') || host.includes('localhost'));
+    mockAgent.enableNetConnect(isLocalTestHost);
     setGlobalDispatcher(mockAgent);
   });
 

@@ -80,7 +80,7 @@ catalogRouter.get('/healthz', async (req, res) => {
       () => true,
       () => false,
     ),
-    Piped.healthcheck().then(
+    Piped.healthcheck({ timeoutMs: 2000, retry: false }).then(
       () => true,
       () => false,
     ),

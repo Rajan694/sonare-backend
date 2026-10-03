@@ -51,7 +51,16 @@ export function createApp() {
     }),
   );
   app.use(requestLogger());
-  app.use(pinoHttp({ logger }));
+  // One line per request: method, URL, status and time. Headers stay out of the logs.
+  app.use(
+    pinoHttp({
+      logger,
+      serializers: {
+        req: (req: { method: string; url: string }) => ({ method: req.method, url: req.url }),
+        res: (res: { statusCode: number }) => ({ statusCode: res.statusCode }),
+      },
+    }),
+  );
   app.use(express.json());
   app.use(optionalAuth);
 

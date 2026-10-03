@@ -278,7 +278,7 @@ describe('Auth routes: error branches', () => {
 describe('Auth: refresh token hashing and rate limiting', () => {
   const app = createApp();
 
-  it('stores hashed refresh token in database matching sha256 of returned token', async () => {
+  it('BE-AUTH-SEC-001: stores hashed refresh token in database matching sha256 of returned token', async () => {
     const res = await request(app).post('/api/v1/auth/register').send({
       email: 'hash_test@example.com',
       displayName: 'Hash Test User',
@@ -309,7 +309,7 @@ describe('Auth: refresh token hashing and rate limiting', () => {
     expect(revokedRefreshRes.status).toBe(401);
   });
 
-  it('rate limits login after 5 failed attempts and returns 429 on 6th attempt', async () => {
+  it('BE-AUTH-SEC-002: rate limits login after 5 failed attempts and returns 429 on 6th attempt', async () => {
     const { user, rawPassword } = await createUser({ email: 'ratelimit_login@example.com' });
 
     // 5 failed attempts
@@ -339,7 +339,7 @@ describe('Auth: refresh token hashing and rate limiting', () => {
     expect(blockedCorrectRes.body.error.code).toBe('RATE_LIMITED');
   });
 
-  it('successful login resets failed login attempt counter', async () => {
+  it('BE-AUTH-SEC-003: successful login resets failed login attempt counter', async () => {
     const { user, rawPassword } = await createUser({ email: 'ratelimit_reset@example.com' });
 
     // 4 failed attempts

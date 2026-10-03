@@ -93,7 +93,22 @@ describe('cache.ts: Redis degradation', () => {
   });
 
   it('BE-CACHE-DEG-002: CachedPiped.trending caches trending results', async () => {
-    // Trending cache check
-    expect(typeof CachedPiped.trending).toBe('function');
+    const original = getGlobalDispatcher();
+    const mockAgent = new MockAgent();
+    mockAgent.disableNetConnect();
+    setGlobalDispatcher(mockAgent);
+    const client = mockAgent.get('http://localhost:8090');
+    // Only one response is mocked: a second request to Piped would fail the test.
+    client
+      .intercept({ path: '/trending?region=US', method: 'GET' })
+      .reply(200, [{ url: '/watch?v=trend1', title: 'Trending One', type: 'stream' }]);
+
+    const first = await CachedPiped.trending('US');
+    const second = await CachedPiped.trending('US');
+    expect(first).toEqual([{ url: '/watch?v=trend1', title: 'Trending One', type: 'stream' }]);
+    expect(second).toEqual(first);
+    mockAgent.assertNoPendingInterceptors();
+    await mockAgent.close();
+    setGlobalDispatcher(original);
   });
 });

@@ -124,29 +124,37 @@ export const Piped = {
     return fetchPiped<T.PlaylistPage>(`/nextpage/playlists/${encodeURIComponent(id)}`, { query: { nextpage } });
   },
 
-  async healthcheck(): Promise<boolean> {
+  /**
+   * `timeoutMs` bounds the whole attempt, connecting included (an unreachable host otherwise
+   * waits for the TCP connect timeout). `/healthz` passes a short one with no retry, so a
+   * Piped outage can't make the health check itself time out.
+   */
+  async healthcheck({
+    timeoutMs = 5000,
+    retry = true,
+  }: { timeoutMs?: number; retry?: boolean } = {}): Promise<boolean> {
     const url = new URL('/healthcheck', pipedApiUrl());
+    const attempts = retry ? 2 : 1;
     let attempt = 0;
-    while (attempt < 2) {
+    while (attempt < attempts) {
       try {
         const { statusCode, body } = await request(url, {
           method: 'GET',
           headers: { 'User-Agent': 'Sonare/1.0' },
-          bodyTimeout: 5000,
-          headersTimeout: 5000,
+          signal: AbortSignal.timeout(timeoutMs),
         });
         await body.dump();
         if (statusCode >= 200 && statusCode < 300) {
           return true;
         }
-        if (statusCode >= 500 && attempt === 0) {
+        if (statusCode >= 500 && attempt < attempts - 1) {
           attempt++;
           continue;
         }
         throw new UpstreamError(`Piped returned ${statusCode} for /healthcheck`, 502);
       } catch (e) {
         if (e instanceof UpstreamError) throw e;
-        if (attempt === 0) {
+        if (attempt < attempts - 1) {
           attempt++;
           continue;
         }
