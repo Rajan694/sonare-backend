@@ -69,6 +69,7 @@ async function searchArtistCatalog(
   return (page.items || []).filter((i) => i.uploaderUrl === `/channel/${channelId}`);
 }
 
+// Placeholder: the apps call it, but there are no recommendations yet.
 catalogRouter.get('/discover/made-for-you', (req, res) => {
   res.json({ items: [], meta: { total: 0 } });
 });
@@ -371,7 +372,7 @@ catalogRouter.get('/playlists/:id', async (req, res) => {
     kind: 'online',
     trackCount: playlist.videos >= 0 ? playlist.videos : null,
     downloadedCount: 0,
-    updatedAt: Date.now(), // TODO(phase3): updatedAt will come from the Sonare DB
+    // No updatedAt: Piped doesn't say when a YouTube playlist last changed.
   });
 });
 

@@ -191,6 +191,7 @@ meRouter.get('/library/artists', async (req, res) => {
   res.json({ items, meta: { total: follows.length } });
 });
 
+// Placeholder: the apps call it, but tracks carry no genre yet.
 meRouter.get('/library/genres', async (req, res) => {
   res.json({ items: [], meta: { total: 0 } });
 });
@@ -347,6 +348,7 @@ meRouter.get('/most-played', async (req, res) => {
   });
 });
 
+// Placeholder: the apps call it, but followed artists' releases aren't tracked yet.
 meRouter.get('/new-releases', async (req, res) => {
   res.json({ items: [], meta: { total: 0 } });
 });

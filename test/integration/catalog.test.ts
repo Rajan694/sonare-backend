@@ -364,6 +364,8 @@ describe('Catalog & public endpoints', () => {
     expect(res.status).toBe(200);
     expect(res.body.id).toBe('yt:PLpublicList1');
     expect(res.body.name).toBe('Greatest Hits Album');
+    // Piped has no last-modified date for YouTube playlists, so none is invented.
+    expect(res.body).not.toHaveProperty('updatedAt');
   });
 });
 
