@@ -3,6 +3,7 @@ import { config } from './config.js';
 import { verifyDatabase } from './db/index.js';
 import { loadSystemConfig, pipedApiUrl } from './services/systemConfig.js';
 import { flushTelemetry, startTelemetry } from './services/telemetry.js';
+import { logger } from './logger.js';
 
 async function start() {
   await verifyDatabase();
@@ -10,21 +11,21 @@ async function start() {
   startTelemetry();
   const app = createApp();
   const server = app.listen(config.PORT, () => {
-    console.log(`Sonare backend listening on port ${config.PORT}`);
-    console.log(`Piped upstream mapped to ${pipedApiUrl()}`);
+    logger.info(`Sonare backend listening on port ${config.PORT}`);
+    logger.info(`Piped upstream mapped to ${pipedApiUrl()}`);
   });
 
   const shutdown = () => {
-    console.log('Shutting down...');
+    logger.info('Shutting down...');
     server.close(() => {
-      console.log('HTTP server closed');
+      logger.info('HTTP server closed');
       // Write out the request and error logs still buffered.
       void flushTelemetry().finally(() => process.exit(0));
     });
 
     // Force close if lingering
     setTimeout(() => {
-      console.error('Forcing exit after 10s timeout');
+      logger.error('Forcing exit after 10s timeout');
       process.exit(1);
     }, 10000).unref();
   };

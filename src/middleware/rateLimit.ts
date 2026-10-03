@@ -1,4 +1,5 @@
 import { redis, isRedisAvailable } from '../services/cache.js';
+import { logger } from '../logger.js';
 
 export interface RateLimitResult {
   allowed: boolean;
@@ -14,7 +15,7 @@ let loggedRateLimitRedisWarning = false;
 
 function warnRedisDown() {
   if (!loggedRateLimitRedisWarning) {
-    console.warn('[RateLimit] Redis unreachable — failing open.');
+    logger.warn('Rate limiter: Redis unreachable, failing open');
     loggedRateLimitRedisWarning = true;
   }
 }

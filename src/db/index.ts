@@ -1,6 +1,7 @@
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 import { dbConfig } from '../config.js';
+import { logger } from '../logger.js';
 import * as schema from './schema.js';
 
 export const sql = postgres({
@@ -16,11 +17,12 @@ export async function verifyDatabase() {
     await sql`SELECT 1`;
   } catch (error: any) {
     if (error.code === '3D000') {
-      console.error('\x1b[31m[Database Error]\x1b[0m Database "sonare" does not exist!');
-      console.error('\x1b[33mRun `npm run db:create` and `npm run db:migrate` to set it up.\x1b[0m');
+      logger.fatal(
+        `Database "${dbConfig.database}" does not exist. Run \`npm run db:create\` and \`npm run db:migrate\` to set it up.`,
+      );
       process.exit(1);
     }
-    console.error('\x1b[31m[Database Error]\x1b[0m Failed to connect to PostgreSQL:', error.message);
+    logger.fatal({ err: error }, `Failed to connect to PostgreSQL: ${error.message}`);
     process.exit(1);
   }
 }

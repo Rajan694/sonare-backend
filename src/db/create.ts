@@ -1,5 +1,6 @@
 import postgres from 'postgres';
 import { dbConfig } from '../config.js';
+import { logger } from '../logger.js';
 
 async function createDatabase() {
   const maintenanceConfig = {
@@ -7,7 +8,7 @@ async function createDatabase() {
     database: 'postgres',
   };
 
-  console.log(`Connecting to maintenance database 'postgres' on host ${maintenanceConfig.host}...`);
+  logger.info(`Connecting to maintenance database 'postgres' on host ${maintenanceConfig.host}...`);
   const sql = postgres(maintenanceConfig);
 
   try {
@@ -16,14 +17,14 @@ async function createDatabase() {
     `;
 
     if (exists.length > 0) {
-      console.log('Database "sonare" already exists. Nothing to do.');
+      logger.info('Database "sonare" already exists. Nothing to do.');
     } else {
-      console.log('Creating database "sonare"...');
+      logger.info('Creating database "sonare"...');
       await sql.unsafe('CREATE DATABASE sonare;');
-      console.log('Database "sonare" created successfully.');
+      logger.info('Database "sonare" created successfully.');
     }
   } catch (error: any) {
-    console.error('Error creating database:', error.message);
+    logger.fatal({ err: error }, `Error creating database: ${error.message}`);
     process.exit(1);
   } finally {
     await sql.end();

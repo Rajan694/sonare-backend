@@ -19,6 +19,7 @@ const envSchema = z.object({
   // Set when running behind a reverse proxy so req.ip is the client, not the proxy:
   // a hop count ("1"), "true", or Express's named values ("loopback").
   TRUST_PROXY: z.string().optional(),
+  LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
   SMTP_HOST: z.string().default('127.0.0.1'),
   SMTP_PORT: z.coerce.number().default(1025),
   SMTP_SECURE: z

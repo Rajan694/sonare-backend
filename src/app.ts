@@ -13,6 +13,7 @@ import { requestLogger } from './services/telemetry.js';
 import { optionalAuth } from './middleware/auth.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import { config, corsOrigins, parseTrustProxy } from './config.js';
+import { logger } from './logger.js';
 
 const LOCALHOST_ORIGIN_REGEX = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
 
@@ -50,11 +51,7 @@ export function createApp() {
     }),
   );
   app.use(requestLogger());
-  app.use(
-    pinoHttp({
-      level: process.env.NODE_ENV === 'test' ? 'silent' : 'info',
-    }),
-  );
+  app.use(pinoHttp({ logger }));
   app.use(express.json());
   app.use(optionalAuth);
 

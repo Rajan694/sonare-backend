@@ -2,6 +2,7 @@ import { Redis } from 'ioredis';
 import { config } from '../config.js';
 import { Piped } from '../upstream/piped.js';
 import * as T from '../upstream/piped.types.js';
+import { logger } from '../logger.js';
 
 export const TTL = {
   search: 5 * 60, // seconds for Redis
@@ -33,7 +34,7 @@ redis
   })
   .catch(() => {
     if (!loggedRedisError) {
-      console.warn('[Cache] Redis unreachable at', config.REDIS_URL, '— degrading to cache passthrough.');
+      logger.warn({ redisUrl: config.REDIS_URL }, 'Cache: Redis unreachable, passing requests through uncached');
       loggedRedisError = true;
     }
   });
@@ -41,7 +42,7 @@ redis
 redis.on('error', () => {
   redisAvailable = false;
   if (!loggedRedisError) {
-    console.warn('[Cache] Redis connection lost — degrading to cache passthrough.');
+    logger.warn('Cache: Redis connection lost, passing requests through uncached');
     loggedRedisError = true;
   }
 });

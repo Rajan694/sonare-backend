@@ -2,6 +2,7 @@ import type { Request, RequestHandler, Response } from 'express';
 import { and, eq, lt, sql } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { errorLogs, requestLogs } from '../db/schema.js';
+import { logger } from '../logger.js';
 
 // Request logs and error logs for the admin page. Both are buffered in memory and written in
 // batches, so logging never adds a query to the request it describes.
@@ -192,7 +193,7 @@ async function writePending(): Promise<void> {
     for (const e of errors) await writeError(e);
   } catch (err: any) {
     // Not recorded as an error log: that write would most likely fail the same way.
-    console.warn('[telemetry] could not write logs:', err.message);
+    logger.warn({ err }, 'Telemetry: could not write logs');
   }
 }
 
@@ -214,7 +215,7 @@ async function prune() {
       .delete(errorLogs)
       .where(lt(errorLogs.lastSeenAt, sql`${utcNow} - make_interval(days => ${ERROR_LOG_DAYS})`));
   } catch (err: any) {
-    console.warn('[telemetry] could not prune old logs:', err.message);
+    logger.warn({ err }, 'Telemetry: could not prune old logs');
   }
 }
 
@@ -230,7 +231,7 @@ export function startTelemetry(): void {
   // Recorded, then the process still exits as it would have without these handlers.
   const crash = (code: string) => (reason: unknown) => {
     const err = reason instanceof Error ? reason : new Error(String(reason));
-    console.error(err);
+    logger.fatal({ err }, code);
     recordError({ source: 'backend', code, message: err.message, stack: err.stack });
     setTimeout(() => process.exit(1), 3_000).unref();
     void flushTelemetry().finally(() => process.exit(1));
