@@ -34,13 +34,13 @@ describe('Catalog & public endpoints', () => {
     setGlobalDispatcher(originalDispatcher);
   });
 
-  it('BE-CATALOG-001: GET /api/v1/healthz returns 200 with piped up status', async () => {
+  it('BE-CATALOG-001: GET /api/v1/healthz reports database, Redis and Piped up with the package version', async () => {
     const pipedMock = mockAgent!.get('http://localhost:8090');
     pipedMock.intercept({ path: '/healthcheck', method: 'GET' }).reply(200, { ok: true });
 
     const res = await request(app).get('/api/v1/healthz');
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ ok: true, version: '1.0.0', piped: 'up' });
+    expect(res.body).toEqual({ ok: true, version: '1.0.0', db: 'up', redis: 'up', piped: 'up' });
   });
 
   it('BE-CATALOG-002: GET /api/v1/healthz reports piped down when healthcheck fails', async () => {
@@ -48,8 +48,9 @@ describe('Catalog & public endpoints', () => {
     pipedMock.intercept({ path: '/healthcheck', method: 'GET' }).reply(500, { error: 'Internal error' });
 
     const res = await request(app).get('/api/v1/healthz');
+    // Piped being down is reported but does not fail the check; only the database does.
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ ok: true, version: '1.0.0', piped: 'down' });
+    expect(res.body).toMatchObject({ ok: true, db: 'up', piped: 'down' });
   });
 
   it('BE-CATALOG-003: GET /api/v1/discover/made-for-you returns empty recommendation list for guest', async () => {

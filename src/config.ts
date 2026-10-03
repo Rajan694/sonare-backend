@@ -16,6 +16,9 @@ const envSchema = z.object({
   DATABASE_URL: z.string(),
   REDIS_URL: z.string().url().default('redis://127.0.0.1:6379/1'),
   CORS_ORIGINS: z.string().default(''),
+  // Set when running behind a reverse proxy so req.ip is the client, not the proxy:
+  // a hop count ("1"), "true", or Express's named values ("loopback").
+  TRUST_PROXY: z.string().optional(),
   SMTP_HOST: z.string().default('127.0.0.1'),
   SMTP_PORT: z.coerce.number().default(1025),
   SMTP_SECURE: z
@@ -46,6 +49,15 @@ export function assertProductionConfig(cfg: Config): void {
 
 export const config = envSchema.parse(process.env);
 assertProductionConfig(config);
+
+/** Express's `trust proxy` setting from TRUST_PROXY, or undefined to leave it off. */
+export function parseTrustProxy(value: string | undefined): boolean | number | string | undefined {
+  if (!value) return undefined;
+  if (value === 'true') return true;
+  if (value === 'false') return false;
+  if (/^\d+$/.test(value)) return Number(value);
+  return value;
+}
 
 export const corsOrigins: string[] = config.CORS_ORIGINS.split(',')
   .map((s) => s.trim())

@@ -1,9 +1,10 @@
+import fs from 'node:fs';
 import express, { Request, Response, NextFunction, RequestHandler } from 'express';
 import { pinoHttp } from 'pino-http';
 import cors from 'cors';
 import helmet from 'helmet';
 import { Piped, UpstreamError } from './upstream/piped.js';
-import { CachedPiped } from './cache.js';
+import { CachedPiped, isRedisAvailable } from './cache.js';
 import {
   normalizeStreamToTrack,
   normalizeStreamItemToTrack,
@@ -30,11 +31,13 @@ import { requestLogger } from './telemetry.js';
 import { optionalAuth } from './auth.js';
 import { getUserTrackFields } from './db/user-data.js';
 import { saveDbLyricsOverride, saveDbLyricsOffset, deleteDbLyricsOverride, getDbLyricsOverride } from './lyrics.js';
-import { db } from './db/index.js';
+import { db, sql } from './db/index.js';
 import { playlistTracks, artistFollows } from './db/schema.js';
 import { and, eq } from 'drizzle-orm';
 import { LRUCache } from 'lru-cache';
-import { config, corsOrigins } from './config.js';
+import { config, corsOrigins, parseTrustProxy } from './config.js';
+
+const APP_VERSION: string = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
 
 const LOCALHOST_ORIGIN_REGEX = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
 
@@ -196,6 +199,8 @@ async function searchArtistCatalog(
 
 export function createApp() {
   const app = express();
+  const trustProxy = parseTrustProxy(config.TRUST_PROXY);
+  if (trustProxy !== undefined) app.set('trust proxy', trustProxy);
 
   app.use(
     helmet({
@@ -254,14 +259,24 @@ export function createApp() {
   v1.get(
     '/healthz',
     asyncHandler(async (req, res) => {
-      let pipedStatus = 'unknown';
-      try {
-        await Piped.healthcheck();
-        pipedStatus = 'up';
-      } catch (e) {
-        pipedStatus = 'down';
-      }
-      res.json({ ok: true, version: '1.0.0', piped: pipedStatus });
+      const [dbUp, pipedUp] = await Promise.all([
+        sql`SELECT 1`.then(
+          () => true,
+          () => false,
+        ),
+        Piped.healthcheck().then(
+          () => true,
+          () => false,
+        ),
+      ]);
+      // Only the database is required; Redis is a cache and Piped outages are reported per request.
+      res.status(dbUp ? 200 : 503).json({
+        ok: dbUp,
+        version: APP_VERSION,
+        db: dbUp ? 'up' : 'down',
+        redis: isRedisAvailable() ? 'up' : 'down',
+        piped: pipedUp ? 'up' : 'down',
+      });
     }),
   );
 

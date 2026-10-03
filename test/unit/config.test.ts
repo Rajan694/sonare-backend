@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { assertProductionConfig, config, corsOrigins, parseDatabaseUrl } from '../../src/config.js';
+import { assertProductionConfig, config, corsOrigins, parseDatabaseUrl, parseTrustProxy } from '../../src/config.js';
 
 describe('config.ts Configuration Parsing', () => {
   it('BE-CONF-001: parseDatabaseUrl parses standard TCP postgres URL correctly', () => {
@@ -65,5 +65,14 @@ describe('config.ts Configuration Parsing', () => {
         assertProductionConfig({ ...prod, NODE_ENV: 'development', JWT_SECRET: 'x', SMTP_USER: undefined }),
       ).not.toThrow();
     });
+  });
+
+  it('BE-CONF-010: parseTrustProxy turns TRUST_PROXY into the Express setting', () => {
+    expect(parseTrustProxy(undefined)).toBeUndefined();
+    expect(parseTrustProxy('')).toBeUndefined();
+    expect(parseTrustProxy('true')).toBe(true);
+    expect(parseTrustProxy('false')).toBe(false);
+    expect(parseTrustProxy('2')).toBe(2);
+    expect(parseTrustProxy('loopback')).toBe('loopback');
   });
 });

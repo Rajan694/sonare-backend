@@ -57,33 +57,33 @@ This document maps all backend test IDs to their specifications, assertions, and
 
 ## 2. Catalog & Discovery
 
-| Test ID           | Method / Scope                       | Description & Assertions                                                   |
-| :---------------- | :----------------------------------- | :------------------------------------------------------------------------- |
-| `BE-CATALOG-001`  | `GET /api/v1/healthz`                | Returns 200 with piped status 'up'.                                        |
-| `BE-CATALOG-002`  | `GET /api/v1/healthz`                | Reports piped status 'down' when upstream health check fails.              |
-| `BE-CATALOG-003`  | `GET /api/v1/discover/made-for-you`  | Returns empty item array for unauthenticated guests.                       |
-| `BE-CATALOG-004`  | `GET /api/v1/search/suggestions`     | Proxies suggestion list from Piped upstream.                               |
-| `BE-CATALOG-005`  | `GET /api/v1/search/suggestions`     | Validates missing query q parameter with 400 BAD_REQUEST.                  |
-| `BE-CATALOG-006`  | `GET /api/v1/search?type=songs`      | Searches songs with filter mapping and cursor pagination.                  |
-| `BE-CATALOG-007`  | `GET /api/v1/search?type=albums`     | Searches albums mapped to normalized album shape.                          |
-| `BE-CATALOG-008`  | `GET /api/v1/search?type=artists`    | Searches artists mapped to normalized artist shape.                        |
-| `BE-CATALOG-009`  | `GET /api/v1/search?type=playlists`  | Searches playlists mapped to album cards.                                  |
-| `BE-CATALOG-010`  | `GET /api/v1/search?type=all`        | Aggregates multi-type search across songs, albums, artists, playlists.     |
-| `BE-CATALOG-011`  | `GET /api/v1/search`                 | Handles cursor decode and forward pagination.                              |
-| `BE-CATALOG-012`  | `GET /api/v1/search`                 | Validates missing q query parameter with 400 BAD_REQUEST.                  |
-| `BE-CATALOG-013`  | `GET /api/v1/tracks/:id`             | Returns normalized track details with authenticated user favourite states. |
-| `BE-CATALOG-014`  | `GET /api/v1/tracks/:id`             | Handles guest requests with default user state flags.                      |
-| `BE-CATALOG-015`  | `GET /api/v1/tracks/:id`             | Returns 502 UPSTREAM_UNAVAILABLE on upstream service failure.              |
-| `BE-CATALOG-016`  | `GET /api/v1/tracks/:id/peaks`       | Returns audio waveform peak levels array.                                  |
-| `BE-CATALOG-017`  | `GET /api/v1/albums/:id`             | Returns normalized album details.                                          |
-| `BE-CATALOG-018`  | `GET /api/v1/albums/:id/tracks`      | Returns track list inside playlist/album.                                  |
-| `BE-CATALOG-019`  | `GET /api/v1/artists/:id`            | Returns artist channel metadata with following state.                      |
-| `BE-CATALOG-020`  | `GET /api/v1/artists/:id/top-tracks` | Returns top tracks for artist channel.                                     |
-| `BE-CATALOG-021`  | `GET /api/v1/artists/:id/albums`     | Returns albums list from artist channel tab.                               |
-| `BE-CATALOG-022`  | `GET /api/v1/playlists/:id`          | Returns public playlist metadata.                                          |
-| `BE-CAT-EDGE-001` | `GET /api/v1/artists/:id/albums`     | Handles cursor pagination for artist channel releases.                     |
-| `BE-CAT-EDGE-002` | `GET /api/v1/albums/:id/tracks`      | Handles cursor pagination for album tracks.                                |
-| `BE-CAT-EDGE-003` | `GET /api/v1/playlists/:id/tracks`   | Handles cursor pagination for playlist tracks.                             |
+| Test ID           | Method / Scope                       | Description & Assertions                                                                   |
+| :---------------- | :----------------------------------- | :----------------------------------------------------------------------------------------- |
+| `BE-CATALOG-001`  | `GET /api/v1/healthz`                | Reports db, redis and piped status plus the package version; 200 while the database is up. |
+| `BE-CATALOG-002`  | `GET /api/v1/healthz`                | Piped down is reported as `piped: down` but the check still returns 200.                   |
+| `BE-CATALOG-003`  | `GET /api/v1/discover/made-for-you`  | Returns empty item array for unauthenticated guests.                                       |
+| `BE-CATALOG-004`  | `GET /api/v1/search/suggestions`     | Proxies suggestion list from Piped upstream.                                               |
+| `BE-CATALOG-005`  | `GET /api/v1/search/suggestions`     | Validates missing query q parameter with 400 BAD_REQUEST.                                  |
+| `BE-CATALOG-006`  | `GET /api/v1/search?type=songs`      | Searches songs with filter mapping and cursor pagination.                                  |
+| `BE-CATALOG-007`  | `GET /api/v1/search?type=albums`     | Searches albums mapped to normalized album shape.                                          |
+| `BE-CATALOG-008`  | `GET /api/v1/search?type=artists`    | Searches artists mapped to normalized artist shape.                                        |
+| `BE-CATALOG-009`  | `GET /api/v1/search?type=playlists`  | Searches playlists mapped to album cards.                                                  |
+| `BE-CATALOG-010`  | `GET /api/v1/search?type=all`        | Aggregates multi-type search across songs, albums, artists, playlists.                     |
+| `BE-CATALOG-011`  | `GET /api/v1/search`                 | Handles cursor decode and forward pagination.                                              |
+| `BE-CATALOG-012`  | `GET /api/v1/search`                 | Validates missing q query parameter with 400 BAD_REQUEST.                                  |
+| `BE-CATALOG-013`  | `GET /api/v1/tracks/:id`             | Returns normalized track details with authenticated user favourite states.                 |
+| `BE-CATALOG-014`  | `GET /api/v1/tracks/:id`             | Handles guest requests with default user state flags.                                      |
+| `BE-CATALOG-015`  | `GET /api/v1/tracks/:id`             | Returns 502 UPSTREAM_UNAVAILABLE on upstream service failure.                              |
+| `BE-CATALOG-016`  | `GET /api/v1/tracks/:id/peaks`       | Returns audio waveform peak levels array.                                                  |
+| `BE-CATALOG-017`  | `GET /api/v1/albums/:id`             | Returns normalized album details.                                                          |
+| `BE-CATALOG-018`  | `GET /api/v1/albums/:id/tracks`      | Returns track list inside playlist/album.                                                  |
+| `BE-CATALOG-019`  | `GET /api/v1/artists/:id`            | Returns artist channel metadata with following state.                                      |
+| `BE-CATALOG-020`  | `GET /api/v1/artists/:id/top-tracks` | Returns top tracks for artist channel.                                                     |
+| `BE-CATALOG-021`  | `GET /api/v1/artists/:id/albums`     | Returns albums list from artist channel tab.                                               |
+| `BE-CATALOG-022`  | `GET /api/v1/playlists/:id`          | Returns public playlist metadata.                                                          |
+| `BE-CAT-EDGE-001` | `GET /api/v1/artists/:id/albums`     | Handles cursor pagination for artist channel releases.                                     |
+| `BE-CAT-EDGE-002` | `GET /api/v1/albums/:id/tracks`      | Handles cursor pagination for album tracks.                                                |
+| `BE-CAT-EDGE-003` | `GET /api/v1/playlists/:id/tracks`   | Handles cursor pagination for playlist tracks.                                             |
 
 ---
 
@@ -326,6 +326,7 @@ This document maps all backend test IDs to their specifications, assertions, and
 | `BE-CONF-007`    | `assertProductionConfig` rejects missing SMTP_USER / SMTP_PASS in production. |
 | `BE-CONF-008`    | `assertProductionConfig` rejects a non-https APP_URL in production.           |
 | `BE-CONF-009`    | `assertProductionConfig` skips all checks outside production.                 |
+| `BE-CONF-010`    | `parseTrustProxy` maps TRUST_PROXY to Express's `trust proxy` value.          |
 | `BE-MAIL-001`    | `verifyEmailMessage` has the subject and the link in text and html.           |
 | `BE-MAIL-002`    | `resetPasswordMessage` has the subject and the link in text and html.         |
 | `BE-SYS-001`     | Normalizes and validates configuration URLs.                                  |

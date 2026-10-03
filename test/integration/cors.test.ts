@@ -54,7 +54,7 @@ describe('CORS and Security Headers', () => {
     const res = await request(app).get('/api/v1/healthz');
 
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ ok: true, version: '1.0.0', piped: 'up' });
+    expect(res.body).toMatchObject({ ok: true, piped: 'up' });
   });
 
   it('includes helmet security headers with cross-origin resource policy', async () => {
