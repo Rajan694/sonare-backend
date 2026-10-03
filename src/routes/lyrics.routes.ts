@@ -1,4 +1,4 @@
-import { Router, type Request, type Response, type NextFunction, type RequestHandler } from 'express';
+import { Router } from 'express';
 import { CachedPiped, PermanentCache } from '../services/cache.js';
 import { idHelpers } from '../ids.js';
 import {
@@ -14,99 +14,78 @@ import { BadRequestError } from '../errors.js';
 // Lyrics: resolve, per-user overrides and offsets, and LRCLIB search.
 export const lyricsRouter = Router();
 
-const asyncHandler =
-  (fn: (req: Request<Record<string, string>>, res: Response, next: NextFunction) => Promise<any>): RequestHandler =>
-  (req, res, next) => {
-    Promise.resolve(fn(req as Request<Record<string, string>>, res, next)).catch(next);
-  };
+lyricsRouter.get('/tracks/:id/lyrics', async (req, res) => {
+  const rawId = idHelpers.extractYtId(req.params.id);
+  const prefer = req.query.prefer as string;
 
-lyricsRouter.get(
-  '/tracks/:id/lyrics',
-  asyncHandler(async (req, res) => {
-    const rawId = idHelpers.extractYtId(req.params.id);
-    const prefer = req.query.prefer as string;
-
-    let resolved;
-    const dbOverride = await getDbLyricsOverride(rawId, req.user?.id);
-    if (dbOverride && (dbOverride.lrc || dbOverride.plain)) {
-      resolved = await LyricsResolver.resolve(rawId, '', '', undefined, undefined, req.user?.id);
-    } else {
-      resolved = await PermanentCache.getLyrics(rawId);
-      if (!resolved) {
-        const streams = await CachedPiped.getStream(rawId);
-        const trackName = streams.title;
-        const artistName = streams.uploader.replace(/\s*-\s*Topic$/i, '').trim();
-        resolved = await LyricsResolver.resolve(
-          rawId,
-          trackName,
-          artistName,
-          undefined,
-          streams.duration * 1000,
-          req.user?.id,
-        );
-        if (resolved) await PermanentCache.setLyrics(rawId, resolved);
-      }
-    }
-
+  let resolved;
+  const dbOverride = await getDbLyricsOverride(rawId, req.user?.id);
+  if (dbOverride && (dbOverride.lrc || dbOverride.plain)) {
+    resolved = await LyricsResolver.resolve(rawId, '', '', undefined, undefined, req.user?.id);
+  } else {
+    resolved = await PermanentCache.getLyrics(rawId);
     if (!resolved) {
-      res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Lyrics not found' } });
-      return;
+      const streams = await CachedPiped.getStream(rawId);
+      const trackName = streams.title;
+      const artistName = streams.uploader.replace(/\s*-\s*Topic$/i, '').trim();
+      resolved = await LyricsResolver.resolve(
+        rawId,
+        trackName,
+        artistName,
+        undefined,
+        streams.duration * 1000,
+        req.user?.id,
+      );
+      if (resolved) await PermanentCache.setLyrics(rawId, resolved);
     }
+  }
 
-    const response: any = { ...resolved };
-    if (prefer === 'plain' && response.plain) {
-      response.synced = false;
-      response.lines = [];
-    }
+  if (!resolved) {
+    res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Lyrics not found' } });
+    return;
+  }
 
-    res.json(response);
-  }),
-);
+  const response: any = { ...resolved };
+  if (prefer === 'plain' && response.plain) {
+    response.synced = false;
+    response.lines = [];
+  }
 
-lyricsRouter.post(
-  '/tracks/:id/lyrics',
-  asyncHandler(async (req, res) => {
-    const rawId = idHelpers.extractYtId(req.params.id);
-    const { lrc, plain } = req.body;
-    const userId = req.user?.id || '00000000-0000-0000-0000-000000000000';
+  res.json(response);
+});
 
-    await saveDbLyricsOverride(rawId, userId, { lrc, plain });
-    await PermanentCache.setLyrics(rawId, null);
+lyricsRouter.post('/tracks/:id/lyrics', async (req, res) => {
+  const rawId = idHelpers.extractYtId(req.params.id);
+  const { lrc, plain } = req.body;
+  const userId = req.user?.id || '00000000-0000-0000-0000-000000000000';
 
-    res.json({ ok: true });
-  }),
-);
+  await saveDbLyricsOverride(rawId, userId, { lrc, plain });
+  await PermanentCache.setLyrics(rawId, null);
 
-lyricsRouter.patch(
-  '/tracks/:id/lyrics/offset',
-  asyncHandler(async (req, res) => {
-    const rawId = idHelpers.extractYtId(req.params.id);
-    const { offsetMs } = req.body;
-    const userId = req.user?.id || '00000000-0000-0000-0000-000000000000';
+  res.json({ ok: true });
+});
 
-    await saveDbLyricsOffset(rawId, userId, offsetMs);
-    res.json({ ok: true });
-  }),
-);
+lyricsRouter.patch('/tracks/:id/lyrics/offset', async (req, res) => {
+  const rawId = idHelpers.extractYtId(req.params.id);
+  const { offsetMs } = req.body;
+  const userId = req.user?.id || '00000000-0000-0000-0000-000000000000';
 
-lyricsRouter.delete(
-  '/tracks/:id/lyrics',
-  asyncHandler(async (req, res) => {
-    const rawId = idHelpers.extractYtId(req.params.id);
-    await deleteDbLyricsOverride(rawId, req.user?.id);
-    await PermanentCache.setLyrics(rawId, null);
-    res.json({ ok: true });
-  }),
-);
+  await saveDbLyricsOffset(rawId, userId, offsetMs);
+  res.json({ ok: true });
+});
 
-lyricsRouter.get(
-  '/lyrics/search',
-  asyncHandler(async (req, res) => {
-    const { track, artist, album } = req.query;
-    if (!track) {
-      throw new BadRequestError('Missing track parameter');
-    }
-    const results = await Lrclib.search(undefined, track as string, artist as string, album as string);
-    res.json(results || []);
-  }),
-);
+lyricsRouter.delete('/tracks/:id/lyrics', async (req, res) => {
+  const rawId = idHelpers.extractYtId(req.params.id);
+  await deleteDbLyricsOverride(rawId, req.user?.id);
+  await PermanentCache.setLyrics(rawId, null);
+  res.json({ ok: true });
+});
+
+lyricsRouter.get('/lyrics/search', async (req, res) => {
+  const { track, artist, album } = req.query;
+  if (!track) {
+    throw new BadRequestError('Missing track parameter');
+  }
+  const results = await Lrclib.search(undefined, track as string, artist as string, album as string);
+  res.json(results || []);
+});

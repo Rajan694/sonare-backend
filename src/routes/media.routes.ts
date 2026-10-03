@@ -1,4 +1,4 @@
-import { Router, type Request, type Response, type NextFunction, type RequestHandler } from 'express';
+import { Router, type Request, type Response } from 'express';
 import { eq } from 'drizzle-orm';
 import { request } from 'undici';
 import { LRUCache } from 'lru-cache';
@@ -147,49 +147,37 @@ async function largestThumb(videoId: string): Promise<string> {
   return found;
 }
 
-const asyncHandler =
-  (fn: (req: Request<Record<string, string>>, res: Response, next: NextFunction) => Promise<any>): RequestHandler =>
-  (req, res, next) => {
-    Promise.resolve(fn(req as Request<Record<string, string>>, res, next)).catch(next);
-  };
+mediaRouter.get('/tracks/:id', async (req, res) => {
+  const rawId = idHelpers.extractYtId(req.params.id);
+  const streams = await CachedPiped.getStream(rawId);
 
-mediaRouter.get(
-  '/tracks/:id',
-  asyncHandler(async (req, res) => {
-    const rawId = idHelpers.extractYtId(req.params.id);
-    const streams = await CachedPiped.getStream(rawId);
+  // Select best audio stream (or muxed fallback if adaptive audio is absent).
+  // Codec and bitrate are null only when upstream yields no audio streams at all (neither adaptive nor muxed).
+  let codecStr: string | null = null;
+  let bitrate: number | null = null;
+  const best = selectBestAudioStream(streams.audioStreams, 'auto', undefined, streams.videoStreams);
+  if (best) {
+    codecStr = best.codec;
+    bitrate = best.bitrate;
+  }
 
-    // Select best audio stream (or muxed fallback if adaptive audio is absent).
-    // Codec and bitrate are null only when upstream yields no audio streams at all (neither adaptive nor muxed).
-    let codecStr: string | null = null;
-    let bitrate: number | null = null;
-    const best = selectBestAudioStream(streams.audioStreams, 'auto', undefined, streams.videoStreams);
-    if (best) {
-      codecStr = best.codec;
-      bitrate = best.bitrate;
-    }
+  const userFields = await getUserTrackFields(req.user?.id, rawId);
+  const track = normalizeStreamToTrack(streams, rawId, codecStr ?? undefined, bitrate ?? undefined, userFields);
+  res.json(track);
+});
 
-    const userFields = await getUserTrackFields(req.user?.id, rawId);
-    const track = normalizeStreamToTrack(streams, rawId, codecStr ?? undefined, bitrate ?? undefined, userFields);
-    res.json(track);
-  }),
-);
+mediaRouter.get('/tracks/:id/artwork', async (req, res) => {
+  const { size } = req.query;
+  const rawId = idHelpers.extractYtId(req.params.id);
 
-mediaRouter.get(
-  '/tracks/:id/artwork',
-  asyncHandler(async (req, res) => {
-    const { size } = req.query;
-    const rawId = idHelpers.extractYtId(req.params.id);
+  // hqdefault is 4:3 with black bars baked in, which shows as letterboxing in square
+  // artwork. mqdefault is 16:9 without bars and exists for every video.
+  const thumbRes = size === '640' ? await largestThumb(rawId) : 'mqdefault';
 
-    // hqdefault is 4:3 with black bars baked in, which shows as letterboxing in square
-    // artwork. mqdefault is 16:9 without bars and exists for every video.
-    const thumbRes = size === '640' ? await largestThumb(rawId) : 'mqdefault';
+  res.redirect(302, `https://i.ytimg.com/vi/${rawId}/${thumbRes}.jpg`);
+});
 
-    res.redirect(302, `https://i.ytimg.com/vi/${rawId}/${thumbRes}.jpg`);
-  }),
-);
-
-const handlePlaylistArtwork = async (req: Request<Record<string, string>>, res: Response) => {
+const handlePlaylistArtwork = async (req: Request<{ id: string }>, res: Response) => {
   const rawId = req.params.id;
   const size = req.query.size as string;
 
@@ -245,196 +233,179 @@ const handlePlaylistArtwork = async (req: Request<Record<string, string>>, res: 
   }
 };
 
-mediaRouter.get('/albums/:id/artwork', asyncHandler(handlePlaylistArtwork));
-mediaRouter.get('/playlists/:id/artwork', asyncHandler(handlePlaylistArtwork));
+mediaRouter.get('/albums/:id/artwork', handlePlaylistArtwork);
+mediaRouter.get('/playlists/:id/artwork', handlePlaylistArtwork);
 
-mediaRouter.get(
-  '/artists/:id/artwork',
-  asyncHandler(async (req, res) => {
-    try {
-      const rawId = idHelpers.extractYtId(req.params.id);
-      const size = req.query.size as string;
-      const channel = await CachedPiped.channel(rawId);
-      if (!channel.avatarUrl) {
-        res.status(404).end();
-        return;
-      }
-
-      let avatarUrl = channel.avatarUrl;
-      const targetSize = size === '64' ? 64 : size === '140' ? 140 : size === '300' ? 300 : size === '640' ? 640 : null;
-      if (targetSize) {
-        avatarUrl = avatarUrl
-          .replace(/=s\d+/, `=s${targetSize}`)
-          .replace(/=w\d+-h\d+/, `=w${targetSize}-h${targetSize}`);
-      }
-
-      res.redirect(302, `/api/v1/image/${signStreamToken(avatarUrl, 30 * 24 * 3600 * 1000)}`);
-    } catch {
+mediaRouter.get('/artists/:id/artwork', async (req, res) => {
+  try {
+    const rawId = idHelpers.extractYtId(req.params.id);
+    const size = req.query.size as string;
+    const channel = await CachedPiped.channel(rawId);
+    if (!channel.avatarUrl) {
       res.status(404).end();
-    }
-  }),
-);
-
-mediaRouter.get(
-  '/image/:token',
-  asyncHandler(async (req, res) => {
-    const { token } = req.params;
-    const data = verifyStreamToken(token);
-
-    const upstreamRes = await request(data.url);
-    if (upstreamRes.statusCode === 200 || upstreamRes.statusCode === 206) {
-      res.status(upstreamRes.statusCode);
-      if (upstreamRes.headers['content-length'])
-        res.setHeader('Content-Length', upstreamRes.headers['content-length'] as string);
-      if (upstreamRes.headers['content-type'])
-        res.setHeader('Content-Type', upstreamRes.headers['content-type'] as string);
-      upstreamRes.body.on('error', () => {});
-      req.on('close', () => {
-        try {
-          upstreamRes.body.destroy();
-        } catch {}
-      });
-      upstreamRes.body.pipe(res);
-    } else {
-      await upstreamRes.body.dump();
-      res.status(502).json({ error: { code: 'UPSTREAM_ERROR', message: 'Failed to proxy image' } });
-    }
-  }),
-);
-
-mediaRouter.get(
-  '/tracks/:id/stream',
-  asyncHandler(async (req, res) => {
-    const { quality = 'auto', format } = req.query;
-    const rawId = idHelpers.extractYtId(req.params.id);
-
-    const streams = await CachedPiped.getStream(rawId);
-    const best = selectBestAudioStream(streams.audioStreams, quality as string, format as string, streams.videoStreams);
-    if (!best) {
-      throw new NoAudioStreamError('No audio streams found');
+      return;
     }
 
-    const expiresAt = Date.now() + 3600_000;
-    const token = signStreamToken(best.url, 3600_000, { vid: rawId, itag: best.itag });
+    let avatarUrl = channel.avatarUrl;
+    const targetSize = size === '64' ? 64 : size === '140' ? 140 : size === '300' ? 300 : size === '640' ? 640 : null;
+    if (targetSize) {
+      avatarUrl = avatarUrl.replace(/=s\d+/, `=s${targetSize}`).replace(/=w\d+-h\d+/, `=w${targetSize}-h${targetSize}`);
+    }
 
-    res.json({
-      url: `/api/v1/stream/${token}`,
-      mimeType: best.mimeType,
-      codec: best.codec,
-      bitrateKbps: Math.floor(best.bitrate / 1000),
-      // 0 when YouTube didn't say (NewPipe reports -1): clients treat it as unknown.
-      contentLength: best.contentLength > 0 ? best.contentLength : 0,
-      expiresAt,
-      muxed: best.muxed,
-      // Lets a paused download check that a refreshed url still points at the same file.
-      itag: best.itag,
-    });
-  }),
-);
+    res.redirect(302, `/api/v1/image/${signStreamToken(avatarUrl, 30 * 24 * 3600 * 1000)}`);
+  } catch {
+    res.status(404).end();
+  }
+});
 
-mediaRouter.get(
-  '/tracks/:id/peaks',
-  asyncHandler(async (req, res) => {
-    const rawId = idHelpers.extractYtId(req.params.id);
-    const barsStr = req.query.bars as string;
-    const bars = barsStr ? parseInt(barsStr, 10) : 150;
+mediaRouter.get('/image/:token', async (req, res) => {
+  const { token } = req.params;
+  const data = verifyStreamToken(token);
 
-    const cacheKey = `${rawId}:${bars}`;
-    let peaks = await PermanentCache.getPeaks(cacheKey);
-    if (!peaks) {
-      let urlStr = '';
+  const upstreamRes = await request(data.url);
+  if (upstreamRes.statusCode === 200 || upstreamRes.statusCode === 206) {
+    res.status(upstreamRes.statusCode);
+    if (upstreamRes.headers['content-length'])
+      res.setHeader('Content-Length', upstreamRes.headers['content-length'] as string);
+    if (upstreamRes.headers['content-type'])
+      res.setHeader('Content-Type', upstreamRes.headers['content-type'] as string);
+    upstreamRes.body.on('error', () => {});
+    req.on('close', () => {
       try {
-        const streams = await CachedPiped.getStream(rawId);
-        const best = selectBestAudioStream(streams.audioStreams, 'low', undefined, streams.videoStreams);
-        if (best) {
-          urlStr = best.url;
-        }
-      } catch (e) {
-        // Suppress piped errors for peaks
-      }
+        upstreamRes.body.destroy();
+      } catch {}
+    });
+    upstreamRes.body.pipe(res);
+  } else {
+    await upstreamRes.body.dump();
+    res.status(502).json({ error: { code: 'UPSTREAM_ERROR', message: 'Failed to proxy image' } });
+  }
+});
 
-      peaks = await extractPeaks(urlStr, rawId, bars);
-      await PermanentCache.setPeaks(cacheKey, peaks);
+mediaRouter.get('/tracks/:id/stream', async (req, res) => {
+  const { quality = 'auto', format } = req.query;
+  const rawId = idHelpers.extractYtId(req.params.id);
+
+  const streams = await CachedPiped.getStream(rawId);
+  const best = selectBestAudioStream(streams.audioStreams, quality as string, format as string, streams.videoStreams);
+  if (!best) {
+    throw new NoAudioStreamError('No audio streams found');
+  }
+
+  const expiresAt = Date.now() + 3600_000;
+  const token = signStreamToken(best.url, 3600_000, { vid: rawId, itag: best.itag });
+
+  res.json({
+    url: `/api/v1/stream/${token}`,
+    mimeType: best.mimeType,
+    codec: best.codec,
+    bitrateKbps: Math.floor(best.bitrate / 1000),
+    // 0 when YouTube didn't say (NewPipe reports -1): clients treat it as unknown.
+    contentLength: best.contentLength > 0 ? best.contentLength : 0,
+    expiresAt,
+    muxed: best.muxed,
+    // Lets a paused download check that a refreshed url still points at the same file.
+    itag: best.itag,
+  });
+});
+
+mediaRouter.get('/tracks/:id/peaks', async (req, res) => {
+  const rawId = idHelpers.extractYtId(req.params.id);
+  const barsStr = req.query.bars as string;
+  const bars = barsStr ? parseInt(barsStr, 10) : 150;
+
+  const cacheKey = `${rawId}:${bars}`;
+  let peaks = await PermanentCache.getPeaks(cacheKey);
+  if (!peaks) {
+    let urlStr = '';
+    try {
+      const streams = await CachedPiped.getStream(rawId);
+      const best = selectBestAudioStream(streams.audioStreams, 'low', undefined, streams.videoStreams);
+      if (best) {
+        urlStr = best.url;
+      }
+    } catch (e) {
+      // Suppress piped errors for peaks
     }
 
-    res.json({ peaks });
-  }),
-);
+    peaks = await extractPeaks(urlStr, rawId, bars);
+    await PermanentCache.setPeaks(cacheKey, peaks);
+  }
 
-mediaRouter.get(
-  '/stream/:token',
-  asyncHandler(async (req, res) => {
-    const { token } = req.params;
-    const data = verifyStreamToken(token);
+  res.json({ peaks });
+});
 
-    const headers: Record<string, string> = {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
-    };
+mediaRouter.get('/stream/:token', async (req, res) => {
+  const { token } = req.params;
+  const data = verifyStreamToken(token);
 
-    if (req.headers.range) {
-      headers['Range'] = req.headers.range;
+  const headers: Record<string, string> = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+  };
+
+  if (req.headers.range) {
+    headers['Range'] = req.headers.range;
+  }
+
+  let url = replacedStreamUrls.get(data.url) ?? data.url;
+  let upstreamRes = await request(url, { headers });
+
+  // YouTube sometimes hands out URLs that serve only the first ~1MB and 403 the rest.
+  // A fresh extraction usually yields a working one, so swap it in once and remember
+  // the swap - the player keeps seeking with the same token.
+  if (upstreamRes.statusCode === 403 && data.vid && data.itag) {
+    await upstreamRes.body.dump();
+    const fresh = await CachedPiped.refreshStream(data.vid);
+    const match = [...(fresh.audioStreams ?? []), ...(fresh.videoStreams ?? [])].find((s) => s.itag === data.itag);
+    if (match) {
+      replacedStreamUrls.set(data.url, match.url);
+      url = match.url;
+      upstreamRes = await request(url, { headers });
+    }
+  }
+
+  if (upstreamRes.statusCode === 206 || upstreamRes.statusCode === 200) {
+    res.status(upstreamRes.statusCode);
+
+    if (upstreamRes.headers['content-range']) {
+      res.setHeader('Content-Range', upstreamRes.headers['content-range'] as string);
+    }
+    if (upstreamRes.headers['content-length']) {
+      res.setHeader('Content-Length', upstreamRes.headers['content-length'] as string);
+    }
+    if (upstreamRes.headers['accept-ranges']) {
+      res.setHeader('Accept-Ranges', upstreamRes.headers['accept-ranges'] as string);
+    }
+    if (upstreamRes.headers['content-type']) {
+      res.setHeader('Content-Type', upstreamRes.headers['content-type'] as string);
     }
 
-    let url = replacedStreamUrls.get(data.url) ?? data.url;
-    let upstreamRes = await request(url, { headers });
+    upstreamRes.body.on('error', () => {});
+    req.on('close', () => {
+      try {
+        upstreamRes.body.destroy();
+      } catch {}
+    });
 
-    // YouTube sometimes hands out URLs that serve only the first ~1MB and 403 the rest.
-    // A fresh extraction usually yields a working one, so swap it in once and remember
-    // the swap - the player keeps seeking with the same token.
-    if (upstreamRes.statusCode === 403 && data.vid && data.itag) {
-      await upstreamRes.body.dump();
-      const fresh = await CachedPiped.refreshStream(data.vid);
-      const match = [...(fresh.audioStreams ?? []), ...(fresh.videoStreams ?? [])].find((s) => s.itag === data.itag);
-      if (match) {
-        replacedStreamUrls.set(data.url, match.url);
-        url = match.url;
-        upstreamRes = await request(url, { headers });
-      }
-    }
-
-    if (upstreamRes.statusCode === 206 || upstreamRes.statusCode === 200) {
-      res.status(upstreamRes.statusCode);
-
-      if (upstreamRes.headers['content-range']) {
-        res.setHeader('Content-Range', upstreamRes.headers['content-range'] as string);
-      }
-      if (upstreamRes.headers['content-length']) {
-        res.setHeader('Content-Length', upstreamRes.headers['content-length'] as string);
-      }
-      if (upstreamRes.headers['accept-ranges']) {
-        res.setHeader('Accept-Ranges', upstreamRes.headers['accept-ranges'] as string);
-      }
-      if (upstreamRes.headers['content-type']) {
-        res.setHeader('Content-Type', upstreamRes.headers['content-type'] as string);
-      }
-
-      upstreamRes.body.on('error', () => {});
-      req.on('close', () => {
-        try {
-          upstreamRes.body.destroy();
-        } catch {}
-      });
-
-      upstreamRes.body.pipe(res);
-    } else if ((upstreamRes.statusCode === 416 || upstreamRes.statusCode === 400) && req.headers.range) {
-      // A range past the end (YouTube says 416, Piped's proxy 400) should come back as 416
-      // with the size rather than look like a dead url, so a download that already has
-      // every byte can finish instead of refreshing its url. Two bytes tell us the size
-      // (Piped's proxy answers `bytes=0-0` with the whole file).
-      await upstreamRes.body.dump();
-      const start = Number(/bytes=(\d+)-/.exec(req.headers.range)?.[1]);
-      const probe = await request(url, { headers: { ...headers, Range: 'bytes=0-1' } });
-      await probe.body.dump();
-      const total = Number(String(probe.headers['content-range'] ?? '').split('/')[1]);
-      if (total > 0 && start >= total) {
-        res.setHeader('Content-Range', `bytes */${total}`);
-        res.status(416).end();
-      } else {
-        res.status(502).json({ error: { code: 'UPSTREAM_ERROR', message: 'Failed to proxy stream' } });
-      }
+    upstreamRes.body.pipe(res);
+  } else if ((upstreamRes.statusCode === 416 || upstreamRes.statusCode === 400) && req.headers.range) {
+    // A range past the end (YouTube says 416, Piped's proxy 400) should come back as 416
+    // with the size rather than look like a dead url, so a download that already has
+    // every byte can finish instead of refreshing its url. Two bytes tell us the size
+    // (Piped's proxy answers `bytes=0-0` with the whole file).
+    await upstreamRes.body.dump();
+    const start = Number(/bytes=(\d+)-/.exec(req.headers.range)?.[1]);
+    const probe = await request(url, { headers: { ...headers, Range: 'bytes=0-1' } });
+    await probe.body.dump();
+    const total = Number(String(probe.headers['content-range'] ?? '').split('/')[1]);
+    if (total > 0 && start >= total) {
+      res.setHeader('Content-Range', `bytes */${total}`);
+      res.status(416).end();
     } else {
-      await upstreamRes.body.dump();
       res.status(502).json({ error: { code: 'UPSTREAM_ERROR', message: 'Failed to proxy stream' } });
     }
-  }),
-);
+  } else {
+    await upstreamRes.body.dump();
+    res.status(502).json({ error: { code: 'UPSTREAM_ERROR', message: 'Failed to proxy stream' } });
+  }
+});
