@@ -13,12 +13,12 @@ import {
   playlists,
 } from '../../src/db/schema.js';
 import { eq } from 'drizzle-orm';
-import { MockAgent, getGlobalDispatcher, setGlobalDispatcher } from 'undici';
+import { MockAgent, getGlobalDispatcher, setGlobalDispatcher, type Dispatcher } from 'undici';
 
 describe('Me: profile & personal data', () => {
   const app = createApp();
   let mockAgent: MockAgent | null = null;
-  let originalDispatcher: any;
+  let originalDispatcher: Dispatcher;
 
   beforeEach(() => {
     originalDispatcher = getGlobalDispatcher();

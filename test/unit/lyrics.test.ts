@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { LyricsResolver, getDbLyricsOverride, parseLrc } from '../../src/services/lyrics.js';
-import { MockAgent, getGlobalDispatcher, setGlobalDispatcher } from 'undici';
+import { MockAgent, getGlobalDispatcher, setGlobalDispatcher, type Dispatcher } from 'undici';
 
 describe('lyrics.ts: resolver', () => {
   let mockAgent: MockAgent | null = null;
-  let originalDispatcher: any;
+  let originalDispatcher: Dispatcher;
 
   beforeEach(() => {
     originalDispatcher = getGlobalDispatcher();

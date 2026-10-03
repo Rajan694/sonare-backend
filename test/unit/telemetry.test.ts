@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import type { Request } from 'express';
 import { clientOf, flushTelemetry, recordError, startTelemetry } from '../../src/services/telemetry.js';
 import { db } from '../../src/db/index.js';
 import { errorLogs } from '../../src/db/schema.js';
@@ -6,16 +7,16 @@ import { eq } from 'drizzle-orm';
 
 describe('telemetry.ts: internals', () => {
   it('BE-TELEM-001: clientOf extracts valid x-sonare-client header', () => {
-    const req1 = { get: (h: string) => (h === 'x-sonare-client' ? 'web' : undefined) } as any;
+    const req1 = { get: (h: string) => (h === 'x-sonare-client' ? 'web' : undefined) } as unknown as Request;
     expect(clientOf(req1)).toBe('web');
 
-    const req2 = { get: (h: string) => (h === 'x-sonare-client' ? 'linux' : undefined) } as any;
+    const req2 = { get: (h: string) => (h === 'x-sonare-client' ? 'linux' : undefined) } as unknown as Request;
     expect(clientOf(req2)).toBe('linux');
 
-    const req3 = { get: (h: string) => (h === 'x-sonare-client' ? 'mobile' : undefined) } as any;
+    const req3 = { get: (h: string) => (h === 'x-sonare-client' ? 'mobile' : undefined) } as unknown as Request;
     expect(clientOf(req3)).toBe('mobile');
 
-    const req4 = { get: (h: string) => (h === 'x-sonare-client' ? 'unknown' : undefined) } as any;
+    const req4 = { get: (h: string) => (h === 'x-sonare-client' ? 'unknown' : undefined) } as unknown as Request;
     expect(clientOf(req4)).toBeNull();
   });
 

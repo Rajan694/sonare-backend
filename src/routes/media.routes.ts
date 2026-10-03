@@ -10,6 +10,7 @@ import { extractPeaks } from '../services/peaks.js';
 import { NoAudioStreamError } from '../errors.js';
 import { getUserTrackFields } from '../db/userData.js';
 import { db } from '../db/index.js';
+import type { PipedStream } from '../upstream/piped.types.js';
 import { playlistTracks } from '../db/schema.js';
 
 // Media: track details, artwork, image proxy, stream urls, the stream relay and peaks.
@@ -29,20 +30,20 @@ interface SelectedStream {
 }
 
 function selectBestAudioStream(
-  audios: any[] | undefined,
+  audios: PipedStream[] | undefined,
   quality: string,
   format?: string,
-  videoStreams?: any[],
+  videoStreams?: PipedStream[],
 ): SelectedStream | null {
   // If adaptive audio streams exist, adaptive audio must still win
   if (audios && audios.length > 0) {
     const sorted = audios.slice().sort((a, b) => b.bitrate - a.bitrate);
-    const isOpus = (s: any) =>
+    const isOpus = (s: PipedStream) =>
       s.codec?.toLowerCase().includes('opus') ||
       s.format?.toLowerCase().includes('opus') ||
       s.codec?.toLowerCase().includes('webm') ||
       s.format?.toLowerCase().includes('webm');
-    const isAac = (s: any) =>
+    const isAac = (s: PipedStream) =>
       s.codec?.toLowerCase().includes('mp4a') ||
       s.format?.toLowerCase().includes('m4a') ||
       s.codec?.toLowerCase().includes('m4a') ||
@@ -52,7 +53,7 @@ function selectBestAudioStream(
     // YouTube's Opus comes in ~60 / ~75 / ~150 kbps and AAC in ~50 / ~128, so a ceiling
     // can't tell "normal" from "high" (both would be the ~160 kbps Opus).
     const targets: Record<string, number> = { low: 64_000, auto: 160_000, high: Infinity };
-    const pick = (list: any[]) => {
+    const pick = (list: PipedStream[]) => {
       if (list.length === 0) return undefined;
       if (quality === 'normal') {
         const tiers = [...new Set(list.map((s) => s.itag))].reverse(); // lowest bitrate first

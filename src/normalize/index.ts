@@ -18,7 +18,7 @@ export function albumThumbFor(rawId: string): string | undefined {
   return albumThumbs.get(rawId);
 }
 
-export function withUserFields<TObj extends Record<string, any>>(obj: TObj, userFields?: UserTrackFields) {
+export function withUserFields<TObj extends object>(obj: TObj, userFields?: UserTrackFields) {
   return {
     ...obj,
     playCount: userFields?.playCount ?? 0,
@@ -78,8 +78,8 @@ export function normalizeStreamToTrack(
       title: stripTitle(streams.title),
       artistId: idHelpers.artistIdFromUrl(streams.uploaderUrl),
       artist: stripArtist(streams.uploader),
-      albumId: null as any,
-      album: null as any,
+      albumId: null,
+      album: null,
       durationMs: durationSec !== null ? durationSec * 1000 : null,
       source: 'server',
       codec: codecStr ? mapCodec(codecStr) : null,
@@ -108,12 +108,12 @@ export function normalizeStreamItemToTrack(
       title: stripTitle(item.title || item.name || ''),
       artistId: idHelpers.artistIdFromUrl(item.uploaderUrl),
       artist: stripArtist(item.uploaderName || item.uploader || item.author),
-      albumId: null as any,
-      album: null as any,
+      albumId: null,
+      album: null,
       durationMs: durationSec !== null ? durationSec * 1000 : null,
       source: 'server',
-      codec: null as any,
-      bitrateKbps: null as any,
+      codec: null,
+      bitrateKbps: null,
       bitDepth: undefined,
       thumbnail: `/api/v1/tracks/${idHelpers.prefixYt(id)}/artwork`,
     },
@@ -121,7 +121,7 @@ export function normalizeStreamItemToTrack(
   );
 }
 
-export function normalizeStreamItemToArtist(item: any) {
+export function normalizeStreamItemToArtist(item: T.StreamItem) {
   let id = idHelpers.extractChannelIdFromUrl(item.url) || item.url?.replace('/channel/', '') || 'unknown';
   if (id.startsWith('/')) id = 'unknown';
   const ytid = idHelpers.prefixYt(id);
@@ -137,7 +137,7 @@ export function normalizeStreamItemToArtist(item: any) {
   };
 }
 
-export function normalizeStreamItemToAlbum(item: any) {
+export function normalizeStreamItemToAlbum(item: T.StreamItem) {
   const id = idHelpers.extractListIdFromUrl(item.url) || 'unknown';
   const ytid = idHelpers.prefixYt(id);
   rememberAlbumThumb(id, item.thumbnail);
@@ -155,7 +155,7 @@ export function normalizeStreamItemToAlbum(item: any) {
   };
 }
 
-export function normalizeChannelTabAlbum(item: any) {
+export function normalizeChannelTabAlbum(item: T.ChannelTabItem) {
   const id = idHelpers.extractListIdFromUrl(item.url) || item.playlistId || 'unknown';
   const ytid = idHelpers.prefixYt(id);
   const thumb = item.thumbnail || item.thumbnails?.[0]?.url;

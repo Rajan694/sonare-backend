@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import request from 'supertest';
 import { createApp } from '../../src/app.js';
-import { MockAgent, getGlobalDispatcher, setGlobalDispatcher } from 'undici';
+import { MockAgent, getGlobalDispatcher, setGlobalDispatcher, type Dispatcher } from 'undici';
 import {
   createUser,
   samplePipedChannel,
@@ -16,7 +16,7 @@ import { signStreamToken } from '../../src/services/token.js';
 describe('Catalog & public endpoints', () => {
   const app = createApp();
   let mockAgent: MockAgent | null = null;
-  let originalDispatcher: any;
+  let originalDispatcher: Dispatcher;
 
   beforeEach(() => {
     originalDispatcher = getGlobalDispatcher();
@@ -370,7 +370,7 @@ describe('Catalog & public endpoints', () => {
 describe('Catalog: edge cases & upstream errors', () => {
   const app = createApp();
   let mockAgent: MockAgent | null = null;
-  let originalDispatcher: any;
+  let originalDispatcher: Dispatcher;
 
   beforeEach(() => {
     originalDispatcher = getGlobalDispatcher();
@@ -470,7 +470,7 @@ describe('Catalog: edge cases & upstream errors', () => {
 describe('Catalog: trending, artwork & image proxy', () => {
   const app = createApp();
   let mockAgent: MockAgent | null = null;
-  let originalDispatcher: any;
+  let originalDispatcher: Dispatcher;
 
   beforeEach(() => {
     originalDispatcher = getGlobalDispatcher();
@@ -588,7 +588,7 @@ describe('Catalog: trending, artwork & image proxy', () => {
 describe('Catalog: track formats & artist album fallback', () => {
   const app = createApp();
   let mockAgent: MockAgent | null = null;
-  let originalDispatcher: any;
+  let originalDispatcher: Dispatcher;
 
   beforeEach(() => {
     originalDispatcher = getGlobalDispatcher();

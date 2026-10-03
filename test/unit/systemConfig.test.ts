@@ -10,11 +10,11 @@ import {
 import { db } from '../../src/db/index.js';
 import { systemConfiguration } from '../../src/db/schema.js';
 import { eq } from 'drizzle-orm';
-import { MockAgent, getGlobalDispatcher, setGlobalDispatcher } from 'undici';
+import { MockAgent, getGlobalDispatcher, setGlobalDispatcher, type Dispatcher } from 'undici';
 
 describe('systemConfig.ts', () => {
   let mockAgent: MockAgent | null = null;
-  let originalDispatcher: any;
+  let originalDispatcher: Dispatcher;
 
   beforeEach(() => {
     originalDispatcher = getGlobalDispatcher();
@@ -96,7 +96,7 @@ describe('systemConfig.ts', () => {
 
 describe('systemConfig.ts: deployed & extractor checks', () => {
   let mockAgent: MockAgent | null = null;
-  let originalDispatcher: any;
+  let originalDispatcher: Dispatcher;
 
   beforeEach(() => {
     originalDispatcher = getGlobalDispatcher();

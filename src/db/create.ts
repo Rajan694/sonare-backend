@@ -1,6 +1,7 @@
 import postgres from 'postgres';
 import { dbConfig } from '../config.js';
 import { logger } from '../logger.js';
+import { describeError } from '../errors.js';
 
 async function createDatabase() {
   const maintenanceConfig = {
@@ -23,8 +24,8 @@ async function createDatabase() {
       await sql.unsafe('CREATE DATABASE sonare;');
       logger.info('Database "sonare" created successfully.');
     }
-  } catch (error: any) {
-    logger.fatal({ err: error }, `Error creating database: ${error.message}`);
+  } catch (error) {
+    logger.fatal({ err: error }, `Error creating database: ${describeError(error)}`);
     process.exit(1);
   } finally {
     await sql.end();

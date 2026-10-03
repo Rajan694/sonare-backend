@@ -4,8 +4,9 @@ import { createApp } from '../../src/app.js';
 import { createAdminUser, createUser } from '../factories.js';
 import { db } from '../../src/db/index.js';
 import { errorLogs } from '../../src/db/schema.js';
-import { MockAgent, getGlobalDispatcher, setGlobalDispatcher } from 'undici';
+import { MockAgent, getGlobalDispatcher, setGlobalDispatcher, type Dispatcher } from 'undici';
 import { requireAdmin } from '../../src/middleware/adminAuth.js';
+import type { Request, Response } from 'express';
 
 describe('Admin: login, config, analytics & errors', () => {
   const app = createApp();
@@ -221,7 +222,7 @@ describe('Admin: security, rate limiting & filters', () => {
 describe('Admin: config & extractor commit', () => {
   const app = createApp();
   let mockAgent: MockAgent | null = null;
-  let originalDispatcher: any;
+  let originalDispatcher: Dispatcher;
 
   beforeEach(() => {
     originalDispatcher = getGlobalDispatcher();
@@ -378,12 +379,12 @@ describe('Admin: requireAdmin middleware', () => {
   it('BE-ADM-BR-001: requireAdmin rejects when database throws an error', async () => {
     const req = {
       headers: { authorization: 'Bearer invalid_admin_token_string' },
-    } as any;
+    } as unknown as Request;
     const res = {
       status: () => ({
-        json: (d: any) => d,
+        json: (d: unknown) => d,
       }),
-    } as any;
+    } as unknown as Response;
     let calledNext = false;
     await requireAdmin(req, res, () => {
       calledNext = true;

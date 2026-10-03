@@ -10,8 +10,8 @@ export default tseslint.config(
   {
     languageOptions: { globals: globals.node },
     rules: {
-      // About 60 `any`s predate linting; new code should not add more.
-      '@typescript-eslint/no-explicit-any': 'warn',
+      // Use real types (upstream/piped.types.ts for Piped) or `unknown` and narrow.
+      '@typescript-eslint/no-explicit-any': 'error',
       '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_', caughtErrors: 'none' }],
       // `declare global { namespace Express }` is how Express's Request type is extended.
       '@typescript-eslint/no-namespace': ['error', { allowDeclarations: true }],

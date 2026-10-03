@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import type * as T from '../../src/upstream/piped.types.js';
 import {
   albumThumbFor,
   normalizeChannelTabAlbum,
@@ -44,7 +45,7 @@ describe('normalize: Piped → Sonare mapping', () => {
       videoStreams: [],
     };
 
-    const track = normalizeStreamToTrack(raw as any, 'dQw4w9WgXcQ', 'opus', 160000, {
+    const track = normalizeStreamToTrack(raw as unknown as T.Streams, 'dQw4w9WgXcQ', 'opus', 160000, {
       favourite: true,
       playCount: 10,
       lastPlayedAt: 1600000000000,
@@ -66,7 +67,7 @@ describe('normalize: Piped → Sonare mapping', () => {
       title: 'Unknown Title',
       duration: 0,
     };
-    const track = normalizeStreamToTrack(raw as any, 'unk123');
+    const track = normalizeStreamToTrack(raw as unknown as T.Streams, 'unk123');
     expect(track.id).toBe('yt:unk123');
     expect(track.title).toBe('Unknown Title');
     expect(track.artist).toBe('');
@@ -83,7 +84,7 @@ describe('normalize: Piped → Sonare mapping', () => {
       thumbnail: 'https://thumb.jpg',
       duration: 180,
     };
-    const track = normalizeStreamItemToTrack(item as any);
+    const track = normalizeStreamItemToTrack(item as T.StreamItem);
     expect(track.id).toBe('yt:item123');
     expect(track.title).toBe('Item Title');
     expect(track.artist).toBe('Artist Name');
@@ -98,7 +99,7 @@ describe('normalize: Piped → Sonare mapping', () => {
       subscriberCount: 500000,
       verified: true,
     };
-    const artist = normalizeStreamItemToArtist(item as any);
+    const artist = normalizeStreamItemToArtist(item as T.StreamItem);
     expect(artist.id).toBe('yt:UCartistId');
     expect(artist.name).toBe('Superstar');
     expect(artist.monthlyListeners).toBe(500000);
@@ -113,7 +114,7 @@ describe('normalize: Piped → Sonare mapping', () => {
       thumbnail: 'https://album.jpg',
       videos: 12,
     };
-    const album = normalizeStreamItemToAlbum(item as any);
+    const album = normalizeStreamItemToAlbum(item as T.StreamItem);
     expect(album.id).toBe('yt:PLalbumList1');
     expect(album.title).toBe('Greatest Hits Album');
     expect(album.artist).toBe('Artist Name');
@@ -127,7 +128,7 @@ describe('normalize: Piped → Sonare mapping', () => {
       thumbnail: 'https://cover.jpg',
       year: '2021',
     };
-    const album = normalizeChannelTabAlbum(tabItem as any);
+    const album = normalizeChannelTabAlbum(tabItem as T.ChannelTabItem);
     expect(album.id).toBe('yt:OLAK5uy_tab1');
     expect(album.title).toBe('Studio Album 1');
   });
@@ -141,7 +142,7 @@ describe('normalize: Piped → Sonare mapping', () => {
       subscriberCount: 1200000,
       description: 'Band bio description here',
     };
-    const artist = normalizeChannelToArtist(channel as any, 'UCchannel123');
+    const artist = normalizeChannelToArtist(channel as unknown as T.Channel, 'UCchannel123');
     expect(artist.id).toBe('yt:UCchannel123');
     expect(artist.name).toBe('Official Band Name');
     expect(artist.thumbnail).toBe('/api/v1/artists/yt:UCchannel123/artwork');
@@ -171,7 +172,7 @@ describe('normalize: Piped → Sonare mapping', () => {
         },
       ],
     };
-    const album = normalizePlaylistToAlbum(playlist as any, 'PLplaylistId');
+    const album = normalizePlaylistToAlbum(playlist as unknown as T.Playlist, 'PLplaylistId');
     expect(album.id).toBe('yt:PLplaylistId');
     expect(album.title).toBe('Album Title Here');
     expect(album.artist).toBe('Band Name');
@@ -203,7 +204,7 @@ describe('normalize: helpers', () => {
       description: 'Released in 1994 by Music Records',
       relatedStreams: [],
     };
-    const album = normalizePlaylistToAlbum(playlist as any, 'PLwithYear');
+    const album = normalizePlaylistToAlbum(playlist as unknown as T.Playlist, 'PLwithYear');
     expect(album.year).toBe(1994);
   });
 
@@ -217,16 +218,16 @@ describe('normalize: helpers', () => {
         { uploaderName: 'Guest Band', uploaderUrl: '/channel/UCguest' },
       ],
     };
-    const album = normalizePlaylistToAlbum(playlist as any, 'PLnoUploader');
+    const album = normalizePlaylistToAlbum(playlist as unknown as T.Playlist, 'PLnoUploader');
     expect(album.artist).toBe('Main Band');
     expect(album.artistId).toBe('yt:UCmain');
   });
 
   it('BE-NORM-HELP-005: normalizeStreamToTrack maps AAC and other codecs accurately', () => {
-    const trackAac = normalizeStreamToTrack({ title: 'Song', duration: 100 } as any, 'vidAac', 'audio/mp4a.40.2');
+    const trackAac = normalizeStreamToTrack({ title: 'Song', duration: 100 } as T.Streams, 'vidAac', 'audio/mp4a.40.2');
     expect(trackAac.codec).toBe('AAC');
 
-    const trackOther = normalizeStreamToTrack({ title: 'Song', duration: 100 } as any, 'vidFlac', 'flac');
+    const trackOther = normalizeStreamToTrack({ title: 'Song', duration: 100 } as T.Streams, 'vidFlac', 'flac');
     expect(trackOther.codec).toBe('flac');
   });
 });

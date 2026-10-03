@@ -1,12 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { MockAgent, getGlobalDispatcher, setGlobalDispatcher } from 'undici';
+import { MockAgent, getGlobalDispatcher, setGlobalDispatcher, type Dispatcher } from 'undici';
 import { Piped, UpstreamError } from '../../src/upstream/piped.js';
 import { Lrclib } from '../../src/upstream/lrclib.js';
 import { Genius } from '../../src/upstream/genius.js';
 
 describe('Upstream clients (Piped, LRCLIB, Genius)', () => {
   let mockAgent: MockAgent | null = null;
-  let originalDispatcher: any;
+  let originalDispatcher: Dispatcher;
 
   beforeEach(() => {
     originalDispatcher = getGlobalDispatcher();
@@ -256,7 +256,7 @@ describe('Upstream clients (Piped, LRCLIB, Genius)', () => {
 
 describe('Piped client: extra branches', () => {
   let mockAgent: MockAgent | null = null;
-  let originalDispatcher: any;
+  let originalDispatcher: Dispatcher;
 
   beforeEach(() => {
     originalDispatcher = getGlobalDispatcher();

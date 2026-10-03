@@ -67,7 +67,7 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
     }
     req.user = decoded;
     next();
-  } catch (err: any) {
+  } catch {
     res.status(401).json({
       error: { code: 'UNAUTHORIZED', message: 'Token is invalid or expired' },
     });

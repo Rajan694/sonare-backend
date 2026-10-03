@@ -1,3 +1,4 @@
+import type { ResolvedLyrics } from './lyrics.js';
 import { Redis } from 'ioredis';
 import { config } from '../config.js';
 import { Piped } from '../upstream/piped.js';
@@ -68,7 +69,7 @@ async function getCached<T>(key: string): Promise<T | null> {
   }
 }
 
-async function setCached(key: string, data: any, ttlSeconds?: number): Promise<void> {
+async function setCached(key: string, data: unknown, ttlSeconds?: number): Promise<void> {
   if (!redisAvailable) return;
   try {
     const serialized = JSON.stringify(data);
@@ -161,9 +162,9 @@ export const CachedPiped = {
     return res;
   },
 
-  async playlistNextPage(id: string, nextpage: string): Promise<any> {
+  async playlistNextPage(id: string, nextpage: string): Promise<T.PlaylistPage> {
     const key = `playlistNext:${id}:${nextpage}`;
-    const cached = await getCached<any>(key);
+    const cached = await getCached<T.PlaylistPage>(key);
     if (cached) return cached;
 
     const res = await Piped.playlistNextPage(id, nextpage);
@@ -174,9 +175,9 @@ export const CachedPiped = {
 
 export const PermanentCache = {
   async getLyrics(key: string) {
-    return getCached(`lyrics:${key}`);
+    return getCached<ResolvedLyrics>(`lyrics:${key}`);
   },
-  async setLyrics(key: string, data: any) {
+  async setLyrics(key: string, data: ResolvedLyrics | null) {
     return setCached(`lyrics:${key}`, data);
   },
   async getPeaks(key: string) {

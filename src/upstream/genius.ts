@@ -1,7 +1,16 @@
 import { request } from 'undici';
 import { config } from '../config.js';
 
-async function fetchGenius<T>(path: string, query?: Record<string, any>): Promise<T | null> {
+// Only the fields Sonare reads.
+export interface GeniusSearch {
+  response: { hits: { result: { id: number; url: string; title?: string } }[] };
+}
+
+export interface GeniusSong {
+  response: { song: { id: number; url: string; title?: string } };
+}
+
+async function fetchGenius<T>(path: string, query?: Record<string, string | undefined>): Promise<T | null> {
   if (!config.GENIUS_CLIENT_ACCESS_TOKEN) return null;
 
   const url = new URL(path, 'https://api.genius.com');
@@ -22,15 +31,15 @@ async function fetchGenius<T>(path: string, query?: Record<string, any>): Promis
     return null;
   }
 
-  return body.json() as T;
+  return (await body.json()) as T;
 }
 
 export const Genius = {
   search(q: string) {
-    return fetchGenius<any>('/search', { q });
+    return fetchGenius<GeniusSearch>('/search', { q });
   },
 
   song(id: number) {
-    return fetchGenius<any>(`/songs/${id}`);
+    return fetchGenius<GeniusSong>(`/songs/${id}`);
   },
 };

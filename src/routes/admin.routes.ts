@@ -20,6 +20,7 @@ import {
 } from '../services/systemConfig.js';
 import { Piped } from '../upstream/piped.js';
 import { parseBody } from '../validation.js';
+import { describeError } from '../errors.js';
 
 // The admin page's API (/admin on the web build). Every route but /login needs an admin token;
 // these accounts are separate from app accounts (admin_users, not users).
@@ -152,8 +153,8 @@ const saveSchema = z.object({
 adminRouter.get('/config/piped.extractorCommit/latest', async (req, res) => {
   try {
     res.json(await latestExtractorCommit());
-  } catch (e: any) {
-    fail(res, 502, 'UPSTREAM_ERROR', `Could not get the latest commit from GitHub (${e.code || e.message})`);
+  } catch (e) {
+    fail(res, 502, 'UPSTREAM_ERROR', `Could not get the latest commit from GitHub (${describeError(e)})`);
   }
 });
 

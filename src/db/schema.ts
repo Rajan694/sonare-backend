@@ -160,7 +160,7 @@ export const playerState = pgTable('player_state', {
   trackRefKind: text('track_ref_kind'),
   trackRefId: text('track_ref_id'),
   positionMs: integer('position_ms').default(0),
-  queue: jsonb('queue').$type<any[]>().default([]),
+  queue: jsonb('queue').$type<unknown[]>().default([]),
   index: integer('index').default(0),
   shuffle: boolean('shuffle').default(false),
   repeat: text('repeat').default('off'),

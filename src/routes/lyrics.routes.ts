@@ -3,6 +3,7 @@ import { CachedPiped, PermanentCache } from '../services/cache.js';
 import { idHelpers } from '../ids.js';
 import {
   LyricsResolver,
+  type ResolvedLyrics,
   saveDbLyricsOverride,
   saveDbLyricsOffset,
   deleteDbLyricsOverride,
@@ -68,7 +69,7 @@ lyricsRouter.get('/tracks/:id/lyrics', async (req, res) => {
     return;
   }
 
-  const response: any = { ...resolved };
+  const response: ResolvedLyrics = { ...resolved };
   if (prefer === 'plain' && response.plain) {
     response.synced = false;
     response.lines = [];

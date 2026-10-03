@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { request } from 'undici';
 import { z } from 'zod';
+import { describeError } from '../errors.js';
 import { config } from '../config.js';
 import { db } from '../db/index.js';
 import { systemConfiguration } from '../db/schema.js';
@@ -91,8 +92,8 @@ async function pipedAnswers(baseUrl: string): Promise<string | undefined> {
     await body.dump();
     if (statusCode < 200 || statusCode >= 300)
       return `Piped at ${baseUrl} answered /healthcheck with HTTP ${statusCode}`;
-  } catch (e: any) {
-    return `Nothing answered at ${baseUrl} (${e.code || e.message})`;
+  } catch (e) {
+    return `Nothing answered at ${baseUrl} (${describeError(e)})`;
   }
 }
 
@@ -108,8 +109,8 @@ async function extractorCommitExists(sha: string): Promise<string | undefined> {
     await body.dump();
     if (statusCode === 404 || statusCode === 422) return `${sha} is not a commit in ${EXTRACTOR_REPO}`;
     if (statusCode !== 200) return `Could not check the commit on GitHub (HTTP ${statusCode})`;
-  } catch (e: any) {
-    return `Could not reach GitHub to check the commit (${e.code || e.message})`;
+  } catch (e) {
+    return `Could not reach GitHub to check the commit (${describeError(e)})`;
   }
 }
 

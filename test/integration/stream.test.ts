@@ -1,14 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import request from 'supertest';
 import { createApp } from '../../src/app.js';
-import { MockAgent, getGlobalDispatcher, setGlobalDispatcher } from 'undici';
+import { MockAgent, getGlobalDispatcher, setGlobalDispatcher, type Dispatcher } from 'undici';
 import { samplePipedStream } from '../factories.js';
 import { signStreamToken } from '../../src/services/token.js';
 
 describe('Stream relay & stream tokens', () => {
   const app = createApp();
   let mockAgent: MockAgent | null = null;
-  let originalDispatcher: any;
+  let originalDispatcher: Dispatcher;
 
   beforeEach(() => {
     originalDispatcher = getGlobalDispatcher();
@@ -121,7 +121,7 @@ describe('Stream relay & stream tokens', () => {
 describe('Stream relay: mid-stream failover', () => {
   const app = createApp();
   let mockAgent: MockAgent | null = null;
-  let originalDispatcher: any;
+  let originalDispatcher: Dispatcher;
 
   beforeEach(() => {
     originalDispatcher = getGlobalDispatcher();
@@ -178,7 +178,7 @@ describe('Stream relay: mid-stream failover', () => {
 describe('Stream: ranges & quality selection', () => {
   const app = createApp();
   let mockAgent: MockAgent | null = null;
-  let originalDispatcher: any;
+  let originalDispatcher: Dispatcher;
 
   beforeEach(() => {
     originalDispatcher = getGlobalDispatcher();
@@ -268,7 +268,7 @@ describe('Stream: ranges & quality selection', () => {
 describe('Stream: unsatisfiable ranges', () => {
   const app = createApp();
   let mockAgent: MockAgent | null = null;
-  let originalDispatcher: any;
+  let originalDispatcher: Dispatcher;
 
   beforeEach(() => {
     originalDispatcher = getGlobalDispatcher();

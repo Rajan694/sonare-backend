@@ -191,7 +191,7 @@ async function writePending(): Promise<void> {
       await db.insert(requestLogs).values(requests.slice(i, i + 1_000));
     }
     for (const e of errors) await writeError(e);
-  } catch (err: any) {
+  } catch (err) {
     // Not recorded as an error log: that write would most likely fail the same way.
     logger.warn({ err }, 'Telemetry: could not write logs');
   }
@@ -214,7 +214,7 @@ async function prune() {
     await db
       .delete(errorLogs)
       .where(lt(errorLogs.lastSeenAt, sql`${utcNow} - make_interval(days => ${ERROR_LOG_DAYS})`));
-  } catch (err: any) {
+  } catch (err) {
     logger.warn({ err }, 'Telemetry: could not prune old logs');
   }
 }

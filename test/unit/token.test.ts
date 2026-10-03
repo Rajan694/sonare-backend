@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { signStreamToken, verifyStreamToken } from '../../src/services/token.js';
-import { MockAgent, getGlobalDispatcher, setGlobalDispatcher } from 'undici';
+import { MockAgent, getGlobalDispatcher, setGlobalDispatcher, type Dispatcher } from 'undici';
 
 describe('token.ts: stream tokens', () => {
   it('BE-PURE-001: signs and verifies stream token with full payload', () => {
@@ -37,7 +37,7 @@ describe('token.ts: stream tokens', () => {
 
 describe('token.ts: custom expiry', () => {
   let mockAgent: MockAgent | null = null;
-  let originalDispatcher: any;
+  let originalDispatcher: Dispatcher;
 
   beforeEach(() => {
     originalDispatcher = getGlobalDispatcher();

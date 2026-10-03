@@ -140,7 +140,12 @@ export const LyricsResolver = {
       const exact = await Lrclib.get(trackName, artistName, albumName || '', durationMs ? durationMs / 1000 : 0);
       if (exact) {
         if (exact.syncedLyrics) {
-          found = { synced: true, provider: 'lrclib', lines: parseLrc(exact.syncedLyrics), plain: exact.plainLyrics };
+          found = {
+            synced: true,
+            provider: 'lrclib',
+            lines: parseLrc(exact.syncedLyrics),
+            plain: exact.plainLyrics ?? undefined,
+          };
         } else if (exact.plainLyrics) {
           found = { synced: false, provider: 'lrclib', lines: [], plain: exact.plainLyrics };
         }
@@ -151,17 +156,17 @@ export const LyricsResolver = {
       try {
         const fuzzyList = await Lrclib.search(undefined, trackName, artistName, albumName || '');
         if (fuzzyList && fuzzyList.length > 0) {
-          const bestSynced = fuzzyList.find((f: any) => f.syncedLyrics);
-          if (bestSynced) {
+          const bestSynced = fuzzyList.find((f) => f.syncedLyrics);
+          if (bestSynced?.syncedLyrics) {
             found = {
               synced: true,
               provider: 'lrclib',
               lines: parseLrc(bestSynced.syncedLyrics),
-              plain: bestSynced.plainLyrics,
+              plain: bestSynced.plainLyrics ?? undefined,
             };
           } else {
-            const bestPlain = fuzzyList.find((f: any) => f.plainLyrics);
-            if (bestPlain) {
+            const bestPlain = fuzzyList.find((f) => f.plainLyrics);
+            if (bestPlain?.plainLyrics) {
               found = { synced: false, provider: 'lrclib', lines: [], plain: bestPlain.plainLyrics };
             }
           }

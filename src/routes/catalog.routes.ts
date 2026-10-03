@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import { Router } from 'express';
 import { and, eq } from 'drizzle-orm';
 import { Piped } from '../upstream/piped.js';
+import type * as T from '../upstream/piped.types.js';
 import { CachedPiped, isRedisAvailable } from '../services/cache.js';
 import {
   normalizeStreamItemToTrack,
@@ -49,7 +50,7 @@ function encodeCursor(nextpage: string | null | undefined): string | undefined {
   return Buffer.from(nextpage).toString('base64url');
 }
 
-function decodeCursor(cursor: any): string | undefined {
+function decodeCursor(cursor: unknown): string | undefined {
   if (typeof cursor !== 'string' || !cursor) return undefined;
   return Buffer.from(cursor, 'base64url').toString('utf8');
 }
@@ -61,11 +62,11 @@ async function searchArtistCatalog(
   channelId: string,
   channelName: string | undefined,
   filter: 'music_songs' | 'music_albums',
-): Promise<any[]> {
+): Promise<T.StreamItem[]> {
   const name = (channelName || '').replace(/\s+-\s+Topic$/i, '').trim();
   if (!name) return [];
   const page = await CachedPiped.search(name, filter);
-  return (page.items || []).filter((i: any) => i.uploaderUrl === `/channel/${channelId}`);
+  return (page.items || []).filter((i) => i.uploaderUrl === `/channel/${channelId}`);
 }
 
 catalogRouter.get('/discover/made-for-you', (req, res) => {
@@ -114,7 +115,8 @@ catalogRouter.get('/search', async (req, res) => {
 
   const filter = typeMap[type];
 
-  let results;
+  // Results of an `all` search carry the kind of the search they came from.
+  let results: { items: (T.StreamItem & { __sonareKind?: string })[]; nextpage: string | null };
 
   if (filter === 'all' && !nextpage) {
     const [songs, albums, artists, playlists] = await Promise.all([
@@ -149,7 +151,7 @@ catalogRouter.get('/search', async (req, res) => {
 
   const items = results.items.map((item) => {
     let mapped;
-    let mappedKind = (item as any).__sonareKind || expectedKind;
+    let mappedKind = item.__sonareKind || expectedKind;
 
     // Sniff fallback if somehow missing
     if (!mappedKind) {
@@ -181,15 +183,15 @@ catalogRouter.get('/search', async (req, res) => {
 catalogRouter.get('/trending', async (req, res) => {
   const { region, limit } = parseQuery(trendingQuery, req);
 
-  let items: any[] = [];
+  let items: T.StreamItem[] = [];
   // The last upstream failure; reported only if it leaves nothing to show.
   let failure: unknown;
   try {
     const rawTrending = await CachedPiped.trending(region);
-    const isMusicTrack = (t: any) => {
+    const isMusicTrack = (t: T.StreamItem) => {
       if (!t || t.type !== 'stream') return false;
       if (t.isShort || !t.duration || t.duration <= 0) return false;
-      if ((t as any).livestream) return false;
+      if (t.livestream) return false;
 
       const title = (t.title || '').toLowerCase();
       const uploader = (t.uploaderName || '').toLowerCase();
@@ -291,7 +293,7 @@ catalogRouter.get('/albums/:id/tracks', async (req, res) => {
   }
 
   res.json({
-    items: tracks.map((t: any) => ({ kind: 'track', ...normalizeStreamItemToTrack(t) })),
+    items: tracks.map((t) => ({ kind: 'track', ...normalizeStreamItemToTrack(t) })),
     meta: { nextCursor: encodeCursor(nextCursor) },
   });
 });
@@ -321,7 +323,7 @@ catalogRouter.get('/artists/:id/top-tracks', async (req, res) => {
   tracks = tracks.slice(0, limit);
 
   res.json({
-    items: tracks.map((t: any) => ({ kind: 'track', ...normalizeStreamItemToTrack(t) })),
+    items: tracks.map((t) => ({ kind: 'track', ...normalizeStreamItemToTrack(t) })),
     meta: {},
   });
 });
@@ -330,8 +332,8 @@ catalogRouter.get('/artists/:id/albums', async (req, res) => {
   const rawId = idHelpers.extractYtId(req.params.id);
   const { cursor } = parseQuery(pageQuery, req);
 
-  let items = [],
-    nextCursor = undefined;
+  let items: T.ChannelTabItem[] = [];
+  let nextCursor: string | null | undefined;
 
   if (cursor) {
     const data = decodeCursor(cursor);
@@ -343,7 +345,7 @@ catalogRouter.get('/artists/:id/albums', async (req, res) => {
   } else {
     const channel = await CachedPiped.channel(rawId);
     const albumsTab = channel.tabs?.find(
-      (t: any) => t.name.toLowerCase() === 'albums' || t.name.toLowerCase() === 'releases',
+      (t) => t.name.toLowerCase() === 'albums' || t.name.toLowerCase() === 'releases',
     );
     if (albumsTab && albumsTab.data) {
       const tabData = await Piped.channelTabs(albumsTab.data);
@@ -355,7 +357,7 @@ catalogRouter.get('/artists/:id/albums', async (req, res) => {
   }
 
   res.json({
-    items: items.map((i: any) => ({ kind: 'album', ...normalizeChannelTabAlbum(i) })),
+    items: items.map((i) => ({ kind: 'album', ...normalizeChannelTabAlbum(i) })),
     meta: { nextCursor: encodeCursor(nextCursor) },
   });
 });
@@ -391,7 +393,7 @@ catalogRouter.get('/playlists/:id/tracks', async (req, res) => {
   }
 
   res.json({
-    items: tracks.map((t: any) => ({ kind: 'track', ...normalizeStreamItemToTrack(t) })),
+    items: tracks.map((t) => ({ kind: 'track', ...normalizeStreamItemToTrack(t) })),
     meta: { nextCursor: encodeCursor(nextCursor) },
   });
 });
