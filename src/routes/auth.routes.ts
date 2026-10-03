@@ -5,9 +5,9 @@ import { and, eq, isNull, sql } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { users, refreshTokens } from '../db/schema.js';
 import { signAccessToken, generateRefreshToken, hashToken, requireAuth } from '../middleware/auth.js';
-import { BadRequestError } from '../errors.js';
 import { createRateLimiter } from '../middleware/rateLimit.js';
 import { config } from '../config.js';
+import { parseBody } from '../validation.js';
 import { sendMail, verifyEmailMessage, resetPasswordMessage } from '../services/mail.js';
 import {
   createEmailToken,
@@ -38,14 +38,10 @@ const loginSchema = z.object({ email, password: z.string().min(1).max(128) });
 const forgotSchema = z.object({ email });
 const resetSchema = z.object({ token, password });
 const verifySchema = z.object({ token });
-
-function parseBody<T>(schema: z.ZodType<T>, req: Request): T {
-  const parsed = schema.safeParse(req.body ?? {});
-  if (!parsed.success) {
-    throw new BadRequestError(parsed.error.issues[0]?.message ?? 'Invalid request');
-  }
-  return parsed.data;
-}
+const refreshSchema = z.object({
+  refreshToken: z.string({ required_error: 'Missing refreshToken' }).min(1, 'Missing refreshToken').max(500),
+});
+const logoutSchema = z.object({ refreshToken: z.string().max(500).optional() });
 
 function rateLimited(res: Response, retryAfterSec: number) {
   res.setHeader('Retry-After', String(retryAfterSec));
@@ -139,8 +135,7 @@ authRouter.post('/login', async (req, res) => {
 });
 
 authRouter.post('/refresh', async (req, res) => {
-  const { refreshToken } = req.body ?? {};
-  if (!refreshToken) throw new BadRequestError('Missing refreshToken');
+  const { refreshToken } = parseBody(refreshSchema, req);
 
   const [stored] = await db
     .select()
@@ -165,7 +160,7 @@ authRouter.post('/refresh', async (req, res) => {
 });
 
 authRouter.post('/logout', async (req, res) => {
-  const { refreshToken } = req.body ?? {};
+  const { refreshToken } = parseBody(logoutSchema, req);
   if (refreshToken) {
     await db
       .update(refreshTokens)

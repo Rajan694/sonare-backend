@@ -439,3 +439,31 @@ This document maps all backend test IDs to their specifications, assertions, and
 | `BE-PEAKS-001` | Bounded floating point peak levels generation. |
 | `BE-PEAKS-002` | Deterministic waveform generation.             |
 | `BE-PEAKS-003` | Synthetic peak fallback.                       |
+
+## 9. Request validation
+
+Every body and query is checked with zod (`src/validation.ts`); a bad request gets 400 `BAD_REQUEST`
+with the first problem as the message, and nothing is written.
+
+| Test ID      | Method / Scope                                | Description & Assertions                                                     |
+| :----------- | :-------------------------------------------- | :--------------------------------------------------------------------------- |
+| `BE-VAL-001` | `POST /api/v1/me/playlists`                   | Name over 100 characters → 400 with the length message; no playlist created. |
+| `BE-VAL-002` | `PATCH /api/v1/me/playlists/:id`              | Description over 500 characters → 400; stored description unchanged.         |
+| `BE-VAL-003` | `POST /api/v1/me/playlists/:id/tracks`        | An empty track id → 400; no tracks added.                                    |
+| `BE-VAL-004` | `DELETE /api/v1/me/playlists/:id/tracks`      | Negative index → 400; the playlist keeps its track.                          |
+| `BE-VAL-005` | `PATCH /api/v1/me/playlists/:id/tracks/order` | Non-numeric `from` → 400.                                                    |
+| `BE-VAL-006` | `PUT /api/v1/me/settings`                     | Unknown `streamQuality` → 400; the stored value stays.                       |
+| `BE-VAL-007` | `PUT /api/v1/me/player-state`                 | Unknown `repeat` mode → 400; no state row written.                           |
+| `BE-VAL-008` | `POST /api/v1/me/sync`                        | A play without `at` → 400; none of the plays recorded.                       |
+| `BE-VAL-009` | `GET /api/v1/me/recently-played`              | Non-numeric `limit` → 400.                                                   |
+| `BE-VAL-010` | `GET /api/v1/me/library/tracks`               | Unknown `sort` → 400.                                                        |
+| `BE-VAL-011` | `GET /api/v1/me/most-played`                  | `limit=0` → 400 "Must be at least 1".                                        |
+| `BE-VAL-012` | `POST /api/v1/tracks/:id/lyrics`              | Neither `lrc` nor `plain` → 400 "Send lrc or plain lyrics".                  |
+| `BE-VAL-013` | `PATCH /api/v1/tracks/:id/lyrics/offset`      | Non-numeric `offsetMs` → 400 "offsetMs must be a number".                    |
+| `BE-VAL-014` | `GET /api/v1/tracks/:id/lyrics`               | Unknown `prefer` → 400.                                                      |
+| `BE-VAL-015` | `GET /api/v1/search`                          | Unknown `type` → 400.                                                        |
+| `BE-VAL-016` | `GET /api/v1/search`                          | `q` over 200 characters → 400 with the length message.                       |
+| `BE-VAL-017` | `GET /api/v1/search/suggestions`              | Blank `q` → 400 "Missing query parameter: q".                                |
+| `BE-VAL-018` | `GET /api/v1/trending`                        | `limit=500` → 400 "Must be at most 100".                                     |
+| `BE-VAL-019` | `GET /api/v1/trending`                        | `region=India` → 400 "region must be a two-letter country code".             |
+| `BE-VAL-020` | `POST /api/v1/auth/logout`                    | Non-string `refreshToken` → 400.                                             |

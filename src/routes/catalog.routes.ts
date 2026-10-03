@@ -12,12 +12,35 @@ import {
   normalizePlaylistToAlbum,
 } from '../normalize/index.js';
 import { idHelpers } from '../ids.js';
-import { BadRequestError } from '../errors.js';
+import { z } from 'zod';
+import { parseQuery, queryInt } from '../validation.js';
 import { db, sql } from '../db/index.js';
 import { artistFollows } from '../db/schema.js';
 
 // Catalog: health, search, trending, genres, albums, artists and YouTube playlists.
 export const catalogRouter = Router();
+
+const searchText = z
+  .string({ required_error: 'Missing query parameter: q', invalid_type_error: 'Missing query parameter: q' })
+  .trim()
+  .min(1, 'Missing query parameter: q')
+  .max(200, 'Search text must be at most 200 characters');
+const cursor = z.string().max(10_000).optional();
+const suggestionsQuery = z.object({ q: searchText });
+const searchQuery = z.object({
+  q: searchText,
+  type: z.enum(['songs', 'albums', 'artists', 'playlists', 'all']).default('all'),
+  cursor,
+});
+const trendingQuery = z.object({
+  region: z
+    .string()
+    .regex(/^[A-Za-z]{2}$/, 'region must be a two-letter country code')
+    .default('IN'),
+  limit: queryInt(1, 100).default(50),
+});
+const pageQuery = z.object({ cursor });
+const topTracksQuery = z.object({ limit: queryInt(1, 100).default(20) });
 
 const APP_VERSION: string = JSON.parse(fs.readFileSync(new URL('../../package.json', import.meta.url), 'utf8')).version;
 
@@ -71,19 +94,13 @@ catalogRouter.get('/healthz', async (req, res) => {
 });
 
 catalogRouter.get('/search/suggestions', async (req, res) => {
-  const q = req.query.q as string;
-  if (!q || typeof q !== 'string') {
-    throw new BadRequestError('Missing query parameter: q');
-  }
+  const { q } = parseQuery(suggestionsQuery, req);
   const suggestions = await CachedPiped.suggestions(q);
   res.json(suggestions);
 });
 
 catalogRouter.get('/search', async (req, res) => {
-  const { q, type = 'all', cursor } = req.query;
-  if (!q || typeof q !== 'string') {
-    throw new BadRequestError('Missing query parameter: q');
-  }
+  const { q, type, cursor } = parseQuery(searchQuery, req);
 
   const nextpage = decodeCursor(cursor);
 
@@ -95,7 +112,7 @@ catalogRouter.get('/search', async (req, res) => {
     all: 'all',
   };
 
-  const filter = typeMap[typeof type === 'string' ? type : 'all'] || 'all';
+  const filter = typeMap[type];
 
   let results;
 
@@ -162,9 +179,7 @@ catalogRouter.get('/search', async (req, res) => {
 });
 
 catalogRouter.get('/trending', async (req, res) => {
-  const region = (req.query.region as string) || 'IN';
-  const limitStr = req.query.limit as string;
-  const limit = limitStr ? parseInt(limitStr, 10) : 50;
+  const { region, limit } = parseQuery(trendingQuery, req);
 
   let items: any[] = [];
   // The last upstream failure; reported only if it leaves nothing to show.
@@ -259,7 +274,7 @@ catalogRouter.get('/albums/:id', async (req, res) => {
 
 catalogRouter.get('/albums/:id/tracks', async (req, res) => {
   const rawId = idHelpers.extractYtId(req.params.id);
-  const { cursor } = req.query;
+  const { cursor } = parseQuery(pageQuery, req);
   const nextpage = decodeCursor(cursor);
 
   let tracks,
@@ -298,8 +313,7 @@ catalogRouter.get('/artists/:id', async (req, res) => {
 
 catalogRouter.get('/artists/:id/top-tracks', async (req, res) => {
   const rawId = idHelpers.extractYtId(req.params.id);
-  const limitStr = req.query.limit as string;
-  const limit = limitStr ? parseInt(limitStr, 10) : 20;
+  const { limit } = parseQuery(topTracksQuery, req);
 
   const channel = await CachedPiped.channel(rawId);
   let tracks = channel.relatedStreams || [];
@@ -314,7 +328,7 @@ catalogRouter.get('/artists/:id/top-tracks', async (req, res) => {
 
 catalogRouter.get('/artists/:id/albums', async (req, res) => {
   const rawId = idHelpers.extractYtId(req.params.id);
-  const { cursor } = req.query;
+  const { cursor } = parseQuery(pageQuery, req);
 
   let items = [],
     nextCursor = undefined;
@@ -361,7 +375,7 @@ catalogRouter.get('/playlists/:id', async (req, res) => {
 
 catalogRouter.get('/playlists/:id/tracks', async (req, res) => {
   const rawId = idHelpers.extractYtId(req.params.id);
-  const { cursor } = req.query;
+  const { cursor } = parseQuery(pageQuery, req);
   const nextpage = decodeCursor(cursor);
 
   let tracks,

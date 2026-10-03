@@ -655,3 +655,42 @@ describe('Catalog: image token errors', () => {
     expect(res.body.error.code).toBe('FORBIDDEN');
   });
 });
+
+describe('Catalog: request validation', () => {
+  const app = createApp();
+
+  it('BE-VAL-015: GET /api/v1/search rejects an unknown type', async () => {
+    const res = await request(app).get('/api/v1/search?q=queen&type=podcasts');
+
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe('BAD_REQUEST');
+  });
+
+  it('BE-VAL-016: GET /api/v1/search rejects search text over 200 characters', async () => {
+    const res = await request(app).get(`/api/v1/search?q=${'a'.repeat(201)}`);
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toEqual({ code: 'BAD_REQUEST', message: 'Search text must be at most 200 characters' });
+  });
+
+  it('BE-VAL-017: GET /api/v1/search/suggestions rejects blank search text', async () => {
+    const res = await request(app).get('/api/v1/search/suggestions?q=%20%20');
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toEqual({ code: 'BAD_REQUEST', message: 'Missing query parameter: q' });
+  });
+
+  it('BE-VAL-018: GET /api/v1/trending rejects a limit above 100', async () => {
+    const res = await request(app).get('/api/v1/trending?limit=500');
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toEqual({ code: 'BAD_REQUEST', message: 'Must be at most 100' });
+  });
+
+  it('BE-VAL-019: GET /api/v1/trending rejects a region that is not a country code', async () => {
+    const res = await request(app).get('/api/v1/trending?region=India');
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toEqual({ code: 'BAD_REQUEST', message: 'region must be a two-letter country code' });
+  });
+});

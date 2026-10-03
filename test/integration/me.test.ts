@@ -925,3 +925,149 @@ describe('Me: sync & library sorting', () => {
     expect(resAsc.status).toBe(200);
   });
 });
+
+describe('Me: request validation', () => {
+  const app = createApp();
+
+  async function ownPlaylist(userId: string, id: string) {
+    const [pl] = await db.insert(playlists).values({ id, userId, name: 'Validation', kind: 'online' }).returning();
+    return pl;
+  }
+
+  it('BE-VAL-001: POST /api/v1/me/playlists rejects a name over 100 characters', async () => {
+    const { user, token } = await createUser();
+    const res = await request(app)
+      .post('/api/v1/me/playlists')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ name: 'x'.repeat(101) });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toEqual({ code: 'BAD_REQUEST', message: 'Playlist name must be at most 100 characters' });
+    expect(await db.select().from(playlists).where(eq(playlists.userId, user.id))).toHaveLength(0);
+  });
+
+  it('BE-VAL-002: PATCH /api/v1/me/playlists/:id rejects a description over 500 characters', async () => {
+    const { user, token } = await createUser();
+    const pl = await ownPlaylist(user.id, 'sonare:pl_val_desc');
+    const res = await request(app)
+      .patch(`/api/v1/me/playlists/${pl.id}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ description: 'd'.repeat(501) });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe('BAD_REQUEST');
+    const [stored] = await db.select().from(playlists).where(eq(playlists.id, pl.id));
+    expect(stored.description).toBeNull();
+  });
+
+  it('BE-VAL-003: POST /api/v1/me/playlists/:id/tracks rejects empty track ids', async () => {
+    const { user, token } = await createUser();
+    const pl = await ownPlaylist(user.id, 'sonare:pl_val_add');
+    const res = await request(app)
+      .post(`/api/v1/me/playlists/${pl.id}/tracks`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ trackIds: ['yt:ok', ''] });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe('BAD_REQUEST');
+    expect(await db.select().from(playlistTracks).where(eq(playlistTracks.playlistId, pl.id))).toHaveLength(0);
+  });
+
+  it('BE-VAL-004: DELETE /api/v1/me/playlists/:id/tracks rejects a negative index', async () => {
+    const { user, token } = await createUser();
+    const pl = await ownPlaylist(user.id, 'sonare:pl_val_remove');
+    await db
+      .insert(playlistTracks)
+      .values({ playlistId: pl.id, position: 0, trackRefKind: 'server', trackRefId: 'keep1' });
+    const res = await request(app)
+      .delete(`/api/v1/me/playlists/${pl.id}/tracks`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ index: -1 });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe('BAD_REQUEST');
+    expect(await db.select().from(playlistTracks).where(eq(playlistTracks.playlistId, pl.id))).toHaveLength(1);
+  });
+
+  it('BE-VAL-005: PATCH /api/v1/me/playlists/:id/tracks/order rejects non-numeric positions', async () => {
+    const { user, token } = await createUser();
+    const pl = await ownPlaylist(user.id, 'sonare:pl_val_order');
+    const res = await request(app)
+      .patch(`/api/v1/me/playlists/${pl.id}/tracks/order`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ from: 'first', to: 1 });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe('BAD_REQUEST');
+  });
+
+  it('BE-VAL-006: PUT /api/v1/me/settings rejects an unknown stream quality and keeps the stored one', async () => {
+    const { token } = await createUser();
+    await request(app)
+      .put('/api/v1/me/settings')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ streamQuality: 'low' });
+    const res = await request(app)
+      .put('/api/v1/me/settings')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ streamQuality: 'ultra' });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe('BAD_REQUEST');
+    const getRes = await request(app).get('/api/v1/me/settings').set('Authorization', `Bearer ${token}`);
+    expect(getRes.body.streamQuality).toBe('low');
+  });
+
+  it('BE-VAL-007: PUT /api/v1/me/player-state rejects an unknown repeat mode', async () => {
+    const { user, token } = await createUser();
+    const res = await request(app)
+      .put('/api/v1/me/player-state')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ repeat: 'sometimes', positionMs: 1000 });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe('BAD_REQUEST');
+    expect(await db.select().from(playerState).where(eq(playerState.userId, user.id))).toHaveLength(0);
+  });
+
+  it('BE-VAL-008: POST /api/v1/me/sync rejects a play without a timestamp and records nothing', async () => {
+    const { user, token } = await createUser();
+    const res = await request(app)
+      .post('/api/v1/me/sync')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        plays: [
+          { trackRef: { kind: 'server', id: 'valPlay1' }, at: Date.now(), ms: 40000 },
+          { trackRef: { kind: 'server', id: 'valPlay2' }, ms: 40000 },
+        ],
+      });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe('BAD_REQUEST');
+    expect(await db.select().from(playHistory).where(eq(playHistory.userId, user.id))).toHaveLength(0);
+  });
+
+  it('BE-VAL-009: GET /api/v1/me/recently-played rejects a non-numeric limit', async () => {
+    const { token } = await createUser();
+    const res = await request(app).get('/api/v1/me/recently-played?limit=lots').set('Authorization', `Bearer ${token}`);
+
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe('BAD_REQUEST');
+  });
+
+  it('BE-VAL-010: GET /api/v1/me/library/tracks rejects an unknown sort field', async () => {
+    const { token } = await createUser();
+    const res = await request(app).get('/api/v1/me/library/tracks?sort=colour').set('Authorization', `Bearer ${token}`);
+
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe('BAD_REQUEST');
+  });
+
+  it('BE-VAL-011: GET /api/v1/me/most-played rejects a limit of 0', async () => {
+    const { token } = await createUser();
+    const res = await request(app).get('/api/v1/me/most-played?limit=0').set('Authorization', `Bearer ${token}`);
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toEqual({ code: 'BAD_REQUEST', message: 'Must be at least 1' });
+  });
+});

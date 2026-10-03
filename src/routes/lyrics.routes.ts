@@ -9,14 +9,37 @@ import {
   getDbLyricsOverride,
 } from '../services/lyrics.js';
 import { Lrclib } from '../upstream/lrclib.js';
-import { BadRequestError } from '../errors.js';
+import { z } from 'zod';
+import { parseBody, parseQuery } from '../validation.js';
 
 // Lyrics: resolve, per-user overrides and offsets, and LRCLIB search.
 export const lyricsRouter = Router();
 
+const LRC_MAX = 100_000;
+const overrideSchema = z
+  .object({
+    lrc: z.string().max(LRC_MAX, 'Lyrics are too long').optional(),
+    plain: z.string().max(LRC_MAX, 'Lyrics are too long').optional(),
+  })
+  .refine((b) => b.lrc !== undefined || b.plain !== undefined, 'Send lrc or plain lyrics');
+// Ten minutes either way is far more than any real timing drift.
+const offsetSchema = z.object({
+  offsetMs: z
+    .number({ required_error: 'Missing offsetMs', invalid_type_error: 'offsetMs must be a number' })
+    .int('offsetMs must be a whole number')
+    .min(-600_000)
+    .max(600_000),
+});
+const lyricsQuery = z.object({ prefer: z.enum(['synced', 'plain']).optional() });
+const searchQuery = z.object({
+  track: z.string({ required_error: 'Missing track parameter' }).trim().min(1, 'Missing track parameter').max(200),
+  artist: z.string().max(200).optional(),
+  album: z.string().max(200).optional(),
+});
+
 lyricsRouter.get('/tracks/:id/lyrics', async (req, res) => {
   const rawId = idHelpers.extractYtId(req.params.id);
-  const prefer = req.query.prefer as string;
+  const { prefer } = parseQuery(lyricsQuery, req);
 
   let resolved;
   const dbOverride = await getDbLyricsOverride(rawId, req.user?.id);
@@ -56,7 +79,7 @@ lyricsRouter.get('/tracks/:id/lyrics', async (req, res) => {
 
 lyricsRouter.post('/tracks/:id/lyrics', async (req, res) => {
   const rawId = idHelpers.extractYtId(req.params.id);
-  const { lrc, plain } = req.body;
+  const { lrc, plain } = parseBody(overrideSchema, req);
   const userId = req.user?.id || '00000000-0000-0000-0000-000000000000';
 
   await saveDbLyricsOverride(rawId, userId, { lrc, plain });
@@ -67,7 +90,7 @@ lyricsRouter.post('/tracks/:id/lyrics', async (req, res) => {
 
 lyricsRouter.patch('/tracks/:id/lyrics/offset', async (req, res) => {
   const rawId = idHelpers.extractYtId(req.params.id);
-  const { offsetMs } = req.body;
+  const { offsetMs } = parseBody(offsetSchema, req);
   const userId = req.user?.id || '00000000-0000-0000-0000-000000000000';
 
   await saveDbLyricsOffset(rawId, userId, offsetMs);
@@ -82,10 +105,7 @@ lyricsRouter.delete('/tracks/:id/lyrics', async (req, res) => {
 });
 
 lyricsRouter.get('/lyrics/search', async (req, res) => {
-  const { track, artist, album } = req.query;
-  if (!track) {
-    throw new BadRequestError('Missing track parameter');
-  }
-  const results = await Lrclib.search(undefined, track as string, artist as string, album as string);
+  const { track, artist, album } = parseQuery(searchQuery, req);
+  const results = await Lrclib.search(undefined, track, artist, album);
   res.json(results || []);
 });

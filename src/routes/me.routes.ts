@@ -14,13 +14,94 @@ import {
 import { eq, and, desc, sql, gte } from 'drizzle-orm';
 import { requireAuth } from '../middleware/auth.js';
 import { idHelpers } from '../ids.js';
-import { BadRequestError } from '../errors.js';
 import { hydrateTracks } from '../db/hydrate.js';
 import { CachedPiped } from '../services/cache.js';
 import { normalizeChannelToArtist, normalizePlaylistToAlbum } from '../normalize/index.js';
 import crypto from 'node:crypto';
+import { z } from 'zod';
+import { parseBody, parseQuery, queryInt } from '../validation.js';
 
 export const meRouter = Router();
+
+// ---- Request schemas ----
+
+const trackId = z.string().trim().min(1, 'Track ids must not be empty').max(200);
+const trackRef = z.union([
+  z.object({ kind: z.literal('server'), id: z.string().min(1).max(200) }),
+  z.object({ kind: z.literal('local'), fingerprint: z.string().min(1).max(200) }),
+]);
+
+/** The stored id: a YouTube video id for server tracks, the file fingerprint for local ones. */
+function refId(ref: z.infer<typeof trackRef>): string {
+  return ref.kind === 'server' ? ref.id : ref.fingerprint;
+}
+
+const libraryQuery = z.object({
+  sort: z.enum(['addedAt', 'title', 'playCount']).default('addedAt'),
+  order: z.enum(['asc', 'desc']).default('desc'),
+});
+const recentlyPlayedQuery = z.object({ limit: queryInt(1, 100).default(10) });
+const mostPlayedQuery = z.object({
+  limit: queryInt(1, 100).default(20),
+  window: z.enum(['30d', '365d']).optional(),
+});
+
+const playlistName = z
+  .string({ required_error: 'Missing playlist name', invalid_type_error: 'Playlist name must be text' })
+  .trim()
+  .min(1, 'Missing playlist name')
+  .max(100, 'Playlist name must be at most 100 characters');
+const playlistDescription = z.string().max(500, 'Description must be at most 500 characters');
+// `offline` predates the contract's local | synced | online and is still accepted.
+const createPlaylistSchema = z.object({
+  name: playlistName,
+  kind: z.enum(['local', 'synced', 'online', 'offline']).default('online'),
+  description: playlistDescription.optional(),
+});
+const updatePlaylistSchema = z.object({
+  name: playlistName.optional(),
+  description: playlistDescription.optional(),
+});
+const addTracksSchema = z.object({
+  trackIds: z
+    .array(trackId, { required_error: 'trackIds must be an array', invalid_type_error: 'trackIds must be an array' })
+    .max(500, 'At most 500 tracks at a time'),
+});
+const removeTracksSchema = z.object({
+  index: z.number().int().min(0).optional(),
+  trackIds: z.array(trackId).max(500).optional(),
+});
+const position = z.number({ required_error: 'Missing from or to' }).int().min(0);
+const reorderSchema = z.object({ from: position, to: position });
+
+const syncSchema = z.object({
+  since: z.number().optional(),
+  plays: z
+    .array(
+      z.object({
+        trackRef,
+        at: z.number().positive(),
+        ms: z.number().min(0).transform(Math.round).optional(),
+      }),
+    )
+    .max(1000)
+    .optional(),
+  favourites: z
+    .array(z.object({ trackRef, at: z.number().positive().optional() }))
+    .max(1000)
+    .optional(),
+  // Sent by the desktop app; not used yet.
+  playlists: z.array(z.unknown()).optional(),
+});
+
+const playerStateSchema = z.object({
+  trackRef: trackRef.nullable().optional(),
+  positionMs: z.number().int().min(0).optional(),
+  queue: z.array(z.unknown()).max(5000).optional(),
+  index: z.number().int().min(0).optional(),
+  shuffle: z.boolean().optional(),
+  repeat: z.enum(['off', 'all', 'one']).optional(),
+});
 
 // Protect all /me routes with requireAuth
 meRouter.use(requireAuth);
@@ -42,7 +123,7 @@ meRouter.get('/', async (req, res) => {
 
 // Library
 meRouter.get('/library/tracks', async (req, res) => {
-  const { sort = 'addedAt', order = 'desc' } = req.query;
+  const { sort, order } = parseQuery(libraryQuery, req);
   const favs = await db.select().from(favouriteTracks).where(eq(favouriteTracks.userId, req.user!.id));
 
   const items = await hydrateTracks(
@@ -208,7 +289,7 @@ meRouter.delete('/following/artists/:id', async (req, res) => {
 
 // Recently & Most Played
 meRouter.get('/recently-played', async (req, res) => {
-  const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 10;
+  const { limit } = parseQuery(recentlyPlayedQuery, req);
   const history = await db
     .select()
     .from(playHistory)
@@ -233,8 +314,9 @@ meRouter.get('/recently-played', async (req, res) => {
 });
 
 meRouter.get('/most-played', async (req, res) => {
-  const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 20;
-  const windowDays = req.query.window === '30d' ? 30 : 365;
+  const query = parseQuery(mostPlayedQuery, req);
+  const limit = query.limit;
+  const windowDays = query.window === '30d' ? 30 : 365;
   const since = new Date(Date.now() - windowDays * 24 * 3600 * 1000);
 
   const plays = await db
@@ -300,8 +382,7 @@ meRouter.get('/playlists', async (req, res) => {
 });
 
 meRouter.post('/playlists', async (req, res) => {
-  const { name, kind = 'online', description } = req.body;
-  if (!name) throw new BadRequestError('Missing playlist name');
+  const { name, kind, description } = parseBody(createPlaylistSchema, req);
 
   const id = idHelpers.prefixSonare(crypto.randomUUID());
   const [p] = await db
@@ -389,7 +470,7 @@ meRouter.get('/playlists/:id/tracks', async (req, res) => {
 });
 
 meRouter.patch('/playlists/:id', async (req, res) => {
-  const { name, description } = req.body;
+  const { name, description } = parseBody(updatePlaylistSchema, req);
   const [updated] = await db
     .update(playlists)
     .set({
@@ -429,8 +510,7 @@ meRouter.delete('/playlists/:id', async (req, res) => {
 });
 
 meRouter.post('/playlists/:id/tracks', async (req, res) => {
-  const { trackIds } = req.body;
-  if (!Array.isArray(trackIds)) throw new BadRequestError('trackIds must be an array');
+  const { trackIds } = parseBody(addTracksSchema, req);
 
   const [p] = await db
     .select()
@@ -474,7 +554,7 @@ async function ownsPlaylist(userId: string, playlistId: string): Promise<boolean
 }
 
 meRouter.delete('/playlists/:id/tracks', async (req, res) => {
-  const { index, trackIds } = req.body;
+  const { index, trackIds } = parseBody(removeTracksSchema, req);
   const playlistId = req.params.id;
   if (!(await ownsPlaylist(req.user!.id, playlistId))) {
     res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Playlist not found' } });
@@ -485,7 +565,7 @@ meRouter.delete('/playlists/:id/tracks', async (req, res) => {
     await db
       .delete(playlistTracks)
       .where(and(eq(playlistTracks.playlistId, playlistId), eq(playlistTracks.position, index)));
-  } else if (Array.isArray(trackIds)) {
+  } else if (trackIds) {
     for (const id of trackIds) {
       const rawId = id.startsWith('yt:') ? idHelpers.extractYtId(id) : id.replace(/^local:/, '');
       await db
@@ -512,8 +592,7 @@ meRouter.delete('/playlists/:id/tracks', async (req, res) => {
 });
 
 meRouter.patch('/playlists/:id/tracks/order', async (req, res) => {
-  const { from, to } = req.body;
-  if (from === undefined || to === undefined) throw new BadRequestError('Missing from or to');
+  const { from, to } = parseBody(reorderSchema, req);
 
   const playlistId = req.params.id;
   if (!(await ownsPlaylist(req.user!.id, playlistId))) {
@@ -542,17 +621,16 @@ meRouter.patch('/playlists/:id/tracks/order', async (req, res) => {
 
 // Sync & State
 meRouter.post('/sync', async (req, res) => {
-  const { plays, favourites } = req.body;
+  const { plays, favourites } = parseBody(syncSchema, req);
 
   // Count a play on sync receipt from client, where playback met client-side duration threshold (≥30s or ≥50%), ensuring honest count instead of stream URL request.
   // Clients retry a sync whose response they never saw, so this is idempotent: all or
   // nothing, and a listen (user + track + start time) already recorded is skipped.
-  if (Array.isArray(plays)) {
+  if (plays) {
     await db.transaction(async (tx) => {
       for (const p of plays) {
-        if (!p.trackRef || !p.at) continue;
-        const trackRefKind = p.trackRef.kind || 'server';
-        const trackRefId = p.trackRef.id || p.trackRef.fingerprint;
+        const trackRefKind = p.trackRef.kind;
+        const trackRefId = refId(p.trackRef);
         const playedAt = new Date(p.at);
         const [seen] = await tx
           .select({ id: playHistory.id })
@@ -578,19 +656,17 @@ meRouter.post('/sync', async (req, res) => {
     });
   }
 
-  if (Array.isArray(favourites)) {
+  if (favourites) {
     for (const f of favourites) {
-      if (f.trackRef) {
-        await db
-          .insert(favouriteTracks)
-          .values({
-            userId: req.user!.id,
-            trackRefKind: f.trackRef.kind || 'server',
-            trackRefId: f.trackRef.id || f.trackRef.fingerprint,
-            addedAt: new Date(f.at || Date.now()),
-          })
-          .onConflictDoNothing();
-      }
+      await db
+        .insert(favouriteTracks)
+        .values({
+          userId: req.user!.id,
+          trackRefKind: f.trackRef.kind,
+          trackRefId: refId(f.trackRef),
+          addedAt: new Date(f.at || Date.now()),
+        })
+        .onConflictDoNothing();
     }
   }
 
@@ -617,13 +693,13 @@ meRouter.get('/player-state', async (req, res) => {
 });
 
 meRouter.put('/player-state', async (req, res) => {
-  const { positionMs, queue, index, shuffle, repeat, trackRef } = req.body;
+  const { positionMs, queue, index, shuffle, repeat, trackRef } = parseBody(playerStateSchema, req);
   await db
     .insert(playerState)
     .values({
       userId: req.user!.id,
       trackRefKind: trackRef?.kind,
-      trackRefId: trackRef?.id || trackRef?.fingerprint,
+      trackRefId: trackRef ? refId(trackRef) : undefined,
       positionMs,
       queue,
       index,
@@ -635,7 +711,7 @@ meRouter.put('/player-state', async (req, res) => {
       target: [playerState.userId],
       set: {
         trackRefKind: trackRef?.kind,
-        trackRefId: trackRef?.id || trackRef?.fingerprint,
+        trackRefId: trackRef ? refId(trackRef) : undefined,
         positionMs,
         queue,
         index,
@@ -661,10 +737,20 @@ const DEFAULT_SETTINGS = {
   downloadFormat: 'opus',
 };
 
-/** Undefined for anything outside `allowed`, so a bad value leaves the stored one alone. */
-function oneOf<T extends string>(value: unknown, allowed: readonly T[]): T | undefined {
-  return allowed.includes(value as T) ? (value as T) : undefined;
-}
+// Apps send only what changed; a field that's missing keeps the stored value.
+const settingsSchema = z.object({
+  eqPreset: z.string().trim().min(1).max(50).optional(),
+  gapless: z.boolean().optional(),
+  normalization: z.boolean().optional(),
+  stayOffline: z.boolean().optional(),
+  // Older apps still send `lossless`, which is stored as `high`.
+  downloadQuality: z
+    .enum([...QUALITIES, 'lossless'])
+    .transform((q) => (q === 'lossless' ? 'high' : q))
+    .optional(),
+  streamQuality: z.enum(QUALITIES).optional(),
+  downloadFormat: z.enum(DOWNLOAD_FORMATS).optional(),
+});
 
 meRouter.get('/settings', async (req, res) => {
   const [settings] = await db.select().from(userSettings).where(eq(userSettings.userId, req.user!.id)).limit(1);
@@ -684,21 +770,10 @@ meRouter.get('/settings', async (req, res) => {
 });
 
 meRouter.put('/settings', async (req, res) => {
-  const body = req.body ?? {};
-  const bool = (v: unknown) => (typeof v === 'boolean' ? v : undefined);
-  // Apps send only what changed; a field that's missing (or invalid) keeps the stored value.
-  const changes = {
-    eqPreset: typeof body.eqPreset === 'string' ? body.eqPreset : undefined,
-    gapless: bool(body.gapless),
-    normalization: bool(body.normalization),
-    stayOffline: bool(body.stayOffline),
-    downloadQuality: oneOf(body.downloadQuality === 'lossless' ? 'high' : body.downloadQuality, QUALITIES),
-    streamQuality: oneOf(body.streamQuality, QUALITIES),
-    downloadFormat: oneOf(body.downloadFormat, DOWNLOAD_FORMATS),
-  };
+  const changes = parseBody(settingsSchema, req);
   const set = Object.fromEntries(Object.entries(changes).filter(([, v]) => v !== undefined));
   const insert = db.insert(userSettings).values({ userId: req.user!.id, ...set });
-  // Nothing valid to change: still create the row with defaults, but don't touch an existing one.
+  // Nothing to change: still create the row with defaults, but don't touch an existing one.
   await (Object.keys(set).length > 0
     ? insert.onConflictDoUpdate({ target: [userSettings.userId], set })
     : insert.onConflictDoNothing({ target: [userSettings.userId] }));

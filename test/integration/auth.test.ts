@@ -174,6 +174,12 @@ describe('Auth routes & token lifecycle', () => {
     expect(res.body.ok).toBe(true);
   });
 
+  it('BE-VAL-020: Logout rejects a refreshToken that is not a string', async () => {
+    const res = await request(app).post('/api/v1/auth/logout').send({ refreshToken: 12345 });
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe('BAD_REQUEST');
+  });
+
   it('BE-AUTH-017: requireAuth middleware rejects requests missing auth header', async () => {
     const res = await request(app).get('/api/v1/me');
     expect(res.status).toBe(401);

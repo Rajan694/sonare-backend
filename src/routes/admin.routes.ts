@@ -19,6 +19,7 @@ import {
   SETTINGS,
 } from '../services/systemConfig.js';
 import { Piped } from '../upstream/piped.js';
+import { parseBody } from '../validation.js';
 
 // The admin page's API (/admin on the web build). Every route but /login needs an admin token;
 // these accounts are separate from app accounts (admin_users, not users).
@@ -26,15 +27,6 @@ export const adminRouter = Router();
 
 function fail(res: Response, status: number, code: string, message: string) {
   res.status(status).json({ error: { code, message } });
-}
-
-function parseBody<T>(schema: z.ZodType<T>, req: Request, res: Response): T | undefined {
-  const parsed = schema.safeParse(req.body ?? {});
-  if (!parsed.success) {
-    fail(res, 400, 'BAD_REQUEST', parsed.error.issues[0]?.message ?? 'Invalid request');
-    return undefined;
-  }
-  return parsed.data;
 }
 
 // ---- Sign-in and account ----
@@ -72,8 +64,7 @@ adminRouter.post('/login', async (req, res) => {
     );
   }
 
-  const body = parseBody(credentialsSchema, req, res);
-  if (!body) return;
+  const body = parseBody(credentialsSchema, req);
 
   const [admin] = await db.select().from(adminUsers).where(eq(adminUsers.username, body.username)).limit(1);
   const valid = await bcrypt.compare(body.password, admin?.passwordHash ?? (await dummyHash));
@@ -120,8 +111,7 @@ adminRouter.post('/password', async (req, res) => {
     );
   }
 
-  const body = parseBody(passwordSchema, req, res);
-  if (!body) return;
+  const body = parseBody(passwordSchema, req);
 
   const [admin] = await db.select().from(adminUsers).where(eq(adminUsers.id, req.admin!.id)).limit(1);
   if (!(await bcrypt.compare(body.currentPassword, admin.passwordHash))) {
@@ -170,8 +160,7 @@ adminRouter.get('/config/piped.extractorCommit/latest', async (req, res) => {
 adminRouter.put('/config/:key', async (req, res) => {
   const key = req.params.key as string;
   if (!Object.hasOwn(SETTINGS, key)) return fail(res, 404, 'NOT_FOUND', `No setting called ${key}`);
-  const body = parseBody(saveSchema, req, res);
-  if (!body) return;
+  const body = parseBody(saveSchema, req);
 
   let value: string | null;
   try {

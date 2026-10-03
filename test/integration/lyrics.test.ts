@@ -197,3 +197,36 @@ describe('Lyrics search', () => {
     expect(res.body.error.code).toBe('BAD_REQUEST');
   });
 });
+
+describe('Lyrics: request validation', () => {
+  const app = createApp();
+
+  it('BE-VAL-012: POST /api/v1/tracks/:id/lyrics rejects a body with neither lrc nor plain', async () => {
+    const { token } = await createUser();
+    const res = await request(app)
+      .post('/api/v1/tracks/yt:valLyrics1/lyrics')
+      .set('Authorization', `Bearer ${token}`)
+      .send({});
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toEqual({ code: 'BAD_REQUEST', message: 'Send lrc or plain lyrics' });
+  });
+
+  it('BE-VAL-013: PATCH /api/v1/tracks/:id/lyrics/offset rejects a non-numeric offset', async () => {
+    const { token } = await createUser();
+    const res = await request(app)
+      .patch('/api/v1/tracks/yt:valLyrics2/lyrics/offset')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ offsetMs: 'late' });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toEqual({ code: 'BAD_REQUEST', message: 'offsetMs must be a number' });
+  });
+
+  it('BE-VAL-014: GET /api/v1/tracks/:id/lyrics rejects an unknown prefer value', async () => {
+    const res = await request(app).get('/api/v1/tracks/yt:valLyrics3/lyrics?prefer=karaoke');
+
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe('BAD_REQUEST');
+  });
+});
