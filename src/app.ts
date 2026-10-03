@@ -240,9 +240,9 @@ export function createApp() {
   app.use(optionalAuth);
 
   const asyncHandler =
-    (fn: (req: Request, res: Response, next: NextFunction) => Promise<any>): RequestHandler =>
+    (fn: (req: Request<Record<string, string>>, res: Response, next: NextFunction) => Promise<any>): RequestHandler =>
     (req, res, next) => {
-      Promise.resolve(fn(req, res, next)).catch(next);
+      Promise.resolve(fn(req as Request<Record<string, string>>, res, next)).catch(next);
     };
 
   const v1 = express.Router();
@@ -506,7 +506,7 @@ export function createApp() {
     }),
   );
 
-  const handlePlaylistArtwork = async (req: Request, res: Response) => {
+  const handlePlaylistArtwork = async (req: Request<Record<string, string>>, res: Response) => {
     const rawId = req.params.id;
     const size = req.query.size as string;
 
