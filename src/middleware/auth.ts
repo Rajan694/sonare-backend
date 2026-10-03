@@ -1,9 +1,9 @@
 import jwt from 'jsonwebtoken';
 import crypto from 'node:crypto';
 import { Request, Response, NextFunction } from 'express';
-import { config } from './config.js';
-import { db } from './db/index.js';
-import { users } from './db/schema.js';
+import { config } from '../config.js';
+import { db } from '../db/index.js';
+import { users } from '../db/schema.js';
 import { eq } from 'drizzle-orm';
 
 export interface AuthUser {

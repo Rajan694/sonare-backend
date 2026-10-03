@@ -6,7 +6,7 @@ import {
   latestExtractorCommit,
   parseSetting,
   saveSetting,
-} from '../../src/systemConfig.js';
+} from '../../src/services/systemConfig.js';
 import { db } from '../../src/db/index.js';
 import { systemConfiguration } from '../../src/db/schema.js';
 import { eq } from 'drizzle-orm';

@@ -4,12 +4,17 @@ import { z } from 'zod';
 import { and, eq, isNull, sql } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { users, refreshTokens } from '../db/schema.js';
-import { signAccessToken, generateRefreshToken, hashToken, requireAuth } from '../auth.js';
+import { signAccessToken, generateRefreshToken, hashToken, requireAuth } from '../middleware/auth.js';
 import { BadRequestError } from '../errors.js';
-import { createRateLimiter } from '../rateLimit.js';
+import { createRateLimiter } from '../middleware/rateLimit.js';
 import { config } from '../config.js';
-import { sendMail, verifyEmailMessage, resetPasswordMessage } from '../mail.js';
-import { createEmailToken, consumeEmailToken, RESET_TOKEN_TTL_MS, VERIFY_TOKEN_TTL_MS } from '../emailTokens.js';
+import { sendMail, verifyEmailMessage, resetPasswordMessage } from '../services/mail.js';
+import {
+  createEmailToken,
+  consumeEmailToken,
+  RESET_TOKEN_TTL_MS,
+  VERIFY_TOKEN_TTL_MS,
+} from '../services/emailTokens.js';
 
 export const authRouter = Router();
 

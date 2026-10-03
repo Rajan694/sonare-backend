@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { createRateLimiter } from '../rateLimit.js';
-import { CLIENTS, recordError } from '../telemetry.js';
+import { createRateLimiter } from '../middleware/rateLimit.js';
+import { CLIENTS, recordError } from '../services/telemetry.js';
 
 // Crash and error reports from the apps. Public (guests crash too), so it is rate limited
 // per IP and every field is capped.

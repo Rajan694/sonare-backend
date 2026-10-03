@@ -1,8 +1,8 @@
 import { createApp } from './app.js';
 import { config } from './config.js';
 import { verifyDatabase } from './db/index.js';
-import { loadSystemConfig, pipedApiUrl } from './systemConfig.js';
-import { flushTelemetry, startTelemetry } from './telemetry.js';
+import { loadSystemConfig, pipedApiUrl } from './services/systemConfig.js';
+import { flushTelemetry, startTelemetry } from './services/telemetry.js';
 
 async function start() {
   await verifyDatabase();

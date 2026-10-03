@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { db, verifyDatabase } from '../../src/db/index.js';
-import { hashToken } from '../../src/auth.js';
+import { hashToken } from '../../src/middleware/auth.js';
 import {
   adminUsers,
   artistFollows,
@@ -20,7 +20,7 @@ import {
 } from '../../src/db/schema.js';
 import { eq } from 'drizzle-orm';
 import { createAdminUser, createUser } from '../factories.js';
-import { getUserTrackDataMap, getUserTrackFields } from '../../src/db/user-data.js';
+import { getUserTrackDataMap, getUserTrackFields } from '../../src/db/userData.js';
 import { hydrateTracks } from '../../src/db/hydrate.js';
 
 describe('db: models & helpers', () => {

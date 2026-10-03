@@ -4,7 +4,7 @@ import { pinoHttp } from 'pino-http';
 import cors from 'cors';
 import helmet from 'helmet';
 import { Piped, UpstreamError } from './upstream/piped.js';
-import { CachedPiped, isRedisAvailable } from './cache.js';
+import { CachedPiped, isRedisAvailable } from './services/cache.js';
 import {
   normalizeStreamToTrack,
   normalizeStreamItemToTrack,
@@ -16,21 +16,26 @@ import {
   albumThumbFor,
 } from './normalize/index.js';
 import { idHelpers } from './ids.js';
-import { signStreamToken, verifyStreamToken } from './token.js';
+import { signStreamToken, verifyStreamToken } from './services/token.js';
 import { request } from 'undici';
-import { LyricsResolver } from './lyrics.js';
+import { LyricsResolver } from './services/lyrics.js';
 import { Lrclib } from './upstream/lrclib.js';
-import { extractPeaks } from './peaks.js';
-import { PermanentCache } from './cache.js';
+import { extractPeaks } from './services/peaks.js';
+import { PermanentCache } from './services/cache.js';
 import { BadRequestError, NoAudioStreamError, StreamTokenError } from './errors.js';
 import { authRouter } from './routes/auth.routes.js';
 import { meRouter } from './routes/me.routes.js';
 import { adminRouter } from './routes/admin.routes.js';
 import { clientErrorsRouter } from './routes/clientErrors.routes.js';
-import { requestLogger } from './telemetry.js';
-import { optionalAuth } from './auth.js';
-import { getUserTrackFields } from './db/user-data.js';
-import { saveDbLyricsOverride, saveDbLyricsOffset, deleteDbLyricsOverride, getDbLyricsOverride } from './lyrics.js';
+import { requestLogger } from './services/telemetry.js';
+import { optionalAuth } from './middleware/auth.js';
+import { getUserTrackFields } from './db/userData.js';
+import {
+  saveDbLyricsOverride,
+  saveDbLyricsOffset,
+  deleteDbLyricsOverride,
+  getDbLyricsOverride,
+} from './services/lyrics.js';
 import { db, sql } from './db/index.js';
 import { playlistTracks, artistFollows } from './db/schema.js';
 import { and, eq } from 'drizzle-orm';

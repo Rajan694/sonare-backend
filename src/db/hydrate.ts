@@ -1,8 +1,8 @@
-import { CachedPiped } from '../cache.js';
+import { CachedPiped } from '../services/cache.js';
 import { normalizeStreamToTrack } from '../normalize/index.js';
 import { idHelpers } from '../ids.js';
 import { UpstreamError } from '../upstream/piped.js';
-import { getUserTrackDataMap, UserTrackFields } from './user-data.js';
+import { getUserTrackDataMap, UserTrackFields } from './userData.js';
 
 export interface TrackRefInput {
   trackRefKind: string;

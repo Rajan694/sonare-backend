@@ -11,7 +11,7 @@ import {
 } from '../factories.js';
 import { db } from '../../src/db/index.js';
 import { artistFollows, favouriteTracks } from '../../src/db/schema.js';
-import { signStreamToken } from '../../src/token.js';
+import { signStreamToken } from '../../src/services/token.js';
 
 describe('Catalog & public endpoints', () => {
   const app = createApp();

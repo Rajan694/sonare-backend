@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { clientOf, flushTelemetry, recordError, startTelemetry } from '../../src/telemetry.js';
+import { clientOf, flushTelemetry, recordError, startTelemetry } from '../../src/services/telemetry.js';
 import { db } from '../../src/db/index.js';
 import { errorLogs } from '../../src/db/schema.js';
 import { eq } from 'drizzle-orm';

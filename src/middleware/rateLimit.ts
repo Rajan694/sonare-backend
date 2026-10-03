@@ -1,4 +1,4 @@
-import { redis, isRedisAvailable } from './cache.js';
+import { redis, isRedisAvailable } from '../services/cache.js';
 
 export interface RateLimitResult {
   allowed: boolean;

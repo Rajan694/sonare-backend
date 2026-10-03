@@ -1,7 +1,7 @@
 import type { Request, RequestHandler, Response } from 'express';
 import { and, eq, lt, sql } from 'drizzle-orm';
-import { db } from './db/index.js';
-import { errorLogs, requestLogs } from './db/schema.js';
+import { db } from '../db/index.js';
+import { errorLogs, requestLogs } from '../db/schema.js';
 
 // Request logs and error logs for the admin page. Both are buffered in memory and written in
 // batches, so logging never adds a query to the request it describes.

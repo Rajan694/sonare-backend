@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { extractPeaks } from '../../src/peaks.js';
+import { extractPeaks } from '../../src/services/peaks.js';
 
 describe('peaks.ts', () => {
   it('BE-PEAKS-001: extractPeaks produces bounded floating point values', async () => {

@@ -1,8 +1,8 @@
 import { idHelpers } from '../ids.js';
 import * as T from '../upstream/piped.types.js';
 import * as M from '../types.js';
-import { UserTrackFields } from '../db/user-data.js';
-import { signStreamToken } from '../token.js';
+import { UserTrackFields } from '../db/userData.js';
+import { signStreamToken } from '../services/token.js';
 import { LRUCache } from 'lru-cache';
 
 // Album covers in search / artist results are resizable googleusercontent urls

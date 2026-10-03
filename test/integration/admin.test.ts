@@ -5,7 +5,7 @@ import { createAdminUser, createUser } from '../factories.js';
 import { db } from '../../src/db/index.js';
 import { errorLogs } from '../../src/db/schema.js';
 import { MockAgent, getGlobalDispatcher, setGlobalDispatcher } from 'undici';
-import { requireAdmin } from '../../src/adminAuth.js';
+import { requireAdmin } from '../../src/middleware/adminAuth.js';
 
 describe('Admin: login, config, analytics & errors', () => {
   const app = createApp();

@@ -1,8 +1,8 @@
 import bcrypt from 'bcrypt';
 import { db } from '../src/db/index.js';
 import { users, adminUsers, refreshTokens } from '../src/db/schema.js';
-import { signAccessToken, generateRefreshToken, hashToken } from '../src/auth.js';
-import { signAdminToken } from '../src/adminAuth.js';
+import { signAccessToken, generateRefreshToken, hashToken } from '../src/middleware/auth.js';
+import { signAdminToken } from '../src/middleware/adminAuth.js';
 import crypto from 'node:crypto';
 
 export async function createUser(override: Partial<typeof users.$inferInsert> = {}) {

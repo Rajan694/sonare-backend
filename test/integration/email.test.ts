@@ -4,15 +4,15 @@ import { eq } from 'drizzle-orm';
 
 // No SMTP server in tests: capture what would have been sent.
 const sendMail = vi.hoisted(() => vi.fn());
-vi.mock('../../src/mail.js', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../../src/mail.js')>()),
+vi.mock('../../src/services/mail.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../src/services/mail.js')>()),
   sendMail,
 }));
 
 import { createApp } from '../../src/app.js';
 import { db } from '../../src/db/index.js';
 import { emailTokens, refreshTokens, users } from '../../src/db/schema.js';
-import { hashToken } from '../../src/auth.js';
+import { hashToken } from '../../src/middleware/auth.js';
 import { createUser } from '../factories.js';
 
 /** The raw token from the link in the most recent email. */

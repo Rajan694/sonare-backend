@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { resetPasswordMessage, verifyEmailMessage } from '../../src/mail.js';
+import { resetPasswordMessage, verifyEmailMessage } from '../../src/services/mail.js';
 
 describe('mail.ts', () => {
   it('BE-MAIL-001: verifyEmailMessage includes link in text and html', () => {

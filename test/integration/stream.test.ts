@@ -3,7 +3,7 @@ import request from 'supertest';
 import { createApp } from '../../src/app.js';
 import { MockAgent, getGlobalDispatcher, setGlobalDispatcher } from 'undici';
 import { samplePipedStream } from '../factories.js';
-import { signStreamToken } from '../../src/token.js';
+import { signStreamToken } from '../../src/services/token.js';
 
 describe('Stream relay & stream tokens', () => {
   const app = createApp();

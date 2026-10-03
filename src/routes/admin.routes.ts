@@ -3,11 +3,11 @@ import { Router, type NextFunction, type Request, type Response } from 'express'
 import bcrypt from 'bcrypt';
 import { and, count, desc, eq, ilike, sum, type SQL } from 'drizzle-orm';
 import { z } from 'zod';
-import { requireAdmin, signAdminToken } from '../adminAuth.js';
-import { isRedisAvailable } from '../cache.js';
+import { requireAdmin, signAdminToken } from '../middleware/adminAuth.js';
+import { isRedisAvailable } from '../services/cache.js';
 import { db, sql } from '../db/index.js';
 import { adminUsers, errorLogs } from '../db/schema.js';
-import { createRateLimiter } from '../rateLimit.js';
+import { createRateLimiter } from '../middleware/rateLimit.js';
 import {
   checkSetting,
   ConfigValidationError,
@@ -17,7 +17,7 @@ import {
   pipedApiUrl,
   saveSetting,
   SETTINGS,
-} from '../systemConfig.js';
+} from '../services/systemConfig.js';
 import { Piped } from '../upstream/piped.js';
 
 // The admin page's API (/admin on the web build). Every route but /login needs an admin token;

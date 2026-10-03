@@ -1,8 +1,8 @@
 import crypto from 'node:crypto';
 import { and, eq, gt, isNull } from 'drizzle-orm';
-import { hashToken } from './auth.js';
-import { db } from './db/index.js';
-import { emailTokens } from './db/schema.js';
+import { hashToken } from '../middleware/auth.js';
+import { db } from '../db/index.js';
+import { emailTokens } from '../db/schema.js';
 
 export type EmailTokenPurpose = 'verify' | 'reset';
 

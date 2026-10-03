@@ -5,9 +5,9 @@ import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { request } from 'undici';
 import { z } from 'zod';
-import { config } from './config.js';
-import { db } from './db/index.js';
-import { systemConfiguration } from './db/schema.js';
+import { config } from '../config.js';
+import { db } from '../db/index.js';
+import { systemConfiguration } from '../db/schema.js';
 
 /**
  * System-wide settings from the `system_configuration` table, edited on the admin page.

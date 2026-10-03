@@ -2,9 +2,9 @@ import crypto from 'node:crypto';
 import jwt from 'jsonwebtoken';
 import { eq } from 'drizzle-orm';
 import type { NextFunction, Request, Response } from 'express';
-import { config } from './config.js';
-import { db } from './db/index.js';
-import { adminUsers } from './db/schema.js';
+import { config } from '../config.js';
+import { db } from '../db/index.js';
+import { adminUsers } from '../db/schema.js';
 
 const ADMIN_AUDIENCE = 'sonare-admin';
 // Its own key, derived from JWT_SECRET, so an app token can never pass as an admin token

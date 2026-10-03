@@ -5,7 +5,7 @@ import { db } from '../../src/db/index.js';
 import { users, refreshTokens } from '../../src/db/schema.js';
 import { eq } from 'drizzle-orm';
 import { createUser } from '../factories.js';
-import { generateRefreshToken, signAccessToken, hashToken } from '../../src/auth.js';
+import { generateRefreshToken, signAccessToken, hashToken } from '../../src/middleware/auth.js';
 import jwt from 'jsonwebtoken';
 import { config } from '../../src/config.js';
 

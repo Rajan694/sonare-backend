@@ -1,7 +1,7 @@
-import { Lrclib } from './upstream/lrclib.js';
-import { Genius } from './upstream/genius.js';
-import { db } from './db/index.js';
-import { lyricsOverrides } from './db/schema.js';
+import { Lrclib } from '../upstream/lrclib.js';
+import { Genius } from '../upstream/genius.js';
+import { db } from '../db/index.js';
+import { lyricsOverrides } from '../db/schema.js';
 import { eq, and } from 'drizzle-orm';
 
 export interface LyricsLine {

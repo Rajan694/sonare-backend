@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { CachedPiped, PermanentCache } from '../../src/cache.js';
+import { CachedPiped, PermanentCache } from '../../src/services/cache.js';
 import { MockAgent, getGlobalDispatcher, setGlobalDispatcher } from 'undici';
 import { samplePipedChannel, samplePipedPlaylist, samplePipedStream } from '../factories.js';
 

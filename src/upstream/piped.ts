@@ -1,5 +1,5 @@
 import { request } from 'undici';
-import { pipedApiUrl } from '../systemConfig.js';
+import { pipedApiUrl } from '../services/systemConfig.js';
 import * as T from './piped.types.js';
 
 export class UpstreamError extends Error {

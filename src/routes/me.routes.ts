@@ -12,11 +12,11 @@ import {
   playerState,
 } from '../db/schema.js';
 import { eq, and, desc, sql, gte } from 'drizzle-orm';
-import { requireAuth } from '../auth.js';
+import { requireAuth } from '../middleware/auth.js';
 import { idHelpers } from '../ids.js';
 import { BadRequestError } from '../errors.js';
 import { hydrateTracks } from '../db/hydrate.js';
-import { CachedPiped } from '../cache.js';
+import { CachedPiped } from '../services/cache.js';
 import { normalizeChannelToArtist, normalizePlaylistToAlbum } from '../normalize/index.js';
 import crypto from 'node:crypto';
 

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { signStreamToken, verifyStreamToken } from '../../src/token.js';
+import { signStreamToken, verifyStreamToken } from '../../src/services/token.js';
 import { MockAgent, getGlobalDispatcher, setGlobalDispatcher } from 'undici';
 
 describe('token.ts: stream tokens', () => {
