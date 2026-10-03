@@ -1,6 +1,6 @@
 import { db } from './index.js';
-import { favouriteTracks, playHistory, favouriteAlbums, artistFollows } from './schema.js';
-import { eq, and, inArray, desc, sql } from 'drizzle-orm';
+import { favouriteTracks, playHistory } from './schema.js';
+import { eq, and, inArray, sql } from 'drizzle-orm';
 
 export interface UserTrackFields {
   playCount: number;

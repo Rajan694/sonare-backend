@@ -219,7 +219,7 @@ describe('Me: profile & personal data', () => {
   });
 
   it('BE-ME-013: PUT /api/v1/me/following/artists/:id follows an artist', async () => {
-    const { user, token } = await createUser();
+    const { token } = await createUser();
     const res = await request(app)
       .put('/api/v1/me/following/artists/yt:UCnewFollow1')
       .set('Authorization', `Bearer ${token}`);
@@ -322,7 +322,7 @@ describe('Me: profile & personal data', () => {
   });
 
   it('BE-ME-019: POST /api/v1/me/playlists creates a new user playlist', async () => {
-    const { user, token } = await createUser();
+    const { token } = await createUser();
     const res = await request(app).post('/api/v1/me/playlists').set('Authorization', `Bearer ${token}`).send({
       name: 'Road Trip Jam',
       description: 'Driving tunes',

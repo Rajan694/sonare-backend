@@ -28,7 +28,7 @@ import { adminRouter } from './routes/admin.routes.js';
 import { clientErrorsRouter } from './routes/clientErrors.routes.js';
 import { requestLogger } from './telemetry.js';
 import { optionalAuth } from './auth.js';
-import { getUserTrackFields, getUserTrackDataMap } from './db/user-data.js';
+import { getUserTrackFields } from './db/user-data.js';
 import { saveDbLyricsOverride, saveDbLyricsOffset, deleteDbLyricsOverride, getDbLyricsOverride } from './lyrics.js';
 import { db } from './db/index.js';
 import { playlistTracks, artistFollows } from './db/schema.js';
@@ -298,7 +298,6 @@ export function createApp() {
       const filter = typeMap[typeof type === 'string' ? type : 'all'] || 'all';
 
       let results;
-      let fallbackKindMap: Record<string, string> | undefined;
 
       if (filter === 'all' && !nextpage) {
         const [songs, albums, artists, playlists] = await Promise.all([
@@ -754,7 +753,7 @@ export function createApp() {
   v1.get(
     '/lyrics/search',
     asyncHandler(async (req, res) => {
-      const { track, artist, album, durationSec } = req.query;
+      const { track, artist, album } = req.query;
       if (!track) {
         throw new BadRequestError('Missing track parameter');
       }
@@ -995,11 +994,11 @@ export function createApp() {
 
   app.use('/api/v1', v1);
 
-  app.use((req, res, next) => {
+  app.use((req, res) => {
     res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Route not found' } });
   });
 
-  app.use((err: any, req: Request, res: Response, next: NextFunction) => {
+  app.use((err: any, req: Request, res: Response, _next: NextFunction) => {
     req.log.error(err);
     // The request logger records it in error_logs if this ends up a 5xx.
     res.locals.error = err;

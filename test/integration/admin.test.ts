@@ -375,14 +375,12 @@ describe('Admin: invalid config values & analytics tz', () => {
 });
 
 describe('Admin: requireAdmin middleware', () => {
-  const app = createApp();
-
   it('BE-ADM-BR-001: requireAdmin rejects when database throws an error', async () => {
     const req = {
       headers: { authorization: 'Bearer invalid_admin_token_string' },
     } as any;
     const res = {
-      status: (s: number) => ({
+      status: () => ({
         json: (d: any) => d,
       }),
     } as any;

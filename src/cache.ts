@@ -31,14 +31,14 @@ redis
   .then(() => {
     redisAvailable = true;
   })
-  .catch((err: any) => {
+  .catch(() => {
     if (!loggedRedisError) {
       console.warn('[Cache] Redis unreachable at', config.REDIS_URL, '— degrading to cache passthrough.');
       loggedRedisError = true;
     }
   });
 
-redis.on('error', (err: any) => {
+redis.on('error', () => {
   redisAvailable = false;
   if (!loggedRedisError) {
     console.warn('[Cache] Redis connection lost — degrading to cache passthrough.');

@@ -1,6 +1,5 @@
 import { describe, it, expect } from 'vitest';
 import { assertProductionConfig, config, corsOrigins, parseDatabaseUrl } from '../../src/config.js';
-import { z } from 'zod';
 
 describe('config.ts Configuration Parsing', () => {
   it('BE-CONF-001: parseDatabaseUrl parses standard TCP postgres URL correctly', () => {

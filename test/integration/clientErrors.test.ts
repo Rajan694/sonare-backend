@@ -23,7 +23,7 @@ describe('Client error reporting', () => {
   });
 
   it('BE-ERR-002: POST /api/v1/client-errors accepts warning report from linux client with auth', async () => {
-    const { user, token } = await createUser();
+    const { token } = await createUser();
     const res = await request(app).post('/api/v1/client-errors').set('Authorization', `Bearer ${token}`).send({
       source: 'linux',
       level: 'warning',

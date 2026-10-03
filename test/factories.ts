@@ -1,21 +1,6 @@
 import bcrypt from 'bcrypt';
 import { db } from '../src/db/index.js';
-import {
-  users,
-  adminUsers,
-  playlists,
-  playlistTracks,
-  favouriteTracks,
-  favouriteAlbums,
-  artistFollows,
-  playHistory,
-  userSettings,
-  playerState,
-  lyricsOverrides,
-  refreshTokens,
-  errorLogs,
-  requestLogs,
-} from '../src/db/schema.js';
+import { users, adminUsers, refreshTokens } from '../src/db/schema.js';
 import { signAccessToken, generateRefreshToken, hashToken } from '../src/auth.js';
 import { signAdminToken } from '../src/adminAuth.js';
 import crypto from 'node:crypto';

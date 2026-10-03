@@ -50,7 +50,7 @@ meRouter.get('/library/tracks', async (req, res, next) => {
     const { sort = 'addedAt', order = 'desc' } = req.query;
     const favs = await db.select().from(favouriteTracks).where(eq(favouriteTracks.userId, req.user!.id));
 
-    let items = await hydrateTracks(
+    const items = await hydrateTracks(
       req.user!.id,
       favs.map((f) => ({
         trackRefKind: f.trackRefKind,

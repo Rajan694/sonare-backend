@@ -17,7 +17,8 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "lint": "eslint ."
   },
   "dependencies": {
     "bcrypt": "^6.0.0",
@@ -37,6 +38,7 @@
     "zod": "^3.22.4"
   },
   "devDependencies": {
+    "@eslint/js": "^9.39.5",
     "@types/bcrypt": "^6.0.0",
     "@types/cors": "^2.8.17",
     "@types/express": "^4.17.21",
@@ -47,11 +49,15 @@
     "@types/supertest": "^7.2.1",
     "@vitest/coverage-v8": "^4.1.11",
     "drizzle-kit": "^0.31.11",
+    "eslint": "^9.39.5",
+    "eslint-config-prettier": "^10.1.8",
+    "globals": "^17.13.0",
     "pino-pretty": "^11.0.0",
     "prettier": "^3.9.9",
     "supertest": "^7.3.0",
     "tsx": "^4.7.1",
     "typescript": "^5.4.3",
+    "typescript-eslint": "^8.71.0",
     "vitest": "^4.1.11"
   }
 }

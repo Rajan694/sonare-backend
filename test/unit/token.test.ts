@@ -1,6 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { signStreamToken, verifyStreamToken } from '../../src/token.js';
-import { createApp } from '../../src/app.js';
 import { MockAgent, getGlobalDispatcher, setGlobalDispatcher } from 'undici';
 
 describe('token.ts: stream tokens', () => {
@@ -37,7 +36,6 @@ describe('token.ts: stream tokens', () => {
 });
 
 describe('token.ts: custom expiry', () => {
-  const app = createApp();
   let mockAgent: MockAgent | null = null;
   let originalDispatcher: any;
 

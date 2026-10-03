@@ -3,5 +3,5 @@ services:
     image: axllent/mailpit:latest
     restart: unless-stopped
     ports:
-      - "127.0.0.1:1025:1025"
-      - "127.0.0.1:8025:8025"
+      - '127.0.0.1:1025:1025'
+      - '127.0.0.1:8025:8025'
