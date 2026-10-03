@@ -8,7 +8,7 @@ dotenv.config({ path: path.resolve(__dirname, '../.env.test'), override: true })
 
 import { beforeEach, afterAll } from 'vitest';
 import { sql } from '../src/db/index.js';
-import Redis from 'ioredis';
+import { Redis } from 'ioredis';
 import { config } from '../src/config.js';
 
 // Verify redis is db15

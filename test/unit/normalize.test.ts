@@ -48,6 +48,7 @@ describe('normalize: Piped → Sonare mapping', () => {
     const track = normalizeStreamToTrack(raw as unknown as T.Streams, 'dQw4w9WgXcQ', 'opus', 160000, {
       favourite: true,
       playCount: 10,
+      addedAt: 1590000000000,
       lastPlayedAt: 1600000000000,
     });
 
@@ -59,6 +60,7 @@ describe('normalize: Piped → Sonare mapping', () => {
     expect(track.bitrateKbps).toBe(160);
     expect(track.favourite).toBe(true);
     expect(track.playCount).toBe(10);
+    expect(track.addedAt).toBe(1590000000000);
     expect(track.lastPlayedAt).toBe(1600000000000);
   });
 
@@ -99,7 +101,7 @@ describe('normalize: Piped → Sonare mapping', () => {
       subscriberCount: 500000,
       verified: true,
     };
-    const artist = normalizeStreamItemToArtist(item as T.StreamItem);
+    const artist = normalizeStreamItemToArtist(item as unknown as T.StreamItem);
     expect(artist.id).toBe('yt:UCartistId');
     expect(artist.name).toBe('Superstar');
     expect(artist.monthlyListeners).toBe(500000);
@@ -128,7 +130,7 @@ describe('normalize: Piped → Sonare mapping', () => {
       thumbnail: 'https://cover.jpg',
       year: '2021',
     };
-    const album = normalizeChannelTabAlbum(tabItem as T.ChannelTabItem);
+    const album = normalizeChannelTabAlbum(tabItem as unknown as T.ChannelTabItem);
     expect(album.id).toBe('yt:OLAK5uy_tab1');
     expect(album.title).toBe('Studio Album 1');
   });
@@ -187,13 +189,13 @@ describe('normalize: Piped → Sonare mapping', () => {
 describe('normalize: helpers', () => {
   it('BE-NORM-HELP-001: normalizeStreamItemToArtist handles null name/uploader fallbacks', () => {
     const item = { url: '/channel/UCartistFallback', uploader: 'Fallback Artist' };
-    const artist = normalizeStreamItemToArtist(item);
+    const artist = normalizeStreamItemToArtist(item as T.StreamItem);
     expect(artist.name).toBe('Fallback Artist');
   });
 
   it('BE-NORM-HELP-002: normalizeStreamItemToArtist handles unknown channel id gracefully', () => {
     const item = { url: '/channel/' };
-    const artist = normalizeStreamItemToArtist(item);
+    const artist = normalizeStreamItemToArtist(item as T.StreamItem);
     expect(artist.id).toBe('yt:unknown');
   });
 

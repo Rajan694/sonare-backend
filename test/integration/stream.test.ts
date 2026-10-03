@@ -4,6 +4,7 @@ import { createApp } from '../../src/app.js';
 import { MockAgent, getGlobalDispatcher, setGlobalDispatcher, type Dispatcher } from 'undici';
 import { samplePipedStream } from '../factories.js';
 import { signStreamToken } from '../../src/services/token.js';
+import type { PipedStream } from '../../src/upstream/piped.types.js';
 
 describe('Stream relay & stream tokens', () => {
   const app = createApp();
@@ -253,7 +254,7 @@ describe('Stream: ranges & quality selection', () => {
         itag: 18,
         bitrate: 500000,
         contentLength: 10000000,
-      },
+      } as PipedStream,
     ];
 
     const pipedMock = mockAgent!.get('http://localhost:8090');

@@ -201,7 +201,7 @@ describe('Upstream clients (Piped, LRCLIB, Genius)', () => {
 
       const results = await Lrclib.search('bohemian rhapsody');
       expect(results).toHaveLength(1);
-      expect(results[0].trackName).toBe('Bohemian Rhapsody');
+      expect(results?.[0].trackName).toBe('Bohemian Rhapsody');
     });
   });
 

@@ -4,6 +4,7 @@ import { users, adminUsers, refreshTokens } from '../src/db/schema.js';
 import { signAccessToken, generateRefreshToken, hashToken } from '../src/middleware/auth.js';
 import { signAdminToken } from '../src/middleware/adminAuth.js';
 import crypto from 'node:crypto';
+import type { PipedStream } from '../src/upstream/piped.types.js';
 
 export async function createUser(override: Partial<typeof users.$inferInsert> = {}) {
   const email = override.email ?? `user_${crypto.randomBytes(6).toString('hex')}@example.com`;
@@ -108,7 +109,7 @@ export function samplePipedStream(id: string = 'dQw4w9WgXcQ') {
         contentLength: 3500000,
       },
     ],
-    videoStreams: [],
+    videoStreams: [] as PipedStream[],
     relatedStreams: [
       {
         url: '/watch?v=related12345',

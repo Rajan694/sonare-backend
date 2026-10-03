@@ -44,7 +44,7 @@ async function fetchLrc<T>(path: string, query?: Query): Promise<T | null> {
 }
 
 export const Lrclib = {
-  get(track_name: string, artist_name: string, album_name: string, duration?: number) {
+  get(track_name: string, artist_name: string, album_name?: string, duration?: number) {
     return fetchLrc<LrclibTrack>('/api/get', { track_name, artist_name, album_name, duration });
   },
 
