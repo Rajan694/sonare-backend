@@ -35,6 +35,15 @@ function networkError(e: unknown): UpstreamError {
   return new UpstreamError(`Piped network error: ${e instanceof Error ? e.message : String(e)}`, 502);
 }
 
+/** Rejects with an "unreachable" UpstreamError if `promise` hasn't settled after `ms`. */
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new UpstreamError(`Piped did not answer within ${ms} ms`, 502, true)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
 async function fetchPiped<TRes>(
   path: string,
   options: { method?: Dispatcher.HttpMethod; query?: Record<string, string | number> } = {},
@@ -125,9 +134,10 @@ export const Piped = {
   },
 
   /**
-   * `timeoutMs` bounds the whole attempt, connecting included (an unreachable host otherwise
-   * waits for the TCP connect timeout). `/healthz` passes a short one with no retry, so a
-   * Piped outage can't make the health check itself time out.
+   * `timeoutMs` bounds each attempt, connecting included. The abort signal alone does not
+   * cut a TCP connect short (undici then waits its own 10 s connect timeout), hence the
+   * timer. `/healthz` passes a short timeout with no retry, so a Piped outage can't make the
+   * health check itself time out.
    */
   async healthcheck({
     timeoutMs = 5000,
@@ -138,11 +148,14 @@ export const Piped = {
     let attempt = 0;
     while (attempt < attempts) {
       try {
-        const { statusCode, body } = await request(url, {
-          method: 'GET',
-          headers: { 'User-Agent': 'Sonare/1.0' },
-          signal: AbortSignal.timeout(timeoutMs),
-        });
+        const { statusCode, body } = await withTimeout(
+          request(url, {
+            method: 'GET',
+            headers: { 'User-Agent': 'Sonare/1.0' },
+            signal: AbortSignal.timeout(timeoutMs),
+          }),
+          timeoutMs,
+        );
         await body.dump();
         if (statusCode >= 200 && statusCode < 300) {
           return true;

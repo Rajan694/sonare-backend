@@ -123,4 +123,18 @@ describe('CORS and Security Headers', () => {
       await new Promise((resolve) => hanging.close(resolve));
     }
   });
+
+  it('BE-SEC-008: /healthz answers quickly when connecting to Piped never completes', async () => {
+    // A non-routable address: the TCP connect hangs (or fails at once on some networks).
+    mockAgent!.enableNetConnect('10.255.255.1:8090');
+    await saveSetting('piped.apiUrl', 'http://10.255.255.1:8090', 'test');
+    try {
+      const started = Date.now();
+      const res = await request(app).get('/api/v1/healthz');
+      expect(Date.now() - started).toBeLessThan(4000);
+      expect(res.body).toMatchObject({ ok: true, db: 'up', piped: 'down' });
+    } finally {
+      await saveSetting('piped.apiUrl', null, 'test');
+    }
+  });
 });

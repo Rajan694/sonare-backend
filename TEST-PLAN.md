@@ -45,6 +45,7 @@ This document maps all backend test IDs to their specifications, assertions, and
 | `BE-SEC-005`        | error handler                | Unexpected errors return a generic 500 message, never the internal one.           |
 | `BE-SEC-006`        | error handler                | A malformed JSON body gets 400 BAD_REQUEST.                                       |
 | `BE-SEC-007`        | `GET /api/v1/healthz`        | Answers within 4 s with `piped: down` when Piped hangs.                           |
+| `BE-SEC-008`        | `GET /api/v1/healthz`        | Answers within 4 s when the TCP connect to Piped never completes.                 |
 
 ### Email verification & password reset
 
