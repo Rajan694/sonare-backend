@@ -4,18 +4,27 @@ import * as M from '../types.js';
 import { UserTrackFields } from '../db/userData.js';
 import { signStreamToken } from '../services/token.js';
 import { LRUCache } from 'lru-cache';
+import { PermanentCache } from '../services/cache.js';
 
 // Album covers in search / artist results are resizable googleusercontent urls
 // (`=w544-h544`), while the playlist endpoint only offers a signed full-size one (~2MB).
-// Remember the resizable one per album so the artwork route can serve thumbnails.
+// Remember the resizable one per album so the artwork route can serve thumbnails. Redis
+// keeps them across restarts; the in-memory copy saves the round trip.
 const albumThumbs = new LRUCache<string, string>({ max: 5000, ttl: 7 * 24 * 3600 * 1000 });
 
 function rememberAlbumThumb(rawId: string, url: string | undefined) {
-  if (rawId !== 'unknown' && url && /=w\d+-h\d+/.test(url)) albumThumbs.set(rawId, url);
+  if (rawId === 'unknown' || !url || !/=w\d+-h\d+/.test(url)) return;
+  if (albumThumbs.get(rawId) === url) return;
+  albumThumbs.set(rawId, url);
+  void PermanentCache.setAlbumThumb(rawId, url);
 }
 
-export function albumThumbFor(rawId: string): string | undefined {
-  return albumThumbs.get(rawId);
+export async function albumThumbFor(rawId: string): Promise<string | undefined> {
+  const known = albumThumbs.get(rawId);
+  if (known) return known;
+  const stored = await PermanentCache.getAlbumThumb(rawId);
+  if (stored) albumThumbs.set(rawId, stored);
+  return stored ?? undefined;
 }
 
 export function withUserFields<TObj extends object>(obj: TObj, userFields?: UserTrackFields) {

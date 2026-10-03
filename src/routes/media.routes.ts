@@ -208,7 +208,7 @@ const handlePlaylistArtwork = async (req: Request<{ id: string }>, res: Response
     const playlistId = idHelpers.extractYtId(rawId);
     // Prefer the resizable cover seen in search/artist results over the playlist's
     // signed full-size one; it also skips a Piped round trip.
-    const known = albumThumbFor(playlistId);
+    const known = await albumThumbFor(playlistId);
     const source = known ?? (await CachedPiped.playlist(playlistId)).thumbnailUrl;
     if (!source) {
       res.status(404).end();

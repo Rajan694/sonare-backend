@@ -176,9 +176,16 @@ meRouter.get('/library/albums', async (req, res) => {
   res.json({ items, meta: { total: favs.length } });
 });
 
+// How many liked / playlisted songs are looked at to find artists. Their metadata comes
+// through the stream cache, so this bounds the Piped calls on a cold cache.
+const DERIVED_ARTIST_SCAN = 150;
+
+// Followed artists first, then the artists of songs the user liked or put in a playlist,
+// most songs first. Derived ones carry `following: false` and `songCount`.
 meRouter.get('/library/artists', async (req, res) => {
-  const follows = await db.select().from(artistFollows).where(eq(artistFollows.userId, req.user!.id));
-  const items = await Promise.all(
+  const userId = req.user!.id;
+  const follows = await db.select().from(artistFollows).where(eq(artistFollows.userId, userId));
+  const followed = await Promise.all(
     follows.map(async (f) => {
       const base = { id: idHelpers.prefixYt(f.artistId), following: true };
       try {
@@ -188,7 +195,50 @@ meRouter.get('/library/artists', async (req, res) => {
       }
     }),
   );
-  res.json({ items, meta: { total: follows.length } });
+
+  const [favs, listed] = await Promise.all([
+    db
+      .select({ id: favouriteTracks.trackRefId })
+      .from(favouriteTracks)
+      .where(and(eq(favouriteTracks.userId, userId), eq(favouriteTracks.trackRefKind, 'server')))
+      .orderBy(desc(favouriteTracks.addedAt)),
+    db
+      .select({ id: playlistTracks.trackRefId })
+      .from(playlistTracks)
+      .innerJoin(playlists, eq(playlists.id, playlistTracks.playlistId))
+      .where(and(eq(playlists.userId, userId), eq(playlistTracks.trackRefKind, 'server')))
+      .orderBy(desc(playlists.updatedAt)),
+  ]);
+  const videoIds = [...new Set([...favs, ...listed].map((r) => (r.id.startsWith('yt:') ? r.id.slice(3) : r.id)))].slice(
+    0,
+    DERIVED_ARTIST_SCAN,
+  );
+
+  const followedIds = new Set<string>(followed.map((a) => a.id));
+  const derived = new Map<string, { id: string; name: string; songCount: number }>();
+  const streams = await Promise.all(videoIds.map((id) => CachedPiped.getStream(id).catch(() => null)));
+  for (const s of streams) {
+    if (!s) continue;
+    const id = idHelpers.artistIdFromUrl(s.uploaderUrl);
+    if (!id || followedIds.has(id)) continue;
+    const known = derived.get(id);
+    if (known) known.songCount += 1;
+    else derived.set(id, { id, name: s.uploader.replace(/\s*-\s*Topic$/i, '').trim(), songCount: 1 });
+  }
+
+  const items = [
+    ...followed,
+    ...[...derived.values()]
+      .sort((a, b) => b.songCount - a.songCount || a.name.localeCompare(b.name))
+      .map((a) => ({
+        ...a,
+        albumCount: 0,
+        localTrackCount: 0,
+        following: false,
+        thumbnail: `/api/v1/artists/${a.id}/artwork`,
+      })),
+  ];
+  res.json({ items, meta: { total: items.length } });
 });
 
 // Placeholder: the apps call it, but tracks carry no genre yet.

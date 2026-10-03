@@ -181,8 +181,8 @@ describe('normalize: Piped → Sonare mapping', () => {
     expect(album.trackCount).toBe(2);
   });
 
-  it('BE-NORM-011: albumThumbFor returns cached or undefined correctly', () => {
-    expect(albumThumbFor('unknown_id_xyz')).toBeUndefined();
+  it('BE-NORM-011: albumThumbFor returns cached or undefined correctly', async () => {
+    expect(await albumThumbFor('unknown_id_xyz')).toBeUndefined();
   });
 });
 

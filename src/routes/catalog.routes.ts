@@ -256,16 +256,27 @@ catalogRouter.get('/trending', async (req, res) => {
   });
 });
 
+// Browse categories. YouTube tags no genre on a song, so each one is a search: `query` is
+// what the apps search for when the card is opened (the name when it's missing).
 catalogRouter.get('/genres', (req, res) => {
+  const year = new Date().getFullYear();
   res.json([
-    { id: 'ambient', name: 'Ambient' },
-    { id: 'electronica', name: 'Electronica' },
-    { id: 'post-rock', name: 'Post-rock' },
-    { id: 'indie', name: 'Indie' },
-    { id: 'jazz', name: 'Jazz' },
-    { id: 'classical', name: 'Classical' },
-    { id: 'hip-hop', name: 'Hip-hop' },
-    { id: 'folk', name: 'Folk' },
+    { id: 'popular', name: 'Popular', query: 'popular hindi songs' },
+    { id: 'top-this-year', name: 'Top this year', query: `top songs ${year}` },
+    { id: 'bollywood', name: 'Bollywood', query: 'bollywood hits' },
+    { id: 'punjabi', name: 'Punjabi', query: 'punjabi songs' },
+    { id: 'bhojpuri', name: 'Bhojpuri', query: 'bhojpuri songs' },
+    { id: 'devotional', name: 'Devotional', query: 'devotional bhajan songs' },
+    { id: 'party', name: 'Party', query: 'party songs' },
+    { id: 'romantic', name: 'Romantic', query: 'romantic songs' },
+    { id: 'sad', name: 'Sad', query: 'sad songs' },
+    { id: 'lofi', name: 'Lo-fi', query: 'lofi songs' },
+    { id: 'workout', name: 'Workout', query: 'workout songs' },
+    { id: 'ghazal', name: 'Ghazal', query: 'ghazal' },
+    { id: 'indie', name: 'Indie', query: 'indie songs' },
+    { id: 'hip-hop', name: 'Hip-hop', query: 'hip hop songs' },
+    { id: 'english-pop', name: 'English pop', query: 'english pop songs' },
+    { id: 'classical', name: 'Classical', query: 'indian classical music' },
   ]);
 });
 

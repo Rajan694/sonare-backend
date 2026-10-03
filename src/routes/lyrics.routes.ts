@@ -8,6 +8,9 @@ import {
   saveDbLyricsOffset,
   deleteDbLyricsOverride,
   getDbLyricsOverride,
+  LYRICS_SCRIPTS,
+  lyricsInScript,
+  resolveLyricsInScript,
 } from '../services/lyrics.js';
 import { Lrclib } from '../upstream/lrclib.js';
 import { z } from 'zod';
@@ -31,7 +34,11 @@ const offsetSchema = z.object({
     .min(-600_000)
     .max(600_000),
 });
-const lyricsQuery = z.object({ prefer: z.enum(['synced', 'plain']).optional() });
+const lyricsQuery = z.object({
+  prefer: z.enum(['synced', 'plain']).optional(),
+  // The user's preferred lyrics script (Settings); `original` or missing keeps what LRCLIB matched.
+  script: z.enum(LYRICS_SCRIPTS).optional(),
+});
 const searchQuery = z.object({
   track: z.string({ required_error: 'Missing track parameter' }).trim().min(1, 'Missing track parameter').max(200),
   artist: z.string().max(200).optional(),
@@ -40,27 +47,44 @@ const searchQuery = z.object({
 
 lyricsRouter.get('/tracks/:id/lyrics', async (req, res) => {
   const rawId = idHelpers.extractYtId(req.params.id);
-  const { prefer } = parseQuery(lyricsQuery, req);
+  const { prefer, script } = parseQuery(lyricsQuery, req);
 
   let resolved;
   const dbOverride = await getDbLyricsOverride(rawId, req.user?.id);
   if (dbOverride && (dbOverride.lrc || dbOverride.plain)) {
+    // The user's own lyrics win over any preference.
     resolved = await LyricsResolver.resolve(rawId, '', '', undefined, undefined, req.user?.id);
   } else {
     resolved = await PermanentCache.getLyrics(rawId);
+    let streams: Awaited<ReturnType<typeof CachedPiped.getStream>> | null = null;
+    const meta = async () => {
+      const s = (streams ??= await CachedPiped.getStream(rawId));
+      return {
+        title: s.title,
+        artist: s.uploader.replace(/\s*-\s*Topic$/i, '').trim(),
+        durationMs: s.duration * 1000,
+      };
+    };
     if (!resolved) {
-      const streams = await CachedPiped.getStream(rawId);
-      const trackName = streams.title;
-      const artistName = streams.uploader.replace(/\s*-\s*Topic$/i, '').trim();
-      resolved = await LyricsResolver.resolve(
-        rawId,
-        trackName,
-        artistName,
-        undefined,
-        streams.duration * 1000,
-        req.user?.id,
-      );
+      const m = await meta();
+      resolved = await LyricsResolver.resolve(rawId, m.title, m.artist, undefined, m.durationMs, req.user?.id);
       if (resolved) await PermanentCache.setLyrics(rawId, resolved);
+    }
+
+    // A preferred script the matched lyrics aren't in: look for that version, else keep the original.
+    if (script && script !== 'original' && !(resolved && lyricsInScript(resolved, script))) {
+      try {
+        const cached = await PermanentCache.getScriptLyrics(rawId, script);
+        let inScript = cached ? cached.lyrics : null;
+        if (!cached) {
+          const m = await meta();
+          inScript = await resolveLyricsInScript(m.title, m.artist, m.durationMs, script);
+          await PermanentCache.setScriptLyrics(rawId, script, inScript);
+        }
+        if (inScript) resolved = { ...inScript, offsetMs: resolved?.offsetMs ?? 0 };
+      } catch {
+        // The preference is best effort: the original lyrics (or the 404) stand.
+      }
     }
   }
 
