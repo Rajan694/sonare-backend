@@ -19,6 +19,7 @@
     "db:create": "tsx src/db/create.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
+    "db:migrate:prod": "node dist/db/migrate.js",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "lint": "eslint ."

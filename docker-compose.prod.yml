@@ -1,0 +1,64 @@
+# Production stack: the backend plus its own Postgres and Redis.
+#
+#   cp .env.production.example .env.production   # then fill in every CHANGE_ME
+#   docker compose -f docker-compose.prod.yml --env-file .env.production up -d --build
+#
+# Only the backend is published, and only on 127.0.0.1: put a reverse proxy (Caddy, nginx)
+# in front of it for HTTPS. Postgres and Redis are reachable from the backend only.
+# Piped runs separately (sonare-piped-backend, its own compose file); see PIPED_API_URL in
+# .env.production.example.
+
+name: sonare
+
+services:
+  backend:
+    build: .
+    image: sonare-backend:latest
+    restart: unless-stopped
+    # Optional only so `docker compose config` works before the file exists; without it
+    # the backend exits at start (DATABASE_URL is required).
+    env_file:
+      - path: .env.production
+        required: false
+    ports:
+      - '127.0.0.1:3010:3010'
+    # Lets the container reach services published on the host, such as Piped.
+    extra_hosts:
+      - 'host.docker.internal:host-gateway'
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: sonare
+      POSTGRES_DB: sonare
+      # Must match the password in DATABASE_URL.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in the env file}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U sonare -d sonare']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ['redis-server', '--appendonly', 'yes']
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  postgres-data:
+  redis-data:

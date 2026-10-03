@@ -37,3 +37,10 @@ jobs:
         run: sed 's#postgres://postgres:yourpassword@#postgres://postgres:postgres@#' .env.test.example > .env.test
       - run: npm test
       - run: npm run build
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the production image (not pushed)
+        run: docker build .
