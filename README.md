@@ -2,7 +2,7 @@
 
 The Sonare API: Express 5 + TypeScript in front of a private [Piped](../sonare-piped-backend)
 instance. It turns Piped's YouTube data into Sonare's catalog (tracks, albums, artists,
-playlists), relays audio streams, resolves lyrics (LRCLIB, Genius), and stores accounts,
+playlists), relays audio streams, resolves lyrics (LRCLIB), and stores accounts,
 libraries, playlists, settings and play history in Postgres. Redis caches upstream answers
 and backs the rate limiters. The desktop, web and mobile apps (`sonare-frontend`) all talk
 to it under `/api/v1`; the full contract is [`../docs/api-contract.md`](../docs/api-contract.md).
@@ -12,6 +12,8 @@ to it under `/api/v1`; the full contract is [`../docs/api-contract.md`](../docs/
 - Node 22 (`nvm use 22`)
 - Postgres 17 (16 works for development)
 - Redis 7 — optional at runtime: without it caching passes through and rate limits fail open
+- ffmpeg on the PATH — optional: without it waveforms are placeholders (warned at startup,
+  shown on `/healthz` and the admin overview). The production image installs it.
 - Piped running locally (`../sonare-piped-backend/runPiped.sh up`) — API on :8090, proxy on :8091
 - Docker, for Mailpit in development and for the production stack
 
@@ -68,29 +70,28 @@ A pre-commit hook (husky + lint-staged) runs Prettier and ESLint on staged files
 
 Development values are in `.env.example`, production ones in `.env.production.example`.
 
-| Name                         | Default                        | Required in production | What it does                                                        |
-| ---------------------------- | ------------------------------ | ---------------------- | ------------------------------------------------------------------- |
-| `NODE_ENV`                   | `development`                  | yes (`production`)     | `development`, `production` or `test`                               |
-| `PORT`                       | `3010`                         | no                     | Listen port                                                         |
-| `DATABASE_URL`               | —                              | yes                    | Postgres connection URL                                             |
-| `REDIS_URL`                  | `redis://127.0.0.1:6379/1`     | no                     | Redis for the cache and rate limits                                 |
-| `PIPED_API_URL`              | `http://localhost:8090`        | yes                    | Piped API (can be overridden live from the admin page)              |
-| `PIPED_PROXY_URL`            | `http://localhost:8091`        | no                     | Piped's media proxy (media URLs come from Piped's `PROXY_PART`)     |
-| `PIPED_BACKEND_DIR`          | `../sonare-piped-backend`      | no                     | Where the admin page reads Piped's build settings                   |
-| `JWT_SECRET`                 | dev placeholder                | yes (≥ 32 chars)       | Signs access tokens; the server refuses the default in production   |
-| `CORS_ORIGINS`               | empty                          | yes                    | Comma-separated allowed origins (localhost is allowed outside prod) |
-| `TRUST_PROXY`                | unset                          | behind a proxy         | Express `trust proxy` (hop count, `true`, `loopback`…)              |
-| `LOG_LEVEL`                  | `info`                         | no                     | pino level; logs are pretty in development, JSON otherwise          |
-| `LRCLIB_BASE`                | `https://lrclib.net`           | no                     | LRCLIB API                                                          |
-| `LRCLIB_USER_AGENT`          | `Sonare/1.0`                   | no                     | User-Agent sent to LRCLIB                                           |
-| `GENIUS_CLIENT_ACCESS_TOKEN` | unset                          | no                     | Enables the Genius lyrics fallback                                  |
-| `SMTP_HOST`                  | `127.0.0.1`                    | yes                    | Mailpit in development, `smtp.resend.com` in production             |
-| `SMTP_PORT`                  | `1025`                         | yes                    | `465` for Resend                                                    |
-| `SMTP_SECURE`                | `false`                        | yes                    | `true` for Resend                                                   |
-| `SMTP_USER`                  | unset                          | yes                    | `resend`                                                            |
-| `SMTP_PASS`                  | unset                          | yes                    | Resend API key                                                      |
-| `MAIL_FROM`                  | `Sonare <no-reply@sonare.dev>` | yes                    | Sender of account emails                                            |
-| `APP_URL`                    | `http://localhost:5183`        | yes (https)            | Base of the links in verification and reset emails                  |
+| Name                | Default                        | Required in production | What it does                                                        |
+| ------------------- | ------------------------------ | ---------------------- | ------------------------------------------------------------------- |
+| `NODE_ENV`          | `development`                  | yes (`production`)     | `development`, `production` or `test`                               |
+| `PORT`              | `3010`                         | no                     | Listen port                                                         |
+| `DATABASE_URL`      | —                              | yes                    | Postgres connection URL                                             |
+| `REDIS_URL`         | `redis://127.0.0.1:6379/1`     | no                     | Redis for the cache and rate limits                                 |
+| `PIPED_API_URL`     | `http://localhost:8090`        | yes                    | Piped API (can be overridden live from the admin page)              |
+| `PIPED_PROXY_URL`   | `http://localhost:8091`        | no                     | Piped's media proxy (media URLs come from Piped's `PROXY_PART`)     |
+| `PIPED_BACKEND_DIR` | `../sonare-piped-backend`      | no                     | Where the admin page reads Piped's build settings                   |
+| `JWT_SECRET`        | dev placeholder                | yes (≥ 32 chars)       | Signs access tokens; the server refuses the default in production   |
+| `CORS_ORIGINS`      | empty                          | yes                    | Comma-separated allowed origins (localhost is allowed outside prod) |
+| `TRUST_PROXY`       | unset                          | behind a proxy         | Express `trust proxy` (hop count, `true`, `loopback`…)              |
+| `LOG_LEVEL`         | `info`                         | no                     | pino level; logs are pretty in development, JSON otherwise          |
+| `LRCLIB_BASE`       | `https://lrclib.net`           | no                     | LRCLIB API                                                          |
+| `LRCLIB_USER_AGENT` | `Sonare/1.0`                   | no                     | User-Agent sent to LRCLIB                                           |
+| `SMTP_HOST`         | `127.0.0.1`                    | yes                    | Mailpit in development, `smtp.resend.com` in production             |
+| `SMTP_PORT`         | `1025`                         | yes                    | `465` for Resend                                                    |
+| `SMTP_SECURE`       | `false`                        | yes                    | `true` for Resend                                                   |
+| `SMTP_USER`         | unset                          | yes                    | `resend`                                                            |
+| `SMTP_PASS`         | unset                          | yes                    | Resend API key                                                      |
+| `MAIL_FROM`         | `Sonare <no-reply@sonare.dev>` | yes                    | Sender of account emails                                            |
+| `APP_URL`           | `http://localhost:5183`        | yes (https)            | Base of the links in verification and reset emails                  |
 
 ## Folder layout
 
@@ -107,7 +108,7 @@ src/
   services/         cache, emailTokens, lyrics, mail, peaks, systemConfig, telemetry, token
   db/               index (connection), schema, create, migrate, hydrate, userData
   normalize/        Piped → Sonare shapes
-  upstream/         piped (+ piped.types), lrclib, genius
+  upstream/         piped (+ piped.types), lrclib
 drizzle/            SQL migrations
 test/               unit/ and integration/ (vitest)
 ```
@@ -143,8 +144,8 @@ curl http://127.0.0.1:3010/api/v1/healthz
   `redis-data` volumes.
 - Piped runs from its own compose file. Its ports are bound to the host's 127.0.0.1,
   which a container cannot reach — see the Piped notes in `.env.production.example`.
-- `/api/v1/healthz` answers `{ ok, version, db, redis, piped }`, with 503 when the database
-  is down; the image's `HEALTHCHECK` uses it.
+- `/api/v1/healthz` answers `{ ok, version, db, redis, piped, ffmpeg }`, with 503 when the
+  database is down; the image's `HEALTHCHECK` uses it.
 
 ## Admin
 

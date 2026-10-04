@@ -1,5 +1,6 @@
 import { Lrclib } from '../upstream/lrclib.js';
-import { Genius } from '../upstream/genius.js';
+import { LyricsUnavailableError, describeError } from '../errors.js';
+import { logger } from '../logger.js';
 import { db } from '../db/index.js';
 import { lyricsOverrides } from '../db/schema.js';
 import { eq, and } from 'drizzle-orm';
@@ -11,11 +12,16 @@ export interface LyricsLine {
 
 export interface ResolvedLyrics {
   synced: boolean;
-  provider: 'lrclib' | 'genius' | 'tags' | 'user';
+  provider: 'lrclib' | 'tags' | 'user';
   offsetMs: number;
   lines: LyricsLine[];
   plain?: string;
-  attribution?: { name: string; url: string };
+}
+
+/** Logs an LRCLIB failure and returns null, so callers can tell "down" from "no match". */
+function lrclibFailed(e: unknown): null {
+  logger.warn({ err: describeError(e) }, 'LRCLIB request failed');
+  return null;
 }
 
 /**
@@ -66,7 +72,7 @@ export function lyricsInScript(l: ResolvedLyrics, script: Exclude<LyricsScript, 
 
 /**
  * The LRCLIB version of a song written in `script`, synced first and closest in length.
- * Null when LRCLIB has none.
+ * Null when LRCLIB has none; throws LyricsUnavailableError when LRCLIB didn't answer.
  */
 export async function resolveLyricsInScript(
   trackName: string,
@@ -74,17 +80,15 @@ export async function resolveLyricsInScript(
   durationMs: number | undefined,
   script: Exclude<LyricsScript, 'original'>,
 ): Promise<ResolvedLyrics | null> {
-  let candidates: Awaited<ReturnType<typeof Lrclib.search>> = [];
-  try {
-    const [byFields, byQuery] = await Promise.all([
-      Lrclib.search(undefined, trackName, artistName).catch(() => null),
-      Lrclib.search(`${trackName} ${artistName}`).catch(() => null),
-    ]);
-    const seen = new Set<number>();
-    candidates = [...(byFields ?? []), ...(byQuery ?? [])].filter((c) => !seen.has(c.id) && !!seen.add(c.id));
-  } catch {
-    return null;
-  }
+  // undefined = that search failed (null is LRCLIB's 404).
+  const [byFields, byQuery] = await Promise.all([
+    Lrclib.search(undefined, trackName, artistName).catch((e: unknown) => void lrclibFailed(e)),
+    Lrclib.search(`${trackName} ${artistName}`).catch((e: unknown) => void lrclibFailed(e)),
+  ]);
+  // Both failing means LRCLIB is down; a cached "none in this script" would hide it for a week.
+  if (byFields === undefined && byQuery === undefined) throw new LyricsUnavailableError();
+  const seen = new Set<number>();
+  const candidates = [...(byFields ?? []), ...(byQuery ?? [])].filter((c) => !seen.has(c.id) && !!seen.add(c.id));
 
   const durationSec = durationMs ? durationMs / 1000 : 0;
   const matches = candidates
@@ -228,8 +232,11 @@ export const LyricsResolver = {
     }
 
     let found: Partial<ResolvedLyrics> | null = null;
+    // Whether LRCLIB answered at all. If neither call did, "no lyrics" would be a guess.
+    let answered = false;
     try {
       const exact = await Lrclib.get(trackName, artistName, albumName || '', durationMs ? durationMs / 1000 : 0);
+      answered = true;
       if (exact) {
         if (exact.syncedLyrics) {
           found = {
@@ -242,11 +249,14 @@ export const LyricsResolver = {
           found = { synced: false, provider: 'lrclib', lines: [], plain: exact.plainLyrics };
         }
       }
-    } catch {}
+    } catch (e) {
+      lrclibFailed(e);
+    }
 
     if (!found) {
       try {
         const fuzzyList = await Lrclib.search(undefined, trackName, artistName, albumName || '');
+        answered = true;
         if (fuzzyList && fuzzyList.length > 0) {
           const bestSynced = fuzzyList.find((f) => f.syncedLyrics);
           if (bestSynced?.syncedLyrics) {
@@ -263,28 +273,15 @@ export const LyricsResolver = {
             }
           }
         }
-      } catch {}
+      } catch (e) {
+        lrclibFailed(e);
+      }
     }
 
     if (found) {
       return { ...found, offsetMs: override?.offsetMs || 0 } as ResolvedLyrics;
     }
-
-    if (!trackName) return null;
-
-    try {
-      const gRes = await Genius.search(`${trackName} ${artistName}`);
-      if (gRes && gRes.response?.hits?.length > 0) {
-        const hit = gRes.response.hits[0].result;
-        return {
-          synced: false,
-          provider: 'genius',
-          offsetMs: override?.offsetMs || 0,
-          lines: [],
-          attribution: { name: 'Genius', url: hit.url },
-        };
-      }
-    } catch {}
+    if (!answered) throw new LyricsUnavailableError();
 
     return null;
   },

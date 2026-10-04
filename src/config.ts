@@ -9,7 +9,6 @@ const envSchema = z.object({
   PORT: z.coerce.number().default(3010),
   PIPED_API_URL: z.string().url().default('http://localhost:8090'),
   PIPED_PROXY_URL: z.string().url().default('http://localhost:8091'),
-  GENIUS_CLIENT_ACCESS_TOKEN: z.string().optional(),
   LRCLIB_BASE: z.string().url().default('https://lrclib.net'),
   LRCLIB_USER_AGENT: z.string().default('Sonare/1.0'),
   JWT_SECRET: z.string().default(DEV_JWT_SECRET),

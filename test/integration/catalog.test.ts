@@ -3,6 +3,7 @@ import net from 'node:net';
 import request from 'supertest';
 import { saveSetting } from '../../src/services/systemConfig.js';
 import { createApp } from '../../src/app.js';
+import { hasFfmpeg } from '../../src/services/peaks.js';
 import { MockAgent, getGlobalDispatcher, setGlobalDispatcher, type Dispatcher } from 'undici';
 import {
   createUser,
@@ -37,13 +38,20 @@ describe('Catalog & public endpoints', () => {
     setGlobalDispatcher(originalDispatcher);
   });
 
-  it('BE-CATALOG-001: GET /api/v1/healthz reports database, Redis and Piped up with the package version', async () => {
+  it('BE-CATALOG-001: GET /api/v1/healthz reports database, Redis, Piped and ffmpeg with the package version', async () => {
     const pipedMock = mockAgent!.get('http://localhost:8090');
     pipedMock.intercept({ path: '/healthcheck', method: 'GET' }).reply(200, { ok: true });
 
     const res = await request(app).get('/api/v1/healthz');
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ ok: true, version: '1.0.0', db: 'up', redis: 'up', piped: 'up' });
+    expect(res.body).toEqual({
+      ok: true,
+      version: '1.0.0',
+      db: 'up',
+      redis: 'up',
+      piped: 'up',
+      ffmpeg: hasFfmpeg() ? 'found' : 'missing',
+    });
   });
 
   it('BE-CATALOG-002: GET /api/v1/healthz reports piped down when healthcheck fails', async () => {

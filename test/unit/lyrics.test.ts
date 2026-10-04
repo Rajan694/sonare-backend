@@ -7,6 +7,7 @@ import {
   parseLrc,
   resolveLyricsInScript,
 } from '../../src/services/lyrics.js';
+import { LyricsUnavailableError } from '../../src/errors.js';
 import { MockAgent, getGlobalDispatcher, setGlobalDispatcher, type Dispatcher } from 'undici';
 
 describe('lyrics.ts: resolver', () => {
@@ -63,44 +64,40 @@ describe('lyrics.ts: resolver', () => {
     expect(res?.synced).toBe(true);
   });
 
-  it('BE-LYR-COV-003: LyricsResolver resolves via Genius fallback when LRCLIB fuzzy returns empty', async () => {
+  it('BE-LYR-COV-003: LyricsResolver is null when LRCLIB has no match (no Genius link fallback)', async () => {
     const lrcMock = mockAgent!.get('https://lrclib.net');
     lrcMock
       .intercept({
-        path: '/api/get?track_name=GeniusOnly&artist_name=GeniusArtist&album_name=&duration=0',
+        path: '/api/get?track_name=NoMatch&artist_name=NoArtist&album_name=&duration=0',
         method: 'GET',
       })
       .reply(404, {});
     lrcMock
       .intercept({
-        path: '/api/search?track_name=GeniusOnly&artist_name=GeniusArtist&album_name=',
+        path: '/api/search?track_name=NoMatch&artist_name=NoArtist&album_name=',
         method: 'GET',
       })
       .reply(200, []);
 
-    const geniusMock = mockAgent!.get('https://api.genius.com');
-    geniusMock
-      .intercept({
-        path: '/search?q=GeniusOnly%20GeniusArtist',
-        method: 'GET',
-      })
-      .reply(200, {
-        response: {
-          hits: [
-            {
-              result: {
-                id: 111,
-                url: 'https://genius.com/test-song',
-              },
-            },
-          ],
-        },
-      });
+    expect(await LyricsResolver.resolve('trackNoMatch', 'NoMatch', 'NoArtist')).toBeNull();
+  });
 
-    const res = await LyricsResolver.resolve('trackGenius', 'GeniusOnly', 'GeniusArtist');
-    expect(res).not.toBeNull();
-    expect(res?.provider).toBe('genius');
-    expect(res?.attribution?.url).toBe('https://genius.com/test-song');
+  it('BE-LYR-COV-005: LyricsResolver throws LyricsUnavailableError when LRCLIB does not answer', async () => {
+    const lrcMock = mockAgent!.get('https://lrclib.net');
+    lrcMock.intercept({ path: (p) => p.startsWith('/api/get'), method: 'GET' }).reply(503, {});
+    lrcMock
+      .intercept({ path: (p) => p.startsWith('/api/search'), method: 'GET' })
+      .replyWithError(new Error('ECONNREFUSED'));
+
+    await expect(LyricsResolver.resolve('trackDown', 'Down', 'Artist')).rejects.toBeInstanceOf(LyricsUnavailableError);
+  });
+
+  it('BE-LYR-COV-006: LyricsResolver still answers when only the exact lookup fails', async () => {
+    const lrcMock = mockAgent!.get('https://lrclib.net');
+    lrcMock.intercept({ path: (p) => p.startsWith('/api/get'), method: 'GET' }).reply(500, {});
+    lrcMock.intercept({ path: (p) => p.startsWith('/api/search'), method: 'GET' }).reply(200, []);
+
+    expect(await LyricsResolver.resolve('trackHalf', 'Half', 'Artist')).toBeNull();
   });
 
   it('BE-LYR-COV-004: getDbLyricsOverride handles missing user id gracefully', async () => {
@@ -206,7 +203,7 @@ describe('lyrics.ts: preferred script', () => {
     ]);
   });
 
-  it('BE-LYR-SCRIPT-004: resolveLyricsInScript is null when no version is in that script, or LRCLIB fails', async () => {
+  it('BE-LYR-SCRIPT-004: resolveLyricsInScript is null when no version is in that script, and throws when LRCLIB fails', async () => {
     const lrcMock = mockAgent!.get('https://lrclib.net');
     lrcMock
       .intercept({ path: (p) => p.startsWith('/api/search'), method: 'GET' })
@@ -229,6 +226,7 @@ describe('lyrics.ts: preferred script', () => {
       .intercept({ path: (p) => p.startsWith('/api/search'), method: 'GET' })
       .reply(500, {})
       .times(2);
-    expect(await resolveLyricsInScript('X', 'Y', 200_000, 'latin')).toBeNull();
+    // Not null: the route would cache null as "none in this script" for a week.
+    await expect(resolveLyricsInScript('X', 'Y', 200_000, 'latin')).rejects.toBeInstanceOf(LyricsUnavailableError);
   });
 });

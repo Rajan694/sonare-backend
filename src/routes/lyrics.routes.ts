@@ -13,6 +13,7 @@ import {
   resolveLyricsInScript,
 } from '../services/lyrics.js';
 import { Lrclib } from '../upstream/lrclib.js';
+import { LyricsUnavailableError, describeError } from '../errors.js';
 import { z } from 'zod';
 import { parseBody, parseQuery } from '../validation.js';
 
@@ -56,6 +57,8 @@ lyricsRouter.get('/tracks/:id/lyrics', async (req, res) => {
     resolved = await LyricsResolver.resolve(rawId, '', '', undefined, undefined, req.user?.id);
   } else {
     resolved = await PermanentCache.getLyrics(rawId);
+    // Genius results cached before it was dropped are only a link, no lyrics: look again.
+    if ((resolved?.provider as string | undefined) === 'genius') resolved = null;
     let streams: Awaited<ReturnType<typeof CachedPiped.getStream>> | null = null;
     const meta = async () => {
       const s = (streams ??= await CachedPiped.getStream(rawId));
@@ -83,7 +86,7 @@ lyricsRouter.get('/tracks/:id/lyrics', async (req, res) => {
         }
         if (inScript) resolved = { ...inScript, offsetMs: resolved?.offsetMs ?? 0 };
       } catch {
-        // The preference is best effort: the original lyrics (or the 404) stand.
+        // The preference is best effort: the original lyrics (or the 404) stand, uncached.
       }
     }
   }
@@ -131,6 +134,9 @@ lyricsRouter.delete('/tracks/:id/lyrics', async (req, res) => {
 
 lyricsRouter.get('/lyrics/search', async (req, res) => {
   const { track, artist, album } = parseQuery(searchQuery, req);
-  const results = await Lrclib.search(undefined, track, artist, album);
+  const results = await Lrclib.search(undefined, track, artist, album).catch((e: unknown) => {
+    req.log.warn({ err: describeError(e) }, 'LRCLIB search failed');
+    throw new LyricsUnavailableError();
+  });
   res.json(results || []);
 });

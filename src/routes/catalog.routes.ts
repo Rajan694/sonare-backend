@@ -4,6 +4,7 @@ import { and, eq } from 'drizzle-orm';
 import { Piped } from '../upstream/piped.js';
 import type * as T from '../upstream/piped.types.js';
 import { CachedPiped, isRedisAvailable } from '../services/cache.js';
+import { hasFfmpeg } from '../services/peaks.js';
 import {
   normalizeStreamItemToTrack,
   normalizeStreamItemToArtist,
@@ -92,6 +93,8 @@ catalogRouter.get('/healthz', async (req, res) => {
     db: dbUp ? 'up' : 'down',
     redis: isRedisAvailable() ? 'up' : 'down',
     piped: pipedUp ? 'up' : 'down',
+    // Missing means placeholder waveforms, not an outage.
+    ffmpeg: hasFfmpeg() ? 'found' : 'missing',
   });
 });
 

@@ -9,6 +9,11 @@ try {
   HAS_FFMPEG = false;
 }
 
+/** Whether ffmpeg is on the PATH. Without it every waveform is a made-up placeholder. */
+export function hasFfmpeg(): boolean {
+  return HAS_FFMPEG;
+}
+
 export async function extractPeaks(url: string, trackId: string, bars: number = 150): Promise<number[]> {
   if (!HAS_FFMPEG) {
     return generateFallbackPeaks(trackId, bars);

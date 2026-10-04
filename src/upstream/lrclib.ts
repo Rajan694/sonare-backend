@@ -26,8 +26,11 @@ async function fetchLrc<T>(path: string, query?: Query): Promise<T | null> {
     }
   }
 
+  // undici waits 5 minutes for headers by default; a stalled LRCLIB should fail fast instead.
   const { statusCode, body } = await request(url, {
     headers: { 'User-Agent': config.LRCLIB_USER_AGENT },
+    headersTimeout: 8000,
+    bodyTimeout: 8000,
   });
 
   if (statusCode === 404) {

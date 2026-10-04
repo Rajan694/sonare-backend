@@ -70,7 +70,7 @@ This document maps all backend test IDs to their specifications, assertions, and
 
 | Test ID           | Method / Scope                       | Description & Assertions                                                                                    |
 | :---------------- | :----------------------------------- | :---------------------------------------------------------------------------------------------------------- |
-| `BE-CATALOG-001`  | `GET /api/v1/healthz`                | Reports db, redis and piped status plus the package version; 200 while the database is up.                  |
+| `BE-CATALOG-001`  | `GET /api/v1/healthz`                | Reports db, redis, piped and ffmpeg status plus the package version; 200 while the database is up.          |
 | `BE-CATALOG-002`  | `GET /api/v1/healthz`                | Piped down is reported as `piped: down` but the check still returns 200.                                    |
 | `BE-CATALOG-003`  | `GET /api/v1/discover/made-for-you`  | Returns empty item array for unauthenticated guests.                                                        |
 | `BE-CATALOG-004`  | `GET /api/v1/search/suggestions`     | Proxies suggestion list from Piped upstream.                                                                |
@@ -129,18 +129,21 @@ This document maps all backend test IDs to their specifications, assertions, and
 | `BE-LYRICS-006`     | `DELETE /api/v1/tracks/:id/lyrics`       | Clears custom lyrics override for user.                                                                |
 | `BE-LYR-COV-001`    | `parseLrc`                               | Parses LRC string with offset tags and millisecond precision.                                          |
 | `BE-LYR-COV-002`    | `LyricsResolver.resolve`                 | Resolves lyrics via LRCLIB search fuzzy matching.                                                      |
-| `BE-LYR-COV-003`    | `LyricsResolver.resolve`                 | Falls back to Genius search attribution when LRCLIB has no lyrics.                                     |
+| `BE-LYR-COV-003`    | `LyricsResolver.resolve`                 | Null when LRCLIB has no match (no Genius link fallback).                                               |
 | `BE-LYR-COV-004`    | `getDbLyricsOverride`                    | Handles undefined user id gracefully.                                                                  |
+| `BE-LYR-COV-005`    | `LyricsResolver.resolve`                 | Throws LyricsUnavailableError when LRCLIB doesn't answer either lookup.                                |
+| `BE-LYR-COV-006`    | `LyricsResolver.resolve`                 | Still answers (null) when only the exact lookup fails.                                                 |
 | `BE-LYRICS-007`     | `GET /api/v1/tracks/:id/lyrics?script=`  | `script=latin` swaps Devanagari lyrics for the romanised LRCLIB version; no script keeps the original. |
 | `BE-LYRICS-008`     | `GET /api/v1/tracks/:id/lyrics?script=`  | Lyrics already in the preferred script are served without searching LRCLIB again.                      |
 | `BE-LYRICS-009`     | `GET /api/v1/tracks/:id/lyrics?script=`  | No version in that script: the original stays and the miss is cached (no second search).               |
 | `BE-LYRICS-010`     | `GET /api/v1/tracks/:id/lyrics?script=`  | The user's own lyrics win over the preferred script.                                                   |
 | `BE-LYRICS-011`     | `GET /api/v1/tracks/:id/lyrics?script=`  | An unknown script is a 400; `original` behaves like no preference.                                     |
 | `BE-LYRICS-012`     | `GET /api/v1/tracks/:id/lyrics?script=`  | A failing version search still serves the original lyrics.                                             |
+| `BE-LYRICS-013`     | `GET /api/v1/tracks/:id/lyrics`          | 502 LYRICS_UNAVAILABLE when LRCLIB is down; nothing cached, so it finds lyrics once LRCLIB is back.    |
 | `BE-LYR-SCRIPT-001` | `isInScript`                             | Tells scripts apart by most of the letters; digits, timestamps and symbols don't count.                |
 | `BE-LYR-SCRIPT-002` | `lyricsInScript`                         | Reads synced lines, else the plain text.                                                               |
 | `BE-LYR-SCRIPT-003` | `resolveLyricsInScript`                  | Picks the synced candidate in that script, within 15s of the song's length.                            |
-| `BE-LYR-SCRIPT-004` | `resolveLyricsInScript`                  | Null when no candidate is in that script, or LRCLIB fails.                                             |
+| `BE-LYR-SCRIPT-004` | `resolveLyricsInScript`                  | Null when no candidate is in that script; throws when LRCLIB fails.                                    |
 
 ---
 
@@ -257,6 +260,7 @@ This document maps all backend test IDs to their specifications, assertions, and
 | `BE-APP-009`    | `GET /api/v1/lyrics/search`               | Rejects missing track parameter with 400 BAD_REQUEST.                                      |
 | `BE-APP-010`    | Route Not Found                           | Returns 404 NOT_FOUND for unmatched endpoints.                                             |
 | `BE-APP-011`    | `GET /api/v1/stream/:token`               | Handles 416 range past end with proper total size header.                                  |
+| `BE-APP-012`    | `GET /api/v1/lyrics/search`               | 502 LYRICS_UNAVAILABLE when LRCLIB is down.                                                |
 | `BE-ERR-001`    | `POST /api/v1/client-errors`              | Accepts crash report from web client.                                                      |
 | `BE-ERR-002`    | `POST /api/v1/client-errors`              | Accepts warning report from linux client.                                                  |
 | `BE-ERR-003`    | `POST /api/v1/client-errors`              | Rejects invalid source name with 400 BAD_REQUEST.                                          |
@@ -383,8 +387,6 @@ This document maps all backend test IDs to their specifications, assertions, and
 | `BE-UPS-009`         | Lrclib get lyrics happy path.              |
 | `BE-UPS-010`         | Lrclib get lyrics 404 clean handling.      |
 | `BE-UPS-011`         | Lrclib search endpoint.                    |
-| `BE-UPS-012`         | Genius search client.                      |
-| `BE-UPS-013`         | Genius song details client.                |
 | `BE-PIPED-EXTRA-001` | Piped trending with custom region.         |
 | `BE-PIPED-EXTRA-002` | Piped playlist nextpage pagination.        |
 

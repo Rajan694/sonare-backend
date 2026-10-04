@@ -100,6 +100,27 @@ describe('Lyrics endpoints & overrides', () => {
     expect(res.body.error.code).toBe('NOT_FOUND');
   });
 
+  it('BE-LYRICS-013: GET /api/v1/tracks/:id/lyrics is 502 LYRICS_UNAVAILABLE when LRCLIB is down, and retries next time', async () => {
+    const pipedMock = mockAgent!.get('http://localhost:8090');
+    pipedMock.intercept({ path: '/streams/lrclibDown1', method: 'GET' }).reply(200, samplePipedStream('lrclibDown1'));
+
+    const lrcMock = mockAgent!.get('https://lrclib.net');
+    lrcMock.intercept({ path: (p) => p.startsWith('/api/get'), method: 'GET' }).reply(503, {});
+    lrcMock.intercept({ path: (p) => p.startsWith('/api/search'), method: 'GET' }).reply(503, {});
+
+    const down = await request(app).get('/api/v1/tracks/yt:lrclibDown1/lyrics');
+    expect(down.status).toBe(502);
+    expect(down.body.error.code).toBe('LYRICS_UNAVAILABLE');
+
+    // Nothing was cached: once LRCLIB is back the same track finds its lyrics.
+    lrcMock
+      .intercept({ path: (p) => p.startsWith('/api/get'), method: 'GET' })
+      .reply(200, { id: 1, trackName: 'T', artistName: 'A', syncedLyrics: null, plainLyrics: 'Back again' });
+    const back = await request(app).get('/api/v1/tracks/yt:lrclibDown1/lyrics');
+    expect(back.status).toBe(200);
+    expect(back.body.plain).toBe('Back again');
+  });
+
   it('BE-LYRICS-004: POST /api/v1/tracks/:id/lyrics stores custom override text for authenticated user', async () => {
     const { token } = await createUser();
     const res = await request(app)
@@ -189,6 +210,15 @@ describe('Lyrics search', () => {
     expect(res.status).toBe(200);
     expect(res.body).toHaveLength(1);
     expect(res.body[0].trackName).toBe('Bohemian Rhapsody');
+  });
+
+  it('BE-APP-012: GET /api/v1/lyrics/search is 502 LYRICS_UNAVAILABLE when LRCLIB is down', async () => {
+    const lrcMock = mockAgent!.get('https://lrclib.net');
+    lrcMock.intercept({ path: (p) => p.startsWith('/api/search'), method: 'GET' }).reply(500, {});
+
+    const res = await request(app).get('/api/v1/lyrics/search?track=Anything');
+    expect(res.status).toBe(502);
+    expect(res.body.error.code).toBe('LYRICS_UNAVAILABLE');
   });
 
   it('BE-APP-009: GET /api/v1/lyrics/search validates missing track param with 400', async () => {

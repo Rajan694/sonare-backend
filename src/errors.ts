@@ -29,6 +29,18 @@ export class StreamTokenError extends Error {
   }
 }
 
+/** LRCLIB didn't answer, so "no lyrics" would be a guess. Not cached; the next open retries. */
+export class LyricsUnavailableError extends Error {
+  public status: number;
+  public code: string;
+  constructor(message: string = "The lyrics service isn't responding. Try again in a moment.") {
+    super(message);
+    this.name = 'LyricsUnavailableError';
+    this.status = 502;
+    this.code = 'LYRICS_UNAVAILABLE';
+  }
+}
+
 /** A short reason for a caught error: its code (ECONNREFUSED, …) when it has one, else its message. */
 export function describeError(e: unknown): string {
   const code = (e as { code?: unknown } | null)?.code;

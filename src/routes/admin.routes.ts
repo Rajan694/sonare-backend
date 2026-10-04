@@ -5,6 +5,7 @@ import { and, count, desc, eq, ilike, sum, type SQL } from 'drizzle-orm';
 import { z } from 'zod';
 import { requireAdmin, signAdminToken } from '../middleware/adminAuth.js';
 import { isRedisAvailable } from '../services/cache.js';
+import { hasFfmpeg } from '../services/peaks.js';
 import { db, sql } from '../db/index.js';
 import { adminUsers, errorLogs } from '../db/schema.js';
 import { createRateLimiter } from '../middleware/rateLimit.js';
@@ -209,6 +210,7 @@ async function health() {
     piped: { up: piped.status === 'fulfilled', url: pipedApiUrl() },
     database: database.status === 'fulfilled',
     redis: isRedisAvailable(),
+    ffmpeg: hasFfmpeg(),
     uptimeSec: Math.round(process.uptime()),
     node: process.version,
     memoryMb: Math.round(memory.rss / 1e6),

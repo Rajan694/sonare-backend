@@ -1,6 +1,6 @@
 import type { Request, Response, NextFunction } from 'express';
 import { UpstreamError } from '../upstream/piped.js';
-import { BadRequestError, NoAudioStreamError, StreamTokenError } from '../errors.js';
+import { BadRequestError, LyricsUnavailableError, NoAudioStreamError, StreamTokenError } from '../errors.js';
 
 // The last middleware: turns thrown errors into the API's { error: { code, message } } shape.
 export function errorHandler(err: unknown, req: Request, res: Response, _next: NextFunction) {
@@ -37,6 +37,11 @@ export function errorHandler(err: unknown, req: Request, res: Response, _next: N
     res.status(502).json({
       error: { code: err.unreachable ? 'UPSTREAM_UNAVAILABLE' : 'UPSTREAM_ERROR', message: err.message },
     });
+    return;
+  }
+
+  if (err instanceof LyricsUnavailableError) {
+    res.status(err.status).json({ error: { code: err.code, message: err.message } });
     return;
   }
 
