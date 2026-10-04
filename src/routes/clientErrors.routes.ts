@@ -1,7 +1,8 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { createRateLimiter } from '../rateLimit.js';
-import { CLIENTS, recordError } from '../telemetry.js';
+import { createRateLimiter } from '../middleware/rateLimit.js';
+import { CLIENTS, recordError } from '../services/telemetry.js';
+import { parseBody } from '../validation.js';
 
 // Crash and error reports from the apps. Public (guests crash too), so it is rate limited
 // per IP and every field is capped.
@@ -31,15 +32,7 @@ clientErrorsRouter.post('/', async (req, res) => {
     return;
   }
 
-  const parsed = reportSchema.safeParse(req.body);
-  if (!parsed.success) {
-    res
-      .status(400)
-      .json({ error: { code: 'BAD_REQUEST', message: parsed.error.issues[0]?.message ?? 'Invalid report' } });
-    return;
-  }
-
-  const r = parsed.data;
+  const r = parseBody(reportSchema, req);
   recordError({
     source: r.source,
     level: r.level,

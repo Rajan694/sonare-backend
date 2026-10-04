@@ -1,24 +1,38 @@
 import { idHelpers } from '../ids.js';
 import * as T from '../upstream/piped.types.js';
 import * as M from '../types.js';
-import { UserTrackFields } from '../db/user-data.js';
-import { signStreamToken } from '../token.js';
+import { UserTrackFields } from '../db/userData.js';
+import { signStreamToken } from '../services/token.js';
 import { LRUCache } from 'lru-cache';
+import { PermanentCache } from '../services/cache.js';
+import { directImageUrl } from '../upstream/ytImages.js';
 
 // Album covers in search / artist results are resizable googleusercontent urls
 // (`=w544-h544`), while the playlist endpoint only offers a signed full-size one (~2MB).
-// Remember the resizable one per album so the artwork route can serve thumbnails.
+// Remember the resizable one per album so the artwork route can serve thumbnails. Redis
+// keeps them across restarts; the in-memory copy saves the round trip.
 const albumThumbs = new LRUCache<string, string>({ max: 5000, ttl: 7 * 24 * 3600 * 1000 });
 
-function rememberAlbumThumb(rawId: string, url: string | undefined) {
-  if (rawId !== 'unknown' && url && /=w\d+-h\d+/.test(url)) albumThumbs.set(rawId, url);
+function rememberAlbumThumb(rawId: string, proxied: string | undefined) {
+  if (rawId === 'unknown' || !proxied || !/=w\d+-h\d+/.test(proxied)) return;
+  // Stored without the Piped proxy's address, which can change while this is cached.
+  const url = directImageUrl(proxied);
+  if (albumThumbs.get(rawId) === url) return;
+  albumThumbs.set(rawId, url);
+  void PermanentCache.setAlbumThumb(rawId, url);
 }
 
-export function albumThumbFor(rawId: string): string | undefined {
-  return albumThumbs.get(rawId);
+export async function albumThumbFor(rawId: string): Promise<string | undefined> {
+  const known = albumThumbs.get(rawId);
+  if (known) return known;
+  const cached = await PermanentCache.getAlbumThumb(rawId);
+  // Entries saved before 2026-10 still carry the proxy's address.
+  const stored = cached ? directImageUrl(cached) : undefined;
+  if (stored) albumThumbs.set(rawId, stored);
+  return stored;
 }
 
-export function withUserFields<TObj extends Record<string, any>>(obj: TObj, userFields?: UserTrackFields) {
+export function withUserFields<TObj extends object>(obj: TObj, userFields?: UserTrackFields) {
   return {
     ...obj,
     playCount: userFields?.playCount ?? 0,
@@ -58,10 +72,10 @@ function mapCodec(codec: string): string {
   return codec;
 }
 
+/** A 30-day image token; the backend fetches the image straight from Google's CDN. */
 export function proxyImageUrl(url: string | undefined): string | undefined {
   if (!url) return undefined;
-  // Use a 30-day token for images
-  return `/api/v1/image/${signStreamToken(url, 30 * 24 * 3600 * 1000)}`;
+  return `/api/v1/image/${signStreamToken(directImageUrl(url), 30 * 24 * 3600 * 1000)}`;
 }
 
 export function normalizeStreamToTrack(
@@ -78,8 +92,8 @@ export function normalizeStreamToTrack(
       title: stripTitle(streams.title),
       artistId: idHelpers.artistIdFromUrl(streams.uploaderUrl),
       artist: stripArtist(streams.uploader),
-      albumId: null as any,
-      album: null as any,
+      albumId: null,
+      album: null,
       durationMs: durationSec !== null ? durationSec * 1000 : null,
       source: 'server',
       codec: codecStr ? mapCodec(codecStr) : null,
@@ -108,12 +122,12 @@ export function normalizeStreamItemToTrack(
       title: stripTitle(item.title || item.name || ''),
       artistId: idHelpers.artistIdFromUrl(item.uploaderUrl),
       artist: stripArtist(item.uploaderName || item.uploader || item.author),
-      albumId: null as any,
-      album: null as any,
+      albumId: null,
+      album: null,
       durationMs: durationSec !== null ? durationSec * 1000 : null,
       source: 'server',
-      codec: null as any,
-      bitrateKbps: null as any,
+      codec: null,
+      bitrateKbps: null,
       bitDepth: undefined,
       thumbnail: `/api/v1/tracks/${idHelpers.prefixYt(id)}/artwork`,
     },
@@ -121,7 +135,7 @@ export function normalizeStreamItemToTrack(
   );
 }
 
-export function normalizeStreamItemToArtist(item: any) {
+export function normalizeStreamItemToArtist(item: T.StreamItem) {
   let id = idHelpers.extractChannelIdFromUrl(item.url) || item.url?.replace('/channel/', '') || 'unknown';
   if (id.startsWith('/')) id = 'unknown';
   const ytid = idHelpers.prefixYt(id);
@@ -137,7 +151,7 @@ export function normalizeStreamItemToArtist(item: any) {
   };
 }
 
-export function normalizeStreamItemToAlbum(item: any) {
+export function normalizeStreamItemToAlbum(item: T.StreamItem) {
   const id = idHelpers.extractListIdFromUrl(item.url) || 'unknown';
   const ytid = idHelpers.prefixYt(id);
   rememberAlbumThumb(id, item.thumbnail);
@@ -155,7 +169,7 @@ export function normalizeStreamItemToAlbum(item: any) {
   };
 }
 
-export function normalizeChannelTabAlbum(item: any) {
+export function normalizeChannelTabAlbum(item: T.ChannelTabItem) {
   const id = idHelpers.extractListIdFromUrl(item.url) || item.playlistId || 'unknown';
   const ytid = idHelpers.prefixYt(id);
   const thumb = item.thumbnail || item.thumbnails?.[0]?.url;

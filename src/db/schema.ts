@@ -16,6 +16,7 @@ export const users = pgTable('users', {
   email: text('email').notNull().unique(),
   passwordHash: text('password_hash').notNull(),
   displayName: text('display_name').notNull(),
+  emailVerifiedAt: timestamp('email_verified_at'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
 });
 
@@ -121,6 +122,24 @@ export const playlistTracks = pgTable(
   }),
 );
 
+export const emailTokens = pgTable(
+  'email_tokens',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    userId: uuid('user_id')
+      .references(() => users.id, { onDelete: 'cascade' })
+      .notNull(),
+    purpose: text('purpose').notNull(),
+    tokenHash: text('token_hash').notNull().unique(),
+    expiresAt: timestamp('expires_at').notNull(),
+    usedAt: timestamp('used_at'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (t) => ({
+    userIdIdx: index('email_tokens_user_id_idx').on(t.userId),
+  }),
+);
+
 export const userSettings = pgTable('user_settings', {
   userId: uuid('user_id')
     .primaryKey()
@@ -141,7 +160,7 @@ export const playerState = pgTable('player_state', {
   trackRefKind: text('track_ref_kind'),
   trackRefId: text('track_ref_id'),
   positionMs: integer('position_ms').default(0),
-  queue: jsonb('queue').$type<any[]>().default([]),
+  queue: jsonb('queue').$type<unknown[]>().default([]),
   index: integer('index').default(0),
   shuffle: boolean('shuffle').default(false),
   repeat: text('repeat').default('off'),

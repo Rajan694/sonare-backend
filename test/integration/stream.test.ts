@@ -1,20 +1,21 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import request from 'supertest';
 import { createApp } from '../../src/app.js';
-import { MockAgent, getGlobalDispatcher, setGlobalDispatcher } from 'undici';
-import { samplePipedStream } from '../factories.js';
-import { signStreamToken } from '../../src/token.js';
+import { MockAgent, getGlobalDispatcher, setGlobalDispatcher, type Dispatcher } from 'undici';
+import { samplePipedStream, isLocalTestHost } from '../factories.js';
+import { signStreamToken } from '../../src/services/token.js';
+import type { PipedStream } from '../../src/upstream/piped.types.js';
 
 describe('Stream relay & stream tokens', () => {
   const app = createApp();
   let mockAgent: MockAgent | null = null;
-  let originalDispatcher: any;
+  let originalDispatcher: Dispatcher;
 
   beforeEach(() => {
     originalDispatcher = getGlobalDispatcher();
     mockAgent = new MockAgent();
     mockAgent.disableNetConnect();
-    mockAgent.enableNetConnect((host) => host.includes('127.0.0.1') || host.includes('localhost'));
+    mockAgent.enableNetConnect(isLocalTestHost);
     setGlobalDispatcher(mockAgent);
   });
 
@@ -121,13 +122,13 @@ describe('Stream relay & stream tokens', () => {
 describe('Stream relay: mid-stream failover', () => {
   const app = createApp();
   let mockAgent: MockAgent | null = null;
-  let originalDispatcher: any;
+  let originalDispatcher: Dispatcher;
 
   beforeEach(() => {
     originalDispatcher = getGlobalDispatcher();
     mockAgent = new MockAgent();
     mockAgent.disableNetConnect();
-    mockAgent.enableNetConnect((host) => host.includes('127.0.0.1') || host.includes('localhost'));
+    mockAgent.enableNetConnect(isLocalTestHost);
     setGlobalDispatcher(mockAgent);
   });
 
@@ -178,13 +179,13 @@ describe('Stream relay: mid-stream failover', () => {
 describe('Stream: ranges & quality selection', () => {
   const app = createApp();
   let mockAgent: MockAgent | null = null;
-  let originalDispatcher: any;
+  let originalDispatcher: Dispatcher;
 
   beforeEach(() => {
     originalDispatcher = getGlobalDispatcher();
     mockAgent = new MockAgent();
     mockAgent.disableNetConnect();
-    mockAgent.enableNetConnect((host) => host.includes('127.0.0.1') || host.includes('localhost'));
+    mockAgent.enableNetConnect(isLocalTestHost);
     setGlobalDispatcher(mockAgent);
   });
 
@@ -253,7 +254,7 @@ describe('Stream: ranges & quality selection', () => {
         itag: 18,
         bitrate: 500000,
         contentLength: 10000000,
-      },
+      } as PipedStream,
     ];
 
     const pipedMock = mockAgent!.get('http://localhost:8090');
@@ -268,13 +269,13 @@ describe('Stream: ranges & quality selection', () => {
 describe('Stream: unsatisfiable ranges', () => {
   const app = createApp();
   let mockAgent: MockAgent | null = null;
-  let originalDispatcher: any;
+  let originalDispatcher: Dispatcher;
 
   beforeEach(() => {
     originalDispatcher = getGlobalDispatcher();
     mockAgent = new MockAgent();
     mockAgent.disableNetConnect();
-    mockAgent.enableNetConnect((host) => host.includes('127.0.0.1') || host.includes('localhost'));
+    mockAgent.enableNetConnect(isLocalTestHost);
     setGlobalDispatcher(mockAgent);
   });
 

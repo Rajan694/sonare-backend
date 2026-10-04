@@ -1,24 +1,10 @@
 import bcrypt from 'bcrypt';
 import { db } from '../src/db/index.js';
-import {
-  users,
-  adminUsers,
-  playlists,
-  playlistTracks,
-  favouriteTracks,
-  favouriteAlbums,
-  artistFollows,
-  playHistory,
-  userSettings,
-  playerState,
-  lyricsOverrides,
-  refreshTokens,
-  errorLogs,
-  requestLogs,
-} from '../src/db/schema.js';
-import { signAccessToken, generateRefreshToken, hashToken } from '../src/auth.js';
-import { signAdminToken } from '../src/adminAuth.js';
+import { users, adminUsers, refreshTokens } from '../src/db/schema.js';
+import { signAccessToken, generateRefreshToken, hashToken } from '../src/middleware/auth.js';
+import { signAdminToken } from '../src/middleware/adminAuth.js';
 import crypto from 'node:crypto';
+import type { PipedStream } from '../src/upstream/piped.types.js';
 
 export async function createUser(override: Partial<typeof users.$inferInsert> = {}) {
   const email = override.email ?? `user_${crypto.randomBytes(6).toString('hex')}@example.com`;
@@ -123,7 +109,7 @@ export function samplePipedStream(id: string = 'dQw4w9WgXcQ') {
         contentLength: 3500000,
       },
     ],
-    videoStreams: [],
+    videoStreams: [] as PipedStream[],
     relatedStreams: [
       {
         url: '/watch?v=related12345',
@@ -204,4 +190,12 @@ export function samplePipedChannel(id: string = 'UCuAXFkgsw1L7xaCfnd5JJOw') {
     ],
     nextpage: null,
   };
+}
+
+/**
+ * For MockAgent.enableNetConnect: lets tests reach servers they start themselves on localhost,
+ * but never a real Piped (8090/8091) that may be running on the developer's machine.
+ */
+export function isLocalTestHost(host: string): boolean {
+  return /^(127\.0\.0\.1|localhost)(:\d+)?$/.test(host) && !/:(8090|8091)$/.test(host);
 }

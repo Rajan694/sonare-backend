@@ -1,14 +1,17 @@
 {
   "name": "sonare-backend",
   "version": "1.0.0",
-  "description": "Sonare native API — Express + TypeScript over a private Piped upstream",
+  "description": "Sonare native API \u2014 Express + TypeScript over a private Piped upstream",
   "main": "dist/server.js",
   "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/server.js",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.test.json",
     "pretest": "node scripts/check-test-plan.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -16,8 +19,11 @@
     "db:create": "tsx src/db/create.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
+    "db:migrate:prod": "node dist/db/migrate.js",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "lint": "eslint .",
+    "prepare": "husky"
   },
   "dependencies": {
     "bcrypt": "^6.0.0",
@@ -29,27 +35,42 @@
     "ioredis": "^6.0.0",
     "jsonwebtoken": "^9.0.3",
     "lru-cache": "^10.2.0",
+    "nodemailer": "^10.0.13",
     "pino": "^9.0.0",
-    "pino-http": "^9.0.0",
+    "pino-http": "^10.5.0",
     "postgres": "^3.4.9",
     "undici": "^6.10.0",
     "zod": "^3.22.4"
   },
   "devDependencies": {
+    "@eslint/js": "^9.39.5",
     "@types/bcrypt": "^6.0.0",
     "@types/cors": "^2.8.17",
-    "@types/express": "^4.17.21",
+    "@types/express": "^5.0.6",
     "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^20.11.30",
-    "@types/pino": "^7.0.5",
+    "@types/nodemailer": "^8.0.2",
     "@types/supertest": "^7.2.1",
     "@vitest/coverage-v8": "^4.1.11",
     "drizzle-kit": "^0.31.11",
+    "eslint": "^9.39.5",
+    "eslint-config-prettier": "^10.1.8",
+    "globals": "^17.13.0",
+    "husky": "^9.1.7",
+    "lint-staged": "^16.4.0",
     "pino-pretty": "^11.0.0",
     "prettier": "^3.9.9",
     "supertest": "^7.3.0",
     "tsx": "^4.7.1",
     "typescript": "^5.4.3",
+    "typescript-eslint": "^8.71.0",
     "vitest": "^4.1.11"
+  },
+  "lint-staged": {
+    "*.{ts,js,mjs}": [
+      "prettier --write --ignore-unknown",
+      "eslint --fix --no-warn-ignored"
+    ],
+    "*.{json,md,yml,yaml}": "prettier --write --ignore-unknown"
   }
 }

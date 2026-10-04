@@ -46,6 +46,8 @@ export interface Artist {
   localTrackCount: number;
   following: boolean;
   monthlyListeners?: number | null;
+  /** Library only: liked or playlisted songs by an artist the user doesn't follow. */
+  songCount?: number;
 }
 
 export interface Playlist {

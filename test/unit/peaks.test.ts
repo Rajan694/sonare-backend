@@ -1,11 +1,25 @@
 import { describe, expect, it } from 'vitest';
-import { extractPeaks } from '../../src/peaks.js';
+import { extractPeaks, isPlaceholderPeaks, placeholderPeaks } from '../../src/services/peaks.js';
 
 describe('peaks.ts', () => {
   it('BE-PEAKS-001: extractPeaks produces bounded floating point values', async () => {
     const peaks = await extractPeaks('http://invalid.local', 'track_peaks_test', 80);
     expect(peaks).toHaveLength(80);
     expect(peaks.every((p) => p >= 0 && p <= 1)).toBe(true);
+  });
+
+  it('BE-PEAKS-004: isPlaceholderPeaks recognises a failed extraction, not real peaks', async () => {
+    const failed = await extractPeaks('http://invalid.local', 'placeholder_id', 60);
+    expect(isPlaceholderPeaks('placeholder_id', 60, failed)).toBe(true);
+    expect(failed).toEqual(placeholderPeaks('placeholder_id', 60));
+    expect(
+      isPlaceholderPeaks(
+        'placeholder_id',
+        60,
+        failed.map((p) => p / 2),
+      ),
+    ).toBe(false);
+    expect(isPlaceholderPeaks('other_id', 60, failed)).toBe(false);
   });
 
   it('BE-PEAKS-002: extractPeaks produces deterministic values for identical trackId', async () => {

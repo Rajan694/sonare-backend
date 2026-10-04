@@ -1,10 +1,18 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { LyricsResolver, getDbLyricsOverride, parseLrc } from '../../src/lyrics.js';
-import { MockAgent, getGlobalDispatcher, setGlobalDispatcher } from 'undici';
+import {
+  LyricsResolver,
+  getDbLyricsOverride,
+  isInScript,
+  lyricsInScript,
+  parseLrc,
+  resolveLyricsInScript,
+} from '../../src/services/lyrics.js';
+import { LyricsUnavailableError } from '../../src/errors.js';
+import { MockAgent, getGlobalDispatcher, setGlobalDispatcher, type Dispatcher } from 'undici';
 
 describe('lyrics.ts: resolver', () => {
   let mockAgent: MockAgent | null = null;
-  let originalDispatcher: any;
+  let originalDispatcher: Dispatcher;
 
   beforeEach(() => {
     originalDispatcher = getGlobalDispatcher();
@@ -56,44 +64,40 @@ describe('lyrics.ts: resolver', () => {
     expect(res?.synced).toBe(true);
   });
 
-  it('BE-LYR-COV-003: LyricsResolver resolves via Genius fallback when LRCLIB fuzzy returns empty', async () => {
+  it('BE-LYR-COV-003: LyricsResolver is null when LRCLIB has no match (no Genius link fallback)', async () => {
     const lrcMock = mockAgent!.get('https://lrclib.net');
     lrcMock
       .intercept({
-        path: '/api/get?track_name=GeniusOnly&artist_name=GeniusArtist&album_name=&duration=0',
+        path: '/api/get?track_name=NoMatch&artist_name=NoArtist&album_name=&duration=0',
         method: 'GET',
       })
       .reply(404, {});
     lrcMock
       .intercept({
-        path: '/api/search?track_name=GeniusOnly&artist_name=GeniusArtist&album_name=',
+        path: '/api/search?track_name=NoMatch&artist_name=NoArtist&album_name=',
         method: 'GET',
       })
       .reply(200, []);
 
-    const geniusMock = mockAgent!.get('https://api.genius.com');
-    geniusMock
-      .intercept({
-        path: '/search?q=GeniusOnly%20GeniusArtist',
-        method: 'GET',
-      })
-      .reply(200, {
-        response: {
-          hits: [
-            {
-              result: {
-                id: 111,
-                url: 'https://genius.com/test-song',
-              },
-            },
-          ],
-        },
-      });
+    expect(await LyricsResolver.resolve('trackNoMatch', 'NoMatch', 'NoArtist')).toBeNull();
+  });
 
-    const res = await LyricsResolver.resolve('trackGenius', 'GeniusOnly', 'GeniusArtist');
-    expect(res).not.toBeNull();
-    expect(res?.provider).toBe('genius');
-    expect(res?.attribution?.url).toBe('https://genius.com/test-song');
+  it('BE-LYR-COV-005: LyricsResolver throws LyricsUnavailableError when LRCLIB does not answer', async () => {
+    const lrcMock = mockAgent!.get('https://lrclib.net');
+    lrcMock.intercept({ path: (p) => p.startsWith('/api/get'), method: 'GET' }).reply(503, {});
+    lrcMock
+      .intercept({ path: (p) => p.startsWith('/api/search'), method: 'GET' })
+      .replyWithError(new Error('ECONNREFUSED'));
+
+    await expect(LyricsResolver.resolve('trackDown', 'Down', 'Artist')).rejects.toBeInstanceOf(LyricsUnavailableError);
+  });
+
+  it('BE-LYR-COV-006: LyricsResolver still answers when only the exact lookup fails', async () => {
+    const lrcMock = mockAgent!.get('https://lrclib.net');
+    lrcMock.intercept({ path: (p) => p.startsWith('/api/get'), method: 'GET' }).reply(500, {});
+    lrcMock.intercept({ path: (p) => p.startsWith('/api/search'), method: 'GET' }).reply(200, []);
+
+    expect(await LyricsResolver.resolve('trackHalf', 'Half', 'Artist')).toBeNull();
   });
 
   it('BE-LYR-COV-004: getDbLyricsOverride handles missing user id gracefully', async () => {
@@ -120,5 +124,109 @@ describe('lyrics.ts: parseLrc', () => {
     const parsed = parseLrc(lrc);
     expect(parsed).toHaveLength(1);
     expect(parsed[0].text).toBe('First real lyric');
+  });
+});
+
+describe('lyrics.ts: preferred script', () => {
+  let mockAgent: MockAgent | null = null;
+  let originalDispatcher: Dispatcher;
+
+  beforeEach(() => {
+    originalDispatcher = getGlobalDispatcher();
+    mockAgent = new MockAgent();
+    mockAgent.disableNetConnect();
+    setGlobalDispatcher(mockAgent);
+  });
+
+  afterEach(async () => {
+    if (mockAgent) {
+      await mockAgent.close();
+      mockAgent = null;
+    }
+    setGlobalDispatcher(originalDispatcher);
+  });
+
+  const hindi = 'तुम ही हो\nअब तुम ही हो';
+  const roman = 'Tum hi ho\nAb tum hi ho';
+
+  it('BE-LYR-SCRIPT-001: isInScript tells scripts apart by most of the letters', () => {
+    expect(isInScript(hindi, 'devanagari')).toBe(true);
+    expect(isInScript(hindi, 'latin')).toBe(false);
+    expect(isInScript(roman, 'latin')).toBe(true);
+    expect(isInScript('ਤੁਸੀਂ ਹੀ ਹੋ', 'gurmukhi')).toBe(true);
+    // A Latin word or two in Devanagari lyrics doesn't change the script.
+    expect(isInScript(`${hindi}\nOh baby`, 'devanagari')).toBe(true);
+    // Timestamps, digits and punctuation aren't letters.
+    expect(isInScript('[00:12.00] ♪ 123 …', 'latin')).toBe(false);
+    expect(isInScript('', 'latin')).toBe(false);
+  });
+
+  it('BE-LYR-SCRIPT-002: lyricsInScript reads synced lines, else the plain text', () => {
+    const base = { synced: true, provider: 'lrclib' as const, offsetMs: 0 };
+    expect(lyricsInScript({ ...base, lines: [{ atMs: 0, text: 'तुम ही हो' }], plain: roman }, 'devanagari')).toBe(true);
+    expect(lyricsInScript({ ...base, synced: false, lines: [], plain: roman }, 'latin')).toBe(true);
+    expect(lyricsInScript({ ...base, synced: false, lines: [] }, 'latin')).toBe(false);
+  });
+
+  it('BE-LYR-SCRIPT-003: resolveLyricsInScript picks the synced version in that script, close in length', async () => {
+    const lrcMock = mockAgent!.get('https://lrclib.net');
+    const candidate = (id: number, text: string, extra: object = {}) => ({
+      id,
+      trackName: 'Tum Hi Ho',
+      artistName: 'Arijit Singh',
+      albumName: 'Aashiqui 2',
+      duration: 262,
+      instrumental: false,
+      plainLyrics: text,
+      syncedLyrics: null,
+      ...extra,
+    });
+    lrcMock
+      .intercept({ path: (p) => p.startsWith('/api/search') && p.includes('track_name'), method: 'GET' })
+      .reply(200, [
+        candidate(1, hindi, { syncedLyrics: '[00:10.00]तुम ही हो' }),
+        // Romanised, but a different recording (two minutes longer): skipped.
+        candidate(2, roman, { duration: 380, syncedLyrics: '[00:10.00]Tum hi ho' }),
+        candidate(3, roman),
+      ]);
+    lrcMock
+      .intercept({ path: (p) => p.startsWith('/api/search') && p.includes('q='), method: 'GET' })
+      .reply(200, [
+        candidate(4, roman, { duration: 263, syncedLyrics: '[00:11.00]Tum hi ho\n[00:15.00]Ab tum hi ho' }),
+      ]);
+
+    const found = await resolveLyricsInScript('Tum Hi Ho', 'Arijit Singh', 262_000, 'latin');
+    expect(found).toMatchObject({ synced: true, provider: 'lrclib', offsetMs: 0 });
+    expect(found!.lines).toEqual([
+      { atMs: 11_000, text: 'Tum hi ho' },
+      { atMs: 15_000, text: 'Ab tum hi ho' },
+    ]);
+  });
+
+  it('BE-LYR-SCRIPT-004: resolveLyricsInScript is null when no version is in that script, and throws when LRCLIB fails', async () => {
+    const lrcMock = mockAgent!.get('https://lrclib.net');
+    lrcMock
+      .intercept({ path: (p) => p.startsWith('/api/search'), method: 'GET' })
+      .reply(200, [
+        {
+          id: 1,
+          trackName: 'X',
+          artistName: 'Y',
+          albumName: '',
+          duration: 200,
+          instrumental: false,
+          plainLyrics: hindi,
+          syncedLyrics: null,
+        },
+      ])
+      .times(2);
+    expect(await resolveLyricsInScript('X', 'Y', 200_000, 'latin')).toBeNull();
+
+    lrcMock
+      .intercept({ path: (p) => p.startsWith('/api/search'), method: 'GET' })
+      .reply(500, {})
+      .times(2);
+    // Not null: the route would cache null as "none in this script" for a week.
+    await expect(resolveLyricsInScript('X', 'Y', 200_000, 'latin')).rejects.toBeInstanceOf(LyricsUnavailableError);
   });
 });

@@ -1,20 +1,23 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { isLocalTestHost } from '../factories.js';
+import net from 'node:net';
 import request from 'supertest';
+import { saveSetting } from '../../src/services/systemConfig.js';
 import { createApp } from '../../src/app.js';
-import { MockAgent, getGlobalDispatcher, setGlobalDispatcher } from 'undici';
-import { LyricsResolver } from '../../src/lyrics.js';
-import { PermanentCache } from '../../src/cache.js';
+import { MockAgent, getGlobalDispatcher, setGlobalDispatcher, type Dispatcher } from 'undici';
+import { LyricsResolver } from '../../src/services/lyrics.js';
+import { PermanentCache } from '../../src/services/cache.js';
 
 describe('CORS and Security Headers', () => {
   const app = createApp();
   let mockAgent: MockAgent | null = null;
-  let originalDispatcher: any;
+  let originalDispatcher: Dispatcher;
 
   beforeEach(() => {
     originalDispatcher = getGlobalDispatcher();
     mockAgent = new MockAgent();
     mockAgent.disableNetConnect();
-    mockAgent.enableNetConnect((host) => host.includes('127.0.0.1') || host.includes('localhost'));
+    mockAgent.enableNetConnect(isLocalTestHost);
     setGlobalDispatcher(mockAgent);
   });
 
@@ -27,7 +30,7 @@ describe('CORS and Security Headers', () => {
     setGlobalDispatcher(originalDispatcher);
   });
 
-  it('allows requests with localhost origin in development/test', async () => {
+  it('BE-SEC-001: allows requests with localhost origin in development/test', async () => {
     const pipedMock = mockAgent!.get('http://localhost:8090');
     pipedMock.intercept({ path: '/healthcheck', method: 'GET' }).reply(200, { ok: true });
 
@@ -37,7 +40,7 @@ describe('CORS and Security Headers', () => {
     expect(res.headers['access-control-allow-origin']).toBe('http://localhost:5183');
   });
 
-  it('rejects disallowed unanchored origin without 500 or CORS header', async () => {
+  it('BE-SEC-002: rejects disallowed unanchored origin without 500 or CORS header', async () => {
     const pipedMock = mockAgent!.get('http://localhost:8090');
     pipedMock.intercept({ path: '/healthcheck', method: 'GET' }).reply(200, { ok: true });
 
@@ -47,17 +50,17 @@ describe('CORS and Security Headers', () => {
     expect(res.headers['access-control-allow-origin']).toBeUndefined();
   });
 
-  it('allows requests with no Origin header', async () => {
+  it('BE-SEC-003: allows requests with no Origin header', async () => {
     const pipedMock = mockAgent!.get('http://localhost:8090');
     pipedMock.intercept({ path: '/healthcheck', method: 'GET' }).reply(200, { ok: true });
 
     const res = await request(app).get('/api/v1/healthz');
 
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ ok: true, version: '1.0.0', piped: 'up' });
+    expect(res.body).toMatchObject({ ok: true, piped: 'up' });
   });
 
-  it('includes helmet security headers with cross-origin resource policy', async () => {
+  it('BE-SEC-004: includes helmet security headers with cross-origin resource policy', async () => {
     const pipedMock = mockAgent!.get('http://localhost:8090');
     pipedMock.intercept({ path: '/healthcheck', method: 'GET' }).reply(200, { ok: true });
 
@@ -68,7 +71,7 @@ describe('CORS and Security Headers', () => {
     expect(res.headers['x-content-type-options']).toBe('nosniff');
   });
 
-  it('returns generic "Internal server error" for unexpected 500 exceptions', async () => {
+  it('BE-SEC-005: returns generic "Internal server error" for unexpected 500 exceptions', async () => {
     const pipedMock = mockAgent!.get('http://localhost:8090');
     pipedMock.intercept({ path: '/streams/crashTrack', method: 'GET' }).reply(200, {
       title: 'Crash Song',
@@ -90,5 +93,48 @@ describe('CORS and Security Headers', () => {
       },
     });
     expect(crashRes.body.error.message).not.toContain('Secret DB connection string leaked');
+  });
+
+  it('BE-SEC-006: a malformed JSON body gets 400, not 500', async () => {
+    const res = await request(app)
+      .post('/api/v1/auth/login')
+      .set('Content-Type', 'application/json')
+      .send('{"email": ');
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual({ error: { code: 'BAD_REQUEST', message: 'The request body is not valid JSON' } });
+  });
+
+  it('BE-SEC-007: /healthz answers within the Docker health check timeout when Piped hangs', async () => {
+    // A server that accepts the connection and never answers, like an overloaded Piped.
+    const sockets: net.Socket[] = [];
+    const hanging = net.createServer((socket) => sockets.push(socket));
+    await new Promise<void>((resolve) => hanging.listen(0, '127.0.0.1', resolve));
+    const { port } = hanging.address() as net.AddressInfo;
+    await saveSetting('piped.apiUrl', `http://127.0.0.1:${port}`, 'test');
+    try {
+      const started = Date.now();
+      const res = await request(app).get('/api/v1/healthz');
+      expect(Date.now() - started).toBeLessThan(4000);
+      expect(res.status).toBe(200);
+      expect(res.body).toMatchObject({ ok: true, db: 'up', piped: 'down' });
+    } finally {
+      await saveSetting('piped.apiUrl', null, 'test');
+      sockets.forEach((s) => s.destroy());
+      await new Promise((resolve) => hanging.close(resolve));
+    }
+  });
+
+  it('BE-SEC-008: /healthz answers quickly when connecting to Piped never completes', async () => {
+    // A non-routable address: the TCP connect hangs (or fails at once on some networks).
+    mockAgent!.enableNetConnect('10.255.255.1:8090');
+    await saveSetting('piped.apiUrl', 'http://10.255.255.1:8090', 'test');
+    try {
+      const started = Date.now();
+      const res = await request(app).get('/api/v1/healthz');
+      expect(Date.now() - started).toBeLessThan(4000);
+      expect(res.body).toMatchObject({ ok: true, db: 'up', piped: 'down' });
+    } finally {
+      await saveSetting('piped.apiUrl', null, 'test');
+    }
   });
 });

@@ -36,6 +36,13 @@ if [ ! -f .env ]; then
     exit 1
 fi
 
+if command -v docker >/dev/null 2>&1; then
+    docker compose -f docker-compose.dev.yml up -d mailpit
+    echo "Mailpit inbox: http://localhost:8025"
+else
+    echo "Warning: docker not found - Mailpit will not start. SMTP will fail."
+fi
+
 # The Piped upstream is private (contract D2) but the catalog is useless without
 # it, so say plainly whether it is up rather than failing later per-request.
 PIPED_URL="$(grep -E '^PIPED_API_URL=' .env | cut -d= -f2- || echo http://localhost:8090)"

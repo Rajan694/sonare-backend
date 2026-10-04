@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
-import { config } from './config.js';
-import { StreamTokenError } from './errors.js';
+import { config } from '../config.js';
+import { StreamTokenError } from '../errors.js';
 
 const STREAM_TOKEN_SECRET = config.JWT_SECRET;
 

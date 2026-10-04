@@ -6,15 +6,15 @@ import {
   latestExtractorCommit,
   parseSetting,
   saveSetting,
-} from '../../src/systemConfig.js';
+} from '../../src/services/systemConfig.js';
 import { db } from '../../src/db/index.js';
 import { systemConfiguration } from '../../src/db/schema.js';
 import { eq } from 'drizzle-orm';
-import { MockAgent, getGlobalDispatcher, setGlobalDispatcher } from 'undici';
+import { MockAgent, getGlobalDispatcher, setGlobalDispatcher, type Dispatcher } from 'undici';
 
 describe('systemConfig.ts', () => {
   let mockAgent: MockAgent | null = null;
-  let originalDispatcher: any;
+  let originalDispatcher: Dispatcher;
 
   beforeEach(() => {
     originalDispatcher = getGlobalDispatcher();
@@ -52,7 +52,7 @@ describe('systemConfig.ts', () => {
   });
 
   it('BE-SYS-004: saveSetting persists configuration to database', async () => {
-    await saveSetting('piped.apiUrl', 'http://localhost:8091');
+    await saveSetting('piped.apiUrl', 'http://localhost:8091', 'test-admin');
     const [row] = await db.select().from(systemConfiguration).where(eq(systemConfiguration.key, 'piped.apiUrl'));
     expect(row.value).toBe('http://localhost:8091');
   });
@@ -96,7 +96,7 @@ describe('systemConfig.ts', () => {
 
 describe('systemConfig.ts: deployed & extractor checks', () => {
   let mockAgent: MockAgent | null = null;
-  let originalDispatcher: any;
+  let originalDispatcher: Dispatcher;
 
   beforeEach(() => {
     originalDispatcher = getGlobalDispatcher();

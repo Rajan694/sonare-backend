@@ -14,7 +14,14 @@ export default defineConfig({
       provider: 'v8',
       reporter: ['text', 'json', 'html'],
       include: ['src/**/*.ts'],
-      exclude: ['src/server.ts', 'src/db/create.ts', 'src/peaks.ts', 'src/db/index.ts', 'src/db/schema.ts'],
+      exclude: [
+        'src/server.ts',
+        'src/db/create.ts',
+        'src/db/migrate.ts',
+        'src/services/peaks.ts',
+        'src/db/index.ts',
+        'src/db/schema.ts',
+      ],
       thresholds: {
         lines: 90,
         branches: 70,

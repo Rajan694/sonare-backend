@@ -1,12 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { MockAgent, getGlobalDispatcher, setGlobalDispatcher } from 'undici';
+import { MockAgent, getGlobalDispatcher, setGlobalDispatcher, type Dispatcher } from 'undici';
 import { Piped, UpstreamError } from '../../src/upstream/piped.js';
 import { Lrclib } from '../../src/upstream/lrclib.js';
-import { Genius } from '../../src/upstream/genius.js';
 
-describe('Upstream clients (Piped, LRCLIB, Genius)', () => {
+describe('Upstream clients (Piped, LRCLIB)', () => {
   let mockAgent: MockAgent | null = null;
-  let originalDispatcher: any;
+  let originalDispatcher: Dispatcher;
 
   beforeEach(() => {
     originalDispatcher = getGlobalDispatcher();
@@ -201,62 +200,14 @@ describe('Upstream clients (Piped, LRCLIB, Genius)', () => {
 
       const results = await Lrclib.search('bohemian rhapsody');
       expect(results).toHaveLength(1);
-      expect(results[0].trackName).toBe('Bohemian Rhapsody');
-    });
-  });
-
-  describe('Genius Client', () => {
-    it('BE-UPS-012: Genius.search searches Genius API and returns song hits', async () => {
-      const client = mockAgent!.get('https://api.genius.com');
-      client
-        .intercept({
-          path: '/search?q=Song',
-          method: 'GET',
-        })
-        .reply(200, {
-          response: {
-            hits: [
-              {
-                result: {
-                  id: 123,
-                  title: 'Song',
-                  url: 'https://genius.com/Song-lyrics',
-                },
-              },
-            ],
-          },
-        });
-
-      const hit = await Genius.search('Song');
-      expect(hit?.response?.hits).toHaveLength(1);
-      expect(hit?.response?.hits[0].result.title).toBe('Song');
-    });
-
-    it('BE-UPS-013: Genius.song fetches song details by id', async () => {
-      const client = mockAgent!.get('https://api.genius.com');
-      client
-        .intercept({
-          path: '/songs/123',
-          method: 'GET',
-        })
-        .reply(200, {
-          response: {
-            song: {
-              id: 123,
-              title: 'Song Title',
-            },
-          },
-        });
-
-      const res = await Genius.song(123);
-      expect(res?.response?.song?.title).toBe('Song Title');
+      expect(results?.[0].trackName).toBe('Bohemian Rhapsody');
     });
   });
 });
 
 describe('Piped client: extra branches', () => {
   let mockAgent: MockAgent | null = null;
-  let originalDispatcher: any;
+  let originalDispatcher: Dispatcher;
 
   beforeEach(() => {
     originalDispatcher = getGlobalDispatcher();

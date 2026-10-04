@@ -36,7 +36,7 @@ export interface Streams {
   license: string;
   visibility: string;
   tags: string[];
-  metaInfo: any[];
+  metaInfo: unknown[];
   uploaderVerified: boolean;
   duration: number;
   views: number;
@@ -47,11 +47,11 @@ export interface Streams {
   audioStreams: PipedStream[];
   videoStreams: PipedStream[];
   relatedStreams: StreamItem[];
-  subtitles: any[];
+  subtitles: unknown[];
   livestream: boolean;
   proxyUrl: string;
-  chapters: any[];
-  previewFrames: any[];
+  chapters: unknown[];
+  previewFrames: unknown[];
 }
 
 export interface StreamItem {
@@ -74,6 +74,7 @@ export interface StreamItem {
   uploaded?: number;
   uploaderVerified?: boolean;
   isShort?: boolean;
+  livestream?: boolean;
   subscriberCount?: number;
 }
 
@@ -87,7 +88,24 @@ export interface Channel {
   subscriberCount: number;
   verified: boolean;
   relatedStreams: StreamItem[]; // Actually usually tracks in top
-  tabs: any[];
+  tabs?: ChannelTab[];
+}
+
+/** A tab on a channel page; `data` is the opaque token /channels/tabs takes. */
+export interface ChannelTab {
+  name: string;
+  data: string;
+}
+
+/** An album or playlist on a channel tab. Some extractor versions send these extra fields. */
+export type ChannelTabItem = StreamItem & {
+  playlistId?: string;
+  thumbnails?: { url: string }[];
+};
+
+export interface ChannelTabPage {
+  content: ChannelTabItem[];
+  nextpage: string | null;
 }
 
 export interface Playlist {
@@ -101,6 +119,12 @@ export interface Playlist {
   uploaderAvatar: string;
   videos: number;
   relatedStreams: StreamItem[];
+}
+
+/** A further page of a playlist's tracks (/nextpage/playlists/:id). */
+export interface PlaylistPage {
+  relatedStreams: StreamItem[];
+  nextpage: string | null;
 }
 
 export interface SearchPage {

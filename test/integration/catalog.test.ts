@@ -1,28 +1,33 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import net from 'node:net';
 import request from 'supertest';
+import { saveSetting } from '../../src/services/systemConfig.js';
 import { createApp } from '../../src/app.js';
-import { MockAgent, getGlobalDispatcher, setGlobalDispatcher } from 'undici';
+import { hasFfmpeg, placeholderPeaks } from '../../src/services/peaks.js';
+import { MockAgent, getGlobalDispatcher, setGlobalDispatcher, type Dispatcher } from 'undici';
 import {
   createUser,
   samplePipedChannel,
   samplePipedPlaylist,
   samplePipedSearchItem,
   samplePipedStream,
+  isLocalTestHost,
 } from '../factories.js';
 import { db } from '../../src/db/index.js';
 import { artistFollows, favouriteTracks } from '../../src/db/schema.js';
-import { signStreamToken } from '../../src/token.js';
+import { signStreamToken } from '../../src/services/token.js';
+import { PermanentCache } from '../../src/services/cache.js';
 
 describe('Catalog & public endpoints', () => {
   const app = createApp();
   let mockAgent: MockAgent | null = null;
-  let originalDispatcher: any;
+  let originalDispatcher: Dispatcher;
 
   beforeEach(() => {
     originalDispatcher = getGlobalDispatcher();
     mockAgent = new MockAgent();
     mockAgent.disableNetConnect();
-    mockAgent.enableNetConnect((host) => host.includes('127.0.0.1') || host.includes('localhost'));
+    mockAgent.enableNetConnect(isLocalTestHost);
     setGlobalDispatcher(mockAgent);
   });
 
@@ -34,13 +39,20 @@ describe('Catalog & public endpoints', () => {
     setGlobalDispatcher(originalDispatcher);
   });
 
-  it('BE-CATALOG-001: GET /api/v1/healthz returns 200 with piped up status', async () => {
+  it('BE-CATALOG-001: GET /api/v1/healthz reports database, Redis, Piped and ffmpeg with the package version', async () => {
     const pipedMock = mockAgent!.get('http://localhost:8090');
     pipedMock.intercept({ path: '/healthcheck', method: 'GET' }).reply(200, { ok: true });
 
     const res = await request(app).get('/api/v1/healthz');
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ ok: true, version: '1.0.0', piped: 'up' });
+    expect(res.body).toEqual({
+      ok: true,
+      version: '1.0.0',
+      db: 'up',
+      redis: 'up',
+      piped: 'up',
+      ffmpeg: hasFfmpeg() ? 'found' : 'missing',
+    });
   });
 
   it('BE-CATALOG-002: GET /api/v1/healthz reports piped down when healthcheck fails', async () => {
@@ -48,8 +60,9 @@ describe('Catalog & public endpoints', () => {
     pipedMock.intercept({ path: '/healthcheck', method: 'GET' }).reply(500, { error: 'Internal error' });
 
     const res = await request(app).get('/api/v1/healthz');
+    // Piped being down is reported but does not fail the check; only the database does.
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ ok: true, version: '1.0.0', piped: 'down' });
+    expect(res.body).toMatchObject({ ok: true, db: 'up', piped: 'down' });
   });
 
   it('BE-CATALOG-003: GET /api/v1/discover/made-for-you returns empty recommendation list for guest', async () => {
@@ -250,13 +263,33 @@ describe('Catalog & public endpoints', () => {
     expect(res.body.favourite).toBe(false);
   });
 
-  it('BE-CATALOG-015: GET /api/v1/tracks/:id returns 502 for upstream errors', async () => {
+  it('BE-CATALOG-015: GET /api/v1/tracks/:id returns 502 UPSTREAM_ERROR when Piped keeps failing', async () => {
     const pipedMock = mockAgent!.get('http://localhost:8090');
-    pipedMock.intercept({ path: '/streams/missing123', method: 'GET' }).reply(500, { message: 'Internal error' });
+    // The client retries a 5xx once, so both attempts fail.
+    pipedMock
+      .intercept({ path: '/streams/missing123', method: 'GET' })
+      .reply(500, { message: 'Internal error' })
+      .times(2);
 
     const res = await request(app).get('/api/v1/tracks/yt:missing123');
     expect(res.status).toBe(502);
-    expect(res.body.error.code).toBe('UPSTREAM_UNAVAILABLE');
+    expect(res.body.error.code).toBe('UPSTREAM_ERROR');
+  });
+
+  it('BE-CATALOG-015B: GET /api/v1/tracks/:id returns 502 UPSTREAM_UNAVAILABLE when Piped cannot be reached', async () => {
+    // A port nothing listens on: grab a free one, then close it.
+    const probe = net.createServer();
+    await new Promise<void>((resolve) => probe.listen(0, '127.0.0.1', resolve));
+    const { port } = probe.address() as net.AddressInfo;
+    await new Promise((resolve) => probe.close(resolve));
+    await saveSetting('piped.apiUrl', `http://127.0.0.1:${port}`, 'test');
+    try {
+      const res = await request(app).get('/api/v1/tracks/yt:offline123');
+      expect(res.status).toBe(502);
+      expect(res.body.error.code).toBe('UPSTREAM_UNAVAILABLE');
+    } finally {
+      await saveSetting('piped.apiUrl', null, 'test');
+    }
   });
 
   it('BE-CATALOG-016: GET /api/v1/tracks/:id/peaks returns audio peaks array', async () => {
@@ -267,6 +300,20 @@ describe('Catalog & public endpoints', () => {
     expect(res.status).toBe(200);
     expect(res.body).toHaveProperty('peaks');
     expect(Array.isArray(res.body.peaks)).toBe(true);
+  });
+
+  it('BE-CATALOG-023: GET /api/v1/tracks/:id/peaks keeps only real waveforms for good', async () => {
+    const pipedMock = mockAgent!.get('http://localhost:8090');
+    pipedMock.intercept({ path: '/streams/peakFail1', method: 'GET' }).reply(500, {});
+    // A placeholder an older version cached permanently.
+    await PermanentCache.setPeaks('peakFail1:150', placeholderPeaks('peakFail1', 150));
+
+    const res = await request(app).get('/api/v1/tracks/yt:peakFail1/peaks');
+    expect(res.status).toBe(200);
+    expect(res.body.peaks).toEqual(placeholderPeaks('peakFail1', 150));
+    // Extraction failed again: no permanent entry, a one-hour "failed" marker instead.
+    expect(await PermanentCache.getPeaks('peakFail1:150')).toBeNull();
+    expect(await PermanentCache.peaksFailedRecently('peakFail1:150')).toBe(true);
   });
 
   it('BE-CATALOG-017: GET /api/v1/albums/:id returns normalized album details', async () => {
@@ -363,19 +410,21 @@ describe('Catalog & public endpoints', () => {
     expect(res.status).toBe(200);
     expect(res.body.id).toBe('yt:PLpublicList1');
     expect(res.body.name).toBe('Greatest Hits Album');
+    // Piped has no last-modified date for YouTube playlists, so none is invented.
+    expect(res.body).not.toHaveProperty('updatedAt');
   });
 });
 
 describe('Catalog: edge cases & upstream errors', () => {
   const app = createApp();
   let mockAgent: MockAgent | null = null;
-  let originalDispatcher: any;
+  let originalDispatcher: Dispatcher;
 
   beforeEach(() => {
     originalDispatcher = getGlobalDispatcher();
     mockAgent = new MockAgent();
     mockAgent.disableNetConnect();
-    mockAgent.enableNetConnect((host) => host.includes('127.0.0.1') || host.includes('localhost'));
+    mockAgent.enableNetConnect(isLocalTestHost);
     setGlobalDispatcher(mockAgent);
   });
 
@@ -469,13 +518,13 @@ describe('Catalog: edge cases & upstream errors', () => {
 describe('Catalog: trending, artwork & image proxy', () => {
   const app = createApp();
   let mockAgent: MockAgent | null = null;
-  let originalDispatcher: any;
+  let originalDispatcher: Dispatcher;
 
   beforeEach(() => {
     originalDispatcher = getGlobalDispatcher();
     mockAgent = new MockAgent();
     mockAgent.disableNetConnect();
-    mockAgent.enableNetConnect((host) => host.includes('127.0.0.1') || host.includes('localhost'));
+    mockAgent.enableNetConnect(isLocalTestHost);
     setGlobalDispatcher(mockAgent);
   });
 
@@ -566,6 +615,18 @@ describe('Catalog: trending, artwork & image proxy', () => {
     expect(res.headers['content-type']).toBe('image/jpeg');
   });
 
+  it('BE-APP-013: GET /api/v1/image/:token fetches a Piped-proxied image straight from the CDN', async () => {
+    const token = signStreamToken('http://old-proxy.example:8091/vi/abc/mqdefault.jpg?host=i.ytimg.com', 3600000);
+    const cdn = mockAgent!.get('https://i.ytimg.com');
+    cdn.intercept({ path: '/vi/abc/mqdefault.jpg', method: 'GET' }).reply(200, Buffer.from('JPEG_DATA'), {
+      headers: { 'content-type': 'image/jpeg' },
+    });
+
+    const res = await request(app).get(`/api/v1/image/${token}`);
+    expect(res.status).toBe(200);
+    expect(res.headers['content-type']).toBe('image/jpeg');
+  });
+
   it('BE-APP-007: GET /api/v1/image/:token returns 502 if upstream fails', async () => {
     const targetUrl = 'https://images.mock/fail.jpg';
     const token = signStreamToken(targetUrl, 3600000);
@@ -587,13 +648,13 @@ describe('Catalog: trending, artwork & image proxy', () => {
 describe('Catalog: track formats & artist album fallback', () => {
   const app = createApp();
   let mockAgent: MockAgent | null = null;
-  let originalDispatcher: any;
+  let originalDispatcher: Dispatcher;
 
   beforeEach(() => {
     originalDispatcher = getGlobalDispatcher();
     mockAgent = new MockAgent();
     mockAgent.disableNetConnect();
-    mockAgent.enableNetConnect((host) => host.includes('127.0.0.1') || host.includes('localhost'));
+    mockAgent.enableNetConnect(isLocalTestHost);
     setGlobalDispatcher(mockAgent);
   });
 
@@ -652,5 +713,44 @@ describe('Catalog: image token errors', () => {
     const res = await request(app).get('/api/v1/image/corrupted.invalid.token');
     expect(res.status).toBe(403);
     expect(res.body.error.code).toBe('FORBIDDEN');
+  });
+});
+
+describe('Catalog: request validation', () => {
+  const app = createApp();
+
+  it('BE-VAL-015: GET /api/v1/search rejects an unknown type', async () => {
+    const res = await request(app).get('/api/v1/search?q=queen&type=podcasts');
+
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe('BAD_REQUEST');
+  });
+
+  it('BE-VAL-016: GET /api/v1/search rejects search text over 200 characters', async () => {
+    const res = await request(app).get(`/api/v1/search?q=${'a'.repeat(201)}`);
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toEqual({ code: 'BAD_REQUEST', message: 'Search text must be at most 200 characters' });
+  });
+
+  it('BE-VAL-017: GET /api/v1/search/suggestions rejects blank search text', async () => {
+    const res = await request(app).get('/api/v1/search/suggestions?q=%20%20');
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toEqual({ code: 'BAD_REQUEST', message: 'Missing query parameter: q' });
+  });
+
+  it('BE-VAL-018: GET /api/v1/trending rejects a limit above 100', async () => {
+    const res = await request(app).get('/api/v1/trending?limit=500');
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toEqual({ code: 'BAD_REQUEST', message: 'Must be at most 100' });
+  });
+
+  it('BE-VAL-019: GET /api/v1/trending rejects a region that is not a country code', async () => {
+    const res = await request(app).get('/api/v1/trending?region=India');
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toEqual({ code: 'BAD_REQUEST', message: 'region must be a two-letter country code' });
   });
 });

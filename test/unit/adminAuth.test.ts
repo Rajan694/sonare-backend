@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { requireAdmin, signAdminToken } from '../../src/adminAuth.js';
+import { requireAdmin, signAdminToken } from '../../src/middleware/adminAuth.js';
 import { createAdminUser } from '../factories.js';
 import jwt from 'jsonwebtoken';
 import { config } from '../../src/config.js';

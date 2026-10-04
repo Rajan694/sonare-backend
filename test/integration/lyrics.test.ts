@@ -1,19 +1,19 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import request from 'supertest';
 import { createApp } from '../../src/app.js';
-import { MockAgent, getGlobalDispatcher, setGlobalDispatcher } from 'undici';
-import { createUser, samplePipedStream } from '../factories.js';
+import { MockAgent, getGlobalDispatcher, setGlobalDispatcher, type Dispatcher } from 'undici';
+import { createUser, samplePipedStream, isLocalTestHost } from '../factories.js';
 
 describe('Lyrics endpoints & overrides', () => {
   const app = createApp();
   let mockAgent: MockAgent | null = null;
-  let originalDispatcher: any;
+  let originalDispatcher: Dispatcher;
 
   beforeEach(() => {
     originalDispatcher = getGlobalDispatcher();
     mockAgent = new MockAgent();
     mockAgent.disableNetConnect();
-    mockAgent.enableNetConnect((host) => host.includes('127.0.0.1') || host.includes('localhost'));
+    mockAgent.enableNetConnect(isLocalTestHost);
     setGlobalDispatcher(mockAgent);
   });
 
@@ -100,6 +100,27 @@ describe('Lyrics endpoints & overrides', () => {
     expect(res.body.error.code).toBe('NOT_FOUND');
   });
 
+  it('BE-LYRICS-013: GET /api/v1/tracks/:id/lyrics is 502 LYRICS_UNAVAILABLE when LRCLIB is down, and retries next time', async () => {
+    const pipedMock = mockAgent!.get('http://localhost:8090');
+    pipedMock.intercept({ path: '/streams/lrclibDown1', method: 'GET' }).reply(200, samplePipedStream('lrclibDown1'));
+
+    const lrcMock = mockAgent!.get('https://lrclib.net');
+    lrcMock.intercept({ path: (p) => p.startsWith('/api/get'), method: 'GET' }).reply(503, {});
+    lrcMock.intercept({ path: (p) => p.startsWith('/api/search'), method: 'GET' }).reply(503, {});
+
+    const down = await request(app).get('/api/v1/tracks/yt:lrclibDown1/lyrics');
+    expect(down.status).toBe(502);
+    expect(down.body.error.code).toBe('LYRICS_UNAVAILABLE');
+
+    // Nothing was cached: once LRCLIB is back the same track finds its lyrics.
+    lrcMock
+      .intercept({ path: (p) => p.startsWith('/api/get'), method: 'GET' })
+      .reply(200, { id: 1, trackName: 'T', artistName: 'A', syncedLyrics: null, plainLyrics: 'Back again' });
+    const back = await request(app).get('/api/v1/tracks/yt:lrclibDown1/lyrics');
+    expect(back.status).toBe(200);
+    expect(back.body.plain).toBe('Back again');
+  });
+
   it('BE-LYRICS-004: POST /api/v1/tracks/:id/lyrics stores custom override text for authenticated user', async () => {
     const { token } = await createUser();
     const res = await request(app)
@@ -152,13 +173,13 @@ describe('Lyrics endpoints & overrides', () => {
 describe('Lyrics search', () => {
   const app = createApp();
   let mockAgent: MockAgent | null = null;
-  let originalDispatcher: any;
+  let originalDispatcher: Dispatcher;
 
   beforeEach(() => {
     originalDispatcher = getGlobalDispatcher();
     mockAgent = new MockAgent();
     mockAgent.disableNetConnect();
-    mockAgent.enableNetConnect((host) => host.includes('127.0.0.1') || host.includes('localhost'));
+    mockAgent.enableNetConnect(isLocalTestHost);
     setGlobalDispatcher(mockAgent);
   });
 
@@ -191,8 +212,50 @@ describe('Lyrics search', () => {
     expect(res.body[0].trackName).toBe('Bohemian Rhapsody');
   });
 
+  it('BE-APP-012: GET /api/v1/lyrics/search is 502 LYRICS_UNAVAILABLE when LRCLIB is down', async () => {
+    const lrcMock = mockAgent!.get('https://lrclib.net');
+    lrcMock.intercept({ path: (p) => p.startsWith('/api/search'), method: 'GET' }).reply(500, {});
+
+    const res = await request(app).get('/api/v1/lyrics/search?track=Anything');
+    expect(res.status).toBe(502);
+    expect(res.body.error.code).toBe('LYRICS_UNAVAILABLE');
+  });
+
   it('BE-APP-009: GET /api/v1/lyrics/search validates missing track param with 400', async () => {
     const res = await request(app).get('/api/v1/lyrics/search');
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe('BAD_REQUEST');
+  });
+});
+
+describe('Lyrics: request validation', () => {
+  const app = createApp();
+
+  it('BE-VAL-012: POST /api/v1/tracks/:id/lyrics rejects a body with neither lrc nor plain', async () => {
+    const { token } = await createUser();
+    const res = await request(app)
+      .post('/api/v1/tracks/yt:valLyrics1/lyrics')
+      .set('Authorization', `Bearer ${token}`)
+      .send({});
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toEqual({ code: 'BAD_REQUEST', message: 'Send lrc or plain lyrics' });
+  });
+
+  it('BE-VAL-013: PATCH /api/v1/tracks/:id/lyrics/offset rejects a non-numeric offset', async () => {
+    const { token } = await createUser();
+    const res = await request(app)
+      .patch('/api/v1/tracks/yt:valLyrics2/lyrics/offset')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ offsetMs: 'late' });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toEqual({ code: 'BAD_REQUEST', message: 'offsetMs must be a number' });
+  });
+
+  it('BE-VAL-014: GET /api/v1/tracks/:id/lyrics rejects an unknown prefer value', async () => {
+    const res = await request(app).get('/api/v1/tracks/yt:valLyrics3/lyrics?prefer=karaoke');
+
     expect(res.status).toBe(400);
     expect(res.body.error.code).toBe('BAD_REQUEST');
   });

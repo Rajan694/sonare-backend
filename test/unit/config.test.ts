@@ -1,6 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { config, corsOrigins, parseDatabaseUrl } from '../../src/config.js';
-import { z } from 'zod';
+import { assertProductionConfig, config, corsOrigins, parseDatabaseUrl, parseTrustProxy } from '../../src/config.js';
 
 describe('config.ts Configuration Parsing', () => {
   it('BE-CONF-001: parseDatabaseUrl parses standard TCP postgres URL correctly', () => {
@@ -31,5 +30,49 @@ describe('config.ts Configuration Parsing', () => {
     expect(config.REDIS_URL).toBeDefined();
     expect(config.PORT).toBeDefined();
     expect(Array.isArray(corsOrigins)).toBe(true);
+  });
+
+  describe('assertProductionConfig', () => {
+    const prod = {
+      ...config,
+      NODE_ENV: 'production' as const,
+      JWT_SECRET: 'a'.repeat(40),
+      SMTP_USER: 'resend',
+      SMTP_PASS: 're_key',
+      APP_URL: 'https://sonare.dev',
+    };
+
+    it('BE-CONF-005: accepts a complete production config', () => {
+      expect(() => assertProductionConfig(prod)).not.toThrow();
+    });
+
+    it('BE-CONF-006: rejects the dev JWT secret or a short one in production', () => {
+      expect(() => assertProductionConfig({ ...prod, JWT_SECRET: '__sonare_dev_secret__' })).toThrow(/JWT_SECRET/);
+      expect(() => assertProductionConfig({ ...prod, JWT_SECRET: 'short' })).toThrow(/JWT_SECRET/);
+    });
+
+    it('BE-CONF-007: rejects missing SMTP credentials in production', () => {
+      expect(() => assertProductionConfig({ ...prod, SMTP_USER: undefined })).toThrow(/SMTP_USER/);
+      expect(() => assertProductionConfig({ ...prod, SMTP_PASS: undefined })).toThrow(/SMTP_USER/);
+    });
+
+    it('BE-CONF-008: rejects a non-https APP_URL in production', () => {
+      expect(() => assertProductionConfig({ ...prod, APP_URL: 'http://sonare.dev' })).toThrow(/APP_URL/);
+    });
+
+    it('BE-CONF-009: skips all checks outside production', () => {
+      expect(() =>
+        assertProductionConfig({ ...prod, NODE_ENV: 'development', JWT_SECRET: 'x', SMTP_USER: undefined }),
+      ).not.toThrow();
+    });
+  });
+
+  it('BE-CONF-010: parseTrustProxy turns TRUST_PROXY into the Express setting', () => {
+    expect(parseTrustProxy(undefined)).toBeUndefined();
+    expect(parseTrustProxy('')).toBeUndefined();
+    expect(parseTrustProxy('true')).toBe(true);
+    expect(parseTrustProxy('false')).toBe(false);
+    expect(parseTrustProxy('2')).toBe(2);
+    expect(parseTrustProxy('loopback')).toBe('loopback');
   });
 });

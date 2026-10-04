@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createRateLimiter } from '../../src/rateLimit.js';
+import { createRateLimiter } from '../../src/middleware/rateLimit.js';
 
 describe('rateLimit.ts: windows', () => {
   it('BE-RATE-001: allows requests under rate limit threshold', async () => {

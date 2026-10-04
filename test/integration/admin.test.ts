@@ -1,11 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import request from 'supertest';
 import { createApp } from '../../src/app.js';
-import { createAdminUser, createUser } from '../factories.js';
+import { createAdminUser, createUser, isLocalTestHost } from '../factories.js';
 import { db } from '../../src/db/index.js';
 import { errorLogs } from '../../src/db/schema.js';
-import { MockAgent, getGlobalDispatcher, setGlobalDispatcher } from 'undici';
-import { requireAdmin } from '../../src/adminAuth.js';
+import { MockAgent, getGlobalDispatcher, setGlobalDispatcher, type Dispatcher } from 'undici';
+import { requireAdmin } from '../../src/middleware/adminAuth.js';
+import type { Request, Response } from 'express';
 
 describe('Admin: login, config, analytics & errors', () => {
   const app = createApp();
@@ -221,13 +222,13 @@ describe('Admin: security, rate limiting & filters', () => {
 describe('Admin: config & extractor commit', () => {
   const app = createApp();
   let mockAgent: MockAgent | null = null;
-  let originalDispatcher: any;
+  let originalDispatcher: Dispatcher;
 
   beforeEach(() => {
     originalDispatcher = getGlobalDispatcher();
     mockAgent = new MockAgent();
     mockAgent.disableNetConnect();
-    mockAgent.enableNetConnect((host) => host.includes('127.0.0.1') || host.includes('localhost'));
+    mockAgent.enableNetConnect(isLocalTestHost);
     setGlobalDispatcher(mockAgent);
   });
 
@@ -375,17 +376,15 @@ describe('Admin: invalid config values & analytics tz', () => {
 });
 
 describe('Admin: requireAdmin middleware', () => {
-  const app = createApp();
-
   it('BE-ADM-BR-001: requireAdmin rejects when database throws an error', async () => {
     const req = {
       headers: { authorization: 'Bearer invalid_admin_token_string' },
-    } as any;
+    } as unknown as Request;
     const res = {
-      status: (s: number) => ({
-        json: (d: any) => d,
+      status: () => ({
+        json: (d: unknown) => d,
       }),
-    } as any;
+    } as unknown as Response;
     let calledNext = false;
     await requireAdmin(req, res, () => {
       calledNext = true;
