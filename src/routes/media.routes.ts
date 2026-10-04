@@ -3,10 +3,11 @@ import { eq } from 'drizzle-orm';
 import { request } from 'undici';
 import { LRUCache } from 'lru-cache';
 import { CachedPiped, PermanentCache } from '../services/cache.js';
-import { normalizeStreamToTrack, albumThumbFor } from '../normalize/index.js';
+import { normalizeStreamToTrack, albumThumbFor, proxyImageUrl } from '../normalize/index.js';
+import { directImageUrl, ytThumbUrl, type YtThumbName } from '../upstream/ytImages.js';
 import { idHelpers } from '../ids.js';
 import { signStreamToken, verifyStreamToken } from '../services/token.js';
-import { extractPeaks } from '../services/peaks.js';
+import { extractPeaks, isPlaceholderPeaks, placeholderPeaks } from '../services/peaks.js';
 import { NoAudioStreamError } from '../errors.js';
 import { getUserTrackFields } from '../db/userData.js';
 import { db } from '../db/index.js';
@@ -126,15 +127,15 @@ function selectBestAudioStream(
 
 // Large thumbnails aren't guaranteed: maxresdefault and hq720 are missing for some videos,
 // and a client (the lock screen especially) can't fall back on its own. Probe once per video.
-const largeThumbs = new LRUCache<string, string>({ max: 5000, ttl: 7 * 24 * 3600_000 });
+const largeThumbs = new LRUCache<string, YtThumbName>({ max: 5000, ttl: 7 * 24 * 3600_000 });
 
-async function largestThumb(videoId: string): Promise<string> {
+async function largestThumb(videoId: string): Promise<YtThumbName> {
   const known = largeThumbs.get(videoId);
   if (known) return known;
-  let found = 'mqdefault';
-  for (const name of ['maxresdefault', 'hq720']) {
+  let found: YtThumbName = 'mqdefault';
+  for (const name of ['maxresdefault', 'hq720'] as const) {
     try {
-      const head = await request(`https://i.ytimg.com/vi/${videoId}/${name}.jpg`, { method: 'HEAD' });
+      const head = await request(ytThumbUrl(videoId, name), { method: 'HEAD' });
       await head.body.dump();
       if (head.statusCode === 200) {
         found = name;
@@ -175,7 +176,7 @@ mediaRouter.get('/tracks/:id/artwork', async (req, res) => {
   // artwork. mqdefault is 16:9 without bars and exists for every video.
   const thumbRes = size === '640' ? await largestThumb(rawId) : 'mqdefault';
 
-  res.redirect(302, `https://i.ytimg.com/vi/${rawId}/${thumbRes}.jpg`);
+  res.redirect(302, ytThumbUrl(rawId, thumbRes));
 });
 
 const handlePlaylistArtwork = async (req: Request<{ id: string }>, res: Response) => {
@@ -228,7 +229,7 @@ const handlePlaylistArtwork = async (req: Request<{ id: string }>, res: Response
       thumbUrl = thumbUrl.replace(/=s\d+/, `=s${targetSize}`).replace(/=w\d+-h\d+/, `=w${targetSize}-h${targetSize}`);
     }
 
-    res.redirect(302, `/api/v1/image/${signStreamToken(thumbUrl, 30 * 24 * 3600 * 1000)}`);
+    res.redirect(302, proxyImageUrl(thumbUrl)!);
   } catch {
     res.status(404).end();
   }
@@ -253,7 +254,7 @@ mediaRouter.get('/artists/:id/artwork', async (req, res) => {
       avatarUrl = avatarUrl.replace(/=s\d+/, `=s${targetSize}`).replace(/=w\d+-h\d+/, `=w${targetSize}-h${targetSize}`);
     }
 
-    res.redirect(302, `/api/v1/image/${signStreamToken(avatarUrl, 30 * 24 * 3600 * 1000)}`);
+    res.redirect(302, proxyImageUrl(avatarUrl)!);
   } catch {
     res.status(404).end();
   }
@@ -263,7 +264,8 @@ mediaRouter.get('/image/:token', async (req, res) => {
   const { token } = req.params;
   const data = verifyStreamToken(token);
 
-  const upstreamRes = await request(data.url);
+  // Tokens signed before images went direct still name the Piped proxy that was current then.
+  const upstreamRes = await request(directImageUrl(data.url));
   if (upstreamRes.statusCode === 200 || upstreamRes.statusCode === 206) {
     res.status(upstreamRes.statusCode);
     if (upstreamRes.headers['content-length'])
@@ -317,6 +319,9 @@ mediaRouter.get('/tracks/:id/peaks', async (req, res) => {
 
   const cacheKey = `${rawId}:${bars}`;
   let peaks = await PermanentCache.getPeaks(cacheKey);
+  // Older versions cached the placeholder for good when extraction failed; look again.
+  if (peaks && isPlaceholderPeaks(rawId, bars, peaks)) peaks = null;
+  if (!peaks && (await PermanentCache.peaksFailedRecently(cacheKey))) peaks = placeholderPeaks(rawId, bars);
   if (!peaks) {
     let urlStr = '';
     try {
@@ -330,7 +335,9 @@ mediaRouter.get('/tracks/:id/peaks', async (req, res) => {
     }
 
     peaks = await extractPeaks(urlStr, rawId, bars);
-    await PermanentCache.setPeaks(cacheKey, peaks);
+    // Only real waveforms are kept for good; a placeholder is retried in an hour.
+    if (isPlaceholderPeaks(rawId, bars, peaks)) await PermanentCache.markPeaksFailed(cacheKey);
+    else await PermanentCache.setPeaks(cacheKey, peaks);
   }
 
   res.json({ peaks });

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { CachedPiped, PermanentCache } from '../../src/services/cache.js';
+import { CachedPiped, PermanentCache, TTL, streamTtl } from '../../src/services/cache.js';
+import type * as T from '../../src/upstream/piped.types.js';
 import { MockAgent, getGlobalDispatcher, setGlobalDispatcher, type Dispatcher } from 'undici';
 import { samplePipedChannel, samplePipedPlaylist, samplePipedStream } from '../factories.js';
 
@@ -76,6 +77,19 @@ describe('cache.ts: Redis & in-memory fallback', () => {
 
     const peaks = await PermanentCache.getPeaks('peakVid1');
     expect(peaks).toEqual(samplePeaks);
+  });
+
+  it('BE-CACHE-006: streamTtl never caches a /streams answer past its urls expiring', () => {
+    const now = 1_800_000_000_000;
+    const at = (expireSec: number | null) =>
+      ({
+        audioStreams: [{ url: `http://localhost:8091/videoplayback?c=WEB${expireSec ? `&expire=${expireSec}` : ''}` }],
+        videoStreams: [],
+      }) as unknown as T.Streams;
+    expect(streamTtl(at(now / 1000 + 6 * 3600), now)).toBe(TTL.streamsMeta);
+    expect(streamTtl(at(now / 1000 + 600), now)).toBe(300);
+    expect(streamTtl(at(now / 1000 + 120), now)).toBe(0);
+    expect(streamTtl(at(null), now)).toBe(TTL.streamsMeta);
   });
 });
 

@@ -5,6 +5,7 @@ import { UserTrackFields } from '../db/userData.js';
 import { signStreamToken } from '../services/token.js';
 import { LRUCache } from 'lru-cache';
 import { PermanentCache } from '../services/cache.js';
+import { directImageUrl } from '../upstream/ytImages.js';
 
 // Album covers in search / artist results are resizable googleusercontent urls
 // (`=w544-h544`), while the playlist endpoint only offers a signed full-size one (~2MB).
@@ -12,8 +13,10 @@ import { PermanentCache } from '../services/cache.js';
 // keeps them across restarts; the in-memory copy saves the round trip.
 const albumThumbs = new LRUCache<string, string>({ max: 5000, ttl: 7 * 24 * 3600 * 1000 });
 
-function rememberAlbumThumb(rawId: string, url: string | undefined) {
-  if (rawId === 'unknown' || !url || !/=w\d+-h\d+/.test(url)) return;
+function rememberAlbumThumb(rawId: string, proxied: string | undefined) {
+  if (rawId === 'unknown' || !proxied || !/=w\d+-h\d+/.test(proxied)) return;
+  // Stored without the Piped proxy's address, which can change while this is cached.
+  const url = directImageUrl(proxied);
   if (albumThumbs.get(rawId) === url) return;
   albumThumbs.set(rawId, url);
   void PermanentCache.setAlbumThumb(rawId, url);
@@ -22,9 +25,11 @@ function rememberAlbumThumb(rawId: string, url: string | undefined) {
 export async function albumThumbFor(rawId: string): Promise<string | undefined> {
   const known = albumThumbs.get(rawId);
   if (known) return known;
-  const stored = await PermanentCache.getAlbumThumb(rawId);
+  const cached = await PermanentCache.getAlbumThumb(rawId);
+  // Entries saved before 2026-10 still carry the proxy's address.
+  const stored = cached ? directImageUrl(cached) : undefined;
   if (stored) albumThumbs.set(rawId, stored);
-  return stored ?? undefined;
+  return stored;
 }
 
 export function withUserFields<TObj extends object>(obj: TObj, userFields?: UserTrackFields) {
@@ -67,10 +72,10 @@ function mapCodec(codec: string): string {
   return codec;
 }
 
+/** A 30-day image token; the backend fetches the image straight from Google's CDN. */
 export function proxyImageUrl(url: string | undefined): string | undefined {
   if (!url) return undefined;
-  // Use a 30-day token for images
-  return `/api/v1/image/${signStreamToken(url, 30 * 24 * 3600 * 1000)}`;
+  return `/api/v1/image/${signStreamToken(directImageUrl(url), 30 * 24 * 3600 * 1000)}`;
 }
 
 export function normalizeStreamToTrack(

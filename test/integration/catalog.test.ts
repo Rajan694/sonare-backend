@@ -3,7 +3,7 @@ import net from 'node:net';
 import request from 'supertest';
 import { saveSetting } from '../../src/services/systemConfig.js';
 import { createApp } from '../../src/app.js';
-import { hasFfmpeg } from '../../src/services/peaks.js';
+import { hasFfmpeg, placeholderPeaks } from '../../src/services/peaks.js';
 import { MockAgent, getGlobalDispatcher, setGlobalDispatcher, type Dispatcher } from 'undici';
 import {
   createUser,
@@ -16,6 +16,7 @@ import {
 import { db } from '../../src/db/index.js';
 import { artistFollows, favouriteTracks } from '../../src/db/schema.js';
 import { signStreamToken } from '../../src/services/token.js';
+import { PermanentCache } from '../../src/services/cache.js';
 
 describe('Catalog & public endpoints', () => {
   const app = createApp();
@@ -299,6 +300,20 @@ describe('Catalog & public endpoints', () => {
     expect(res.status).toBe(200);
     expect(res.body).toHaveProperty('peaks');
     expect(Array.isArray(res.body.peaks)).toBe(true);
+  });
+
+  it('BE-CATALOG-023: GET /api/v1/tracks/:id/peaks keeps only real waveforms for good', async () => {
+    const pipedMock = mockAgent!.get('http://localhost:8090');
+    pipedMock.intercept({ path: '/streams/peakFail1', method: 'GET' }).reply(500, {});
+    // A placeholder an older version cached permanently.
+    await PermanentCache.setPeaks('peakFail1:150', placeholderPeaks('peakFail1', 150));
+
+    const res = await request(app).get('/api/v1/tracks/yt:peakFail1/peaks');
+    expect(res.status).toBe(200);
+    expect(res.body.peaks).toEqual(placeholderPeaks('peakFail1', 150));
+    // Extraction failed again: no permanent entry, a one-hour "failed" marker instead.
+    expect(await PermanentCache.getPeaks('peakFail1:150')).toBeNull();
+    expect(await PermanentCache.peaksFailedRecently('peakFail1:150')).toBe(true);
   });
 
   it('BE-CATALOG-017: GET /api/v1/albums/:id returns normalized album details', async () => {
@@ -593,6 +608,18 @@ describe('Catalog: trending, artwork & image proxy', () => {
     const imgMock = mockAgent!.get('https://images.mock');
     imgMock.intercept({ path: '/artwork.jpg', method: 'GET' }).reply(200, Buffer.from('JPEG_DATA'), {
       headers: { 'content-type': 'image/jpeg', 'content-length': '9' },
+    });
+
+    const res = await request(app).get(`/api/v1/image/${token}`);
+    expect(res.status).toBe(200);
+    expect(res.headers['content-type']).toBe('image/jpeg');
+  });
+
+  it('BE-APP-013: GET /api/v1/image/:token fetches a Piped-proxied image straight from the CDN', async () => {
+    const token = signStreamToken('http://old-proxy.example:8091/vi/abc/mqdefault.jpg?host=i.ytimg.com', 3600000);
+    const cdn = mockAgent!.get('https://i.ytimg.com');
+    cdn.intercept({ path: '/vi/abc/mqdefault.jpg', method: 'GET' }).reply(200, Buffer.from('JPEG_DATA'), {
+      headers: { 'content-type': 'image/jpeg' },
     });
 
     const res = await request(app).get(`/api/v1/image/${token}`);

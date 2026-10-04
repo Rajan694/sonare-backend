@@ -81,21 +81,45 @@ async function setCached(key: string, data: unknown, ttlSeconds?: number): Promi
   } catch {}
 }
 
+async function delCached(key: string): Promise<void> {
+  if (!redisAvailable) return;
+  try {
+    await redis.del(key);
+  } catch {}
+}
+
+/**
+ * How long a /streams answer may be cached: its googlevideo urls stop working at their
+ * `expire` time (about 6 hours out), so never past that, less 5 minutes for the playback
+ * that starts just before it. 0 means don't cache.
+ */
+export function streamTtl(res: T.Streams, now = Date.now()): number {
+  const url = res.audioStreams?.[0]?.url ?? res.videoStreams?.[0]?.url ?? '';
+  const expire = Number(/[?&]expire=(\d+)/.exec(url)?.[1]);
+  if (!expire) return TTL.streamsMeta;
+  const left = Math.floor(expire - now / 1000) - 300;
+  return Math.max(0, Math.min(TTL.streamsMeta, left));
+}
+
+async function cacheStream(videoId: string, res: T.Streams) {
+  const ttl = streamTtl(res);
+  if (ttl > 0) await setCached(`stream:${videoId}`, res, ttl);
+}
+
 export const CachedPiped = {
   async getStream(videoId: string): Promise<T.Streams> {
-    const key = `stream:${videoId}`;
-    const cached = await getCached<T.Streams>(key);
+    const cached = await getCached<T.Streams>(`stream:${videoId}`);
     if (cached) return cached;
 
     const res = await Piped.getStream(videoId);
-    await setCached(key, res, TTL.streamsMeta);
+    await cacheStream(videoId, res);
     return res;
   },
 
   // Bypasses and replaces the cached entry - used when a cached stream URL has gone bad.
   async refreshStream(videoId: string): Promise<T.Streams> {
     const res = await Piped.getStream(videoId);
-    await setCached(`stream:${videoId}`, res, TTL.streamsMeta);
+    await cacheStream(videoId, res);
     return res;
   },
 
@@ -185,6 +209,14 @@ export const PermanentCache = {
   },
   async setPeaks(key: string, data: number[]) {
     return setCached(`peaks:${key}`, data);
+  },
+  /** Extraction failed lately (Piped down, dead url, no ffmpeg): serve the placeholder, retry in an hour. */
+  async peaksFailedRecently(key: string) {
+    return !!(await getCached<boolean>(`peaksFailed:${key}`));
+  },
+  async markPeaksFailed(key: string) {
+    await delCached(`peaks:${key}`);
+    return setCached(`peaksFailed:${key}`, true, 3600);
   },
   /** Lyrics in a preferred script; `lyrics: null` records that LRCLIB has none, so it isn't asked every play. */
   async getScriptLyrics(trackId: string, script: string) {

@@ -16,7 +16,7 @@ export function hasFfmpeg(): boolean {
 
 export async function extractPeaks(url: string, trackId: string, bars: number = 150): Promise<number[]> {
   if (!HAS_FFMPEG) {
-    return generateFallbackPeaks(trackId, bars);
+    return placeholderPeaks(trackId, bars);
   }
 
   return new Promise((resolve) => {
@@ -41,14 +41,14 @@ export async function extractPeaks(url: string, trackId: string, bars: number = 
 
     ff.on('close', (code) => {
       if (code !== 0 && chunks.length === 0) {
-        resolve(generateFallbackPeaks(trackId, bars));
+        resolve(placeholderPeaks(trackId, bars));
         return;
       }
 
       const buf = Buffer.concat(chunks);
       const validBytes = buf.byteLength - (buf.byteLength % 4);
       if (validBytes <= 0) {
-        resolve(generateFallbackPeaks(trackId, bars));
+        resolve(placeholderPeaks(trackId, bars));
         return;
       }
 
@@ -58,7 +58,7 @@ export async function extractPeaks(url: string, trackId: string, bars: number = 
       const floats = new Float32Array(alignedBuf.buffer, alignedBuf.byteOffset, validBytes / 4);
 
       if (floats.length === 0) {
-        resolve(generateFallbackPeaks(trackId, bars));
+        resolve(placeholderPeaks(trackId, bars));
         return;
       }
 
@@ -80,11 +80,18 @@ export async function extractPeaks(url: string, trackId: string, bars: number = 
       resolve(result);
     });
 
-    ff.on('error', () => resolve(generateFallbackPeaks(trackId, bars)));
+    ff.on('error', () => resolve(placeholderPeaks(trackId, bars)));
   });
 }
 
-function generateFallbackPeaks(trackId: string, bars: number): number[] {
+/** True when `peaks` is this track's made-up placeholder, i.e. extraction failed. */
+export function isPlaceholderPeaks(trackId: string, bars: number, peaks: number[]): boolean {
+  const placeholder = placeholderPeaks(trackId, bars);
+  return peaks.length === placeholder.length && peaks.every((p, i) => p === placeholder[i]);
+}
+
+/** A deterministic, waveform-ish shape for when the real audio can't be read. */
+export function placeholderPeaks(trackId: string, bars: number): number[] {
   const hashHex = crypto.createHash('md5').update(trackId).digest('hex');
   const hashBytes = Buffer.from(hashHex, 'hex');
   const result: number[] = [];

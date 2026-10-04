@@ -93,6 +93,7 @@ This document maps all backend test IDs to their specifications, assertions, and
 | `BE-CATALOG-020`  | `GET /api/v1/artists/:id/top-tracks` | Returns top tracks for artist channel.                                                                      |
 | `BE-CATALOG-021`  | `GET /api/v1/artists/:id/albums`     | Returns albums list from artist channel tab.                                                                |
 | `BE-CATALOG-022`  | `GET /api/v1/playlists/:id`          | Returns public playlist metadata.                                                                           |
+| `BE-CATALOG-023`  | `GET /api/v1/tracks/:id/peaks`       | Keeps only real waveforms for good; a failed extraction (or an old cached placeholder) retries in an hour.  |
 | `BE-BROWSE-001`   | `GET /api/v1/genres`                 | Lists the Indian and mood categories (Popular, Punjabi, Bhojpuri, Devotional…), each `{ id, name, query }`. |
 | `BE-BROWSE-002`   | `GET /api/v1/genres`                 | "Top this year" searches for the current year.                                                              |
 | `BE-CAT-EDGE-001` | `GET /api/v1/artists/:id/albums`     | Handles cursor pagination for artist channel releases.                                                      |
@@ -261,6 +262,7 @@ This document maps all backend test IDs to their specifications, assertions, and
 | `BE-APP-010`    | Route Not Found                           | Returns 404 NOT_FOUND for unmatched endpoints.                                             |
 | `BE-APP-011`    | `GET /api/v1/stream/:token`               | Handles 416 range past end with proper total size header.                                  |
 | `BE-APP-012`    | `GET /api/v1/lyrics/search`               | 502 LYRICS_UNAVAILABLE when LRCLIB is down.                                                |
+| `BE-APP-013`    | `GET /api/v1/image/:token`                | Fetches a Piped-proxied image straight from the CDN.                                       |
 | `BE-ERR-001`    | `POST /api/v1/client-errors`              | Accepts crash report from web client.                                                      |
 | `BE-ERR-002`    | `POST /api/v1/client-errors`              | Accepts warning report from linux client.                                                  |
 | `BE-ERR-003`    | `POST /api/v1/client-errors`              | Rejects invalid source name with 400 BAD_REQUEST.                                          |
@@ -392,15 +394,16 @@ This document maps all backend test IDs to their specifications, assertions, and
 
 ### Cache Layer
 
-| Test ID            | Description                                  |
-| :----------------- | :------------------------------------------- |
-| `BE-CACHE-001`     | CachedPiped stream caching.                  |
-| `BE-CACHE-002`     | CachedPiped playlist caching.                |
-| `BE-CACHE-003`     | CachedPiped channel caching.                 |
-| `BE-CACHE-004`     | PermanentCache lyrics storage and retrieval. |
-| `BE-CACHE-005`     | PermanentCache peaks storage and retrieval.  |
-| `BE-CACHE-DEG-001` | Cache fallback on Redis degradation.         |
-| `BE-CACHE-DEG-002` | CachedPiped trending method export.          |
+| Test ID            | Description                                   |
+| :----------------- | :-------------------------------------------- |
+| `BE-CACHE-001`     | CachedPiped stream caching.                   |
+| `BE-CACHE-002`     | CachedPiped playlist caching.                 |
+| `BE-CACHE-003`     | CachedPiped channel caching.                  |
+| `BE-CACHE-004`     | PermanentCache lyrics storage and retrieval.  |
+| `BE-CACHE-005`     | PermanentCache peaks storage and retrieval.   |
+| `BE-CACHE-006`     | streamTtl caps the cache at the urls' expiry. |
+| `BE-CACHE-DEG-001` | Cache fallback on Redis degradation.          |
+| `BE-CACHE-DEG-002` | CachedPiped trending method export.           |
 
 ### Telemetry & Logging
 
@@ -465,11 +468,20 @@ This document maps all backend test IDs to their specifications, assertions, and
 
 ### Peaks Extraction
 
-| Test ID        | Description                                    |
-| :------------- | :--------------------------------------------- |
-| `BE-PEAKS-001` | Bounded floating point peak levels generation. |
-| `BE-PEAKS-002` | Deterministic waveform generation.             |
-| `BE-PEAKS-003` | Synthetic peak fallback.                       |
+| Test ID        | Description                                        |
+| :------------- | :------------------------------------------------- |
+| `BE-PEAKS-001` | Bounded floating point peak levels generation.     |
+| `BE-PEAKS-002` | Deterministic waveform generation.                 |
+| `BE-PEAKS-003` | Synthetic peak fallback.                           |
+| `BE-PEAKS-004` | isPlaceholderPeaks recognises a failed extraction. |
+
+### YouTube image urls
+
+| Test ID        | Description                                                             |
+| :------------- | :---------------------------------------------------------------------- |
+| `BE-YTIMG-001` | directImageUrl turns Piped-proxied thumbnails and covers into CDN urls. |
+| `BE-YTIMG-002` | directImageUrl keeps a signed cover query byte-for-byte.                |
+| `BE-YTIMG-003` | directImageUrl leaves other urls alone; ytThumbUrl builds i.ytimg urls. |
 
 ## 9. Request validation
 
