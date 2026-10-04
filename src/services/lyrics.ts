@@ -18,6 +18,98 @@ export interface ResolvedLyrics {
   attribution?: { name: string; url: string };
 }
 
+/**
+ * Scripts a user can prefer lyrics in. LRCLIB has no language field, but often holds the
+ * same song in more than one script (a Hindi song in Devanagari and in romanised Hinglish),
+ * so the preference picks the version written in that script.
+ */
+export const LYRICS_SCRIPTS = [
+  'original',
+  'latin',
+  'devanagari',
+  'gurmukhi',
+  'arabic',
+  'bengali',
+  'gujarati',
+  'tamil',
+  'telugu',
+] as const;
+export type LyricsScript = (typeof LYRICS_SCRIPTS)[number];
+
+const SCRIPT_LETTERS: Record<Exclude<LyricsScript, 'original'>, RegExp> = {
+  latin: /\p{Script=Latin}/gu,
+  devanagari: /\p{Script=Devanagari}/gu,
+  gurmukhi: /\p{Script=Gurmukhi}/gu,
+  arabic: /\p{Script=Arabic}/gu,
+  bengali: /\p{Script=Bengali}/gu,
+  gujarati: /\p{Script=Gujarati}/gu,
+  tamil: /\p{Script=Tamil}/gu,
+  telugu: /\p{Script=Telugu}/gu,
+};
+
+/** True when most of the letters in `text` are in `script`. */
+export function isInScript(text: string, script: Exclude<LyricsScript, 'original'>): boolean {
+  const letters = text.match(/\p{L}/gu)?.length ?? 0;
+  if (letters === 0) return false;
+  const inScript = text.match(SCRIPT_LETTERS[script])?.length ?? 0;
+  return inScript / letters >= 0.6;
+}
+
+function lyricsText(l: Pick<ResolvedLyrics, 'lines' | 'plain'>): string {
+  return l.lines.length > 0 ? l.lines.map((x) => x.text).join('\n') : (l.plain ?? '');
+}
+
+/** Whether resolved lyrics are already in the preferred script. */
+export function lyricsInScript(l: ResolvedLyrics, script: Exclude<LyricsScript, 'original'>): boolean {
+  return isInScript(lyricsText(l), script);
+}
+
+/**
+ * The LRCLIB version of a song written in `script`, synced first and closest in length.
+ * Null when LRCLIB has none.
+ */
+export async function resolveLyricsInScript(
+  trackName: string,
+  artistName: string,
+  durationMs: number | undefined,
+  script: Exclude<LyricsScript, 'original'>,
+): Promise<ResolvedLyrics | null> {
+  let candidates: Awaited<ReturnType<typeof Lrclib.search>> = [];
+  try {
+    const [byFields, byQuery] = await Promise.all([
+      Lrclib.search(undefined, trackName, artistName).catch(() => null),
+      Lrclib.search(`${trackName} ${artistName}`).catch(() => null),
+    ]);
+    const seen = new Set<number>();
+    candidates = [...(byFields ?? []), ...(byQuery ?? [])].filter((c) => !seen.has(c.id) && !!seen.add(c.id));
+  } catch {
+    return null;
+  }
+
+  const durationSec = durationMs ? durationMs / 1000 : 0;
+  const matches = candidates
+    .filter((c) => !c.instrumental)
+    // A different song with the same title is worse than no match: keep it within 15s.
+    .filter((c) => !durationSec || !c.duration || Math.abs(c.duration - durationSec) <= 15)
+    .filter((c) => isInScript(c.syncedLyrics ?? c.plainLyrics ?? '', script))
+    .sort(
+      (a, b) =>
+        Number(!!b.syncedLyrics) - Number(!!a.syncedLyrics) ||
+        Math.abs((a.duration ?? 0) - durationSec) - Math.abs((b.duration ?? 0) - durationSec),
+    );
+  const best = matches[0];
+  if (!best) return null;
+  return best.syncedLyrics
+    ? {
+        synced: true,
+        provider: 'lrclib',
+        offsetMs: 0,
+        lines: parseLrc(best.syncedLyrics),
+        plain: best.plainLyrics ?? undefined,
+      }
+    : { synced: false, provider: 'lrclib', offsetMs: 0, lines: [], plain: best.plainLyrics ?? undefined };
+}
+
 export async function getDbLyricsOverride(trackId: string, userId?: string) {
   try {
     if (userId) {

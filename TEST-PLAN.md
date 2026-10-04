@@ -68,34 +68,36 @@ This document maps all backend test IDs to their specifications, assertions, and
 
 ## 2. Catalog & Discovery
 
-| Test ID           | Method / Scope                       | Description & Assertions                                                                   |
-| :---------------- | :----------------------------------- | :----------------------------------------------------------------------------------------- |
-| `BE-CATALOG-001`  | `GET /api/v1/healthz`                | Reports db, redis and piped status plus the package version; 200 while the database is up. |
-| `BE-CATALOG-002`  | `GET /api/v1/healthz`                | Piped down is reported as `piped: down` but the check still returns 200.                   |
-| `BE-CATALOG-003`  | `GET /api/v1/discover/made-for-you`  | Returns empty item array for unauthenticated guests.                                       |
-| `BE-CATALOG-004`  | `GET /api/v1/search/suggestions`     | Proxies suggestion list from Piped upstream.                                               |
-| `BE-CATALOG-005`  | `GET /api/v1/search/suggestions`     | Validates missing query q parameter with 400 BAD_REQUEST.                                  |
-| `BE-CATALOG-006`  | `GET /api/v1/search?type=songs`      | Searches songs with filter mapping and cursor pagination.                                  |
-| `BE-CATALOG-007`  | `GET /api/v1/search?type=albums`     | Searches albums mapped to normalized album shape.                                          |
-| `BE-CATALOG-008`  | `GET /api/v1/search?type=artists`    | Searches artists mapped to normalized artist shape.                                        |
-| `BE-CATALOG-009`  | `GET /api/v1/search?type=playlists`  | Searches playlists mapped to album cards.                                                  |
-| `BE-CATALOG-010`  | `GET /api/v1/search?type=all`        | Aggregates multi-type search across songs, albums, artists, playlists.                     |
-| `BE-CATALOG-011`  | `GET /api/v1/search`                 | Handles cursor decode and forward pagination.                                              |
-| `BE-CATALOG-012`  | `GET /api/v1/search`                 | Validates missing q query parameter with 400 BAD_REQUEST.                                  |
-| `BE-CATALOG-013`  | `GET /api/v1/tracks/:id`             | Returns normalized track details with authenticated user favourite states.                 |
-| `BE-CATALOG-014`  | `GET /api/v1/tracks/:id`             | Handles guest requests with default user state flags.                                      |
-| `BE-CATALOG-015`  | `GET /api/v1/tracks/:id`             | Piped failing twice (5xx is retried once) gives 502 UPSTREAM_ERROR.                        |
-| `BE-CATALOG-015B` | `GET /api/v1/tracks/:id`             | Piped unreachable (connection refused) gives 502 UPSTREAM_UNAVAILABLE.                     |
-| `BE-CATALOG-016`  | `GET /api/v1/tracks/:id/peaks`       | Returns audio waveform peak levels array.                                                  |
-| `BE-CATALOG-017`  | `GET /api/v1/albums/:id`             | Returns normalized album details.                                                          |
-| `BE-CATALOG-018`  | `GET /api/v1/albums/:id/tracks`      | Returns track list inside playlist/album.                                                  |
-| `BE-CATALOG-019`  | `GET /api/v1/artists/:id`            | Returns artist channel metadata with following state.                                      |
-| `BE-CATALOG-020`  | `GET /api/v1/artists/:id/top-tracks` | Returns top tracks for artist channel.                                                     |
-| `BE-CATALOG-021`  | `GET /api/v1/artists/:id/albums`     | Returns albums list from artist channel tab.                                               |
-| `BE-CATALOG-022`  | `GET /api/v1/playlists/:id`          | Returns public playlist metadata.                                                          |
-| `BE-CAT-EDGE-001` | `GET /api/v1/artists/:id/albums`     | Handles cursor pagination for artist channel releases.                                     |
-| `BE-CAT-EDGE-002` | `GET /api/v1/albums/:id/tracks`      | Handles cursor pagination for album tracks.                                                |
-| `BE-CAT-EDGE-003` | `GET /api/v1/playlists/:id/tracks`   | Handles cursor pagination for playlist tracks.                                             |
+| Test ID           | Method / Scope                       | Description & Assertions                                                                                    |
+| :---------------- | :----------------------------------- | :---------------------------------------------------------------------------------------------------------- |
+| `BE-CATALOG-001`  | `GET /api/v1/healthz`                | Reports db, redis and piped status plus the package version; 200 while the database is up.                  |
+| `BE-CATALOG-002`  | `GET /api/v1/healthz`                | Piped down is reported as `piped: down` but the check still returns 200.                                    |
+| `BE-CATALOG-003`  | `GET /api/v1/discover/made-for-you`  | Returns empty item array for unauthenticated guests.                                                        |
+| `BE-CATALOG-004`  | `GET /api/v1/search/suggestions`     | Proxies suggestion list from Piped upstream.                                                                |
+| `BE-CATALOG-005`  | `GET /api/v1/search/suggestions`     | Validates missing query q parameter with 400 BAD_REQUEST.                                                   |
+| `BE-CATALOG-006`  | `GET /api/v1/search?type=songs`      | Searches songs with filter mapping and cursor pagination.                                                   |
+| `BE-CATALOG-007`  | `GET /api/v1/search?type=albums`     | Searches albums mapped to normalized album shape.                                                           |
+| `BE-CATALOG-008`  | `GET /api/v1/search?type=artists`    | Searches artists mapped to normalized artist shape.                                                         |
+| `BE-CATALOG-009`  | `GET /api/v1/search?type=playlists`  | Searches playlists mapped to album cards.                                                                   |
+| `BE-CATALOG-010`  | `GET /api/v1/search?type=all`        | Aggregates multi-type search across songs, albums, artists, playlists.                                      |
+| `BE-CATALOG-011`  | `GET /api/v1/search`                 | Handles cursor decode and forward pagination.                                                               |
+| `BE-CATALOG-012`  | `GET /api/v1/search`                 | Validates missing q query parameter with 400 BAD_REQUEST.                                                   |
+| `BE-CATALOG-013`  | `GET /api/v1/tracks/:id`             | Returns normalized track details with authenticated user favourite states.                                  |
+| `BE-CATALOG-014`  | `GET /api/v1/tracks/:id`             | Handles guest requests with default user state flags.                                                       |
+| `BE-CATALOG-015`  | `GET /api/v1/tracks/:id`             | Piped failing twice (5xx is retried once) gives 502 UPSTREAM_ERROR.                                         |
+| `BE-CATALOG-015B` | `GET /api/v1/tracks/:id`             | Piped unreachable (connection refused) gives 502 UPSTREAM_UNAVAILABLE.                                      |
+| `BE-CATALOG-016`  | `GET /api/v1/tracks/:id/peaks`       | Returns audio waveform peak levels array.                                                                   |
+| `BE-CATALOG-017`  | `GET /api/v1/albums/:id`             | Returns normalized album details.                                                                           |
+| `BE-CATALOG-018`  | `GET /api/v1/albums/:id/tracks`      | Returns track list inside playlist/album.                                                                   |
+| `BE-CATALOG-019`  | `GET /api/v1/artists/:id`            | Returns artist channel metadata with following state.                                                       |
+| `BE-CATALOG-020`  | `GET /api/v1/artists/:id/top-tracks` | Returns top tracks for artist channel.                                                                      |
+| `BE-CATALOG-021`  | `GET /api/v1/artists/:id/albums`     | Returns albums list from artist channel tab.                                                                |
+| `BE-CATALOG-022`  | `GET /api/v1/playlists/:id`          | Returns public playlist metadata.                                                                           |
+| `BE-BROWSE-001`   | `GET /api/v1/genres`                 | Lists the Indian and mood categories (Popular, Punjabi, Bhojpuri, Devotional…), each `{ id, name, query }`. |
+| `BE-BROWSE-002`   | `GET /api/v1/genres`                 | "Top this year" searches for the current year.                                                              |
+| `BE-CAT-EDGE-001` | `GET /api/v1/artists/:id/albums`     | Handles cursor pagination for artist channel releases.                                                      |
+| `BE-CAT-EDGE-002` | `GET /api/v1/albums/:id/tracks`      | Handles cursor pagination for album tracks.                                                                 |
+| `BE-CAT-EDGE-003` | `GET /api/v1/playlists/:id/tracks`   | Handles cursor pagination for playlist tracks.                                                              |
 
 ---
 
@@ -117,78 +119,90 @@ This document maps all backend test IDs to their specifications, assertions, and
 
 ## 4. Lyrics & Overrides
 
-| Test ID          | Method / Scope                           | Description & Assertions                                           |
-| :--------------- | :--------------------------------------- | :----------------------------------------------------------------- |
-| `BE-LYRICS-001`  | `GET /api/v1/tracks/:id/lyrics`          | Fetches synchronized lyrics from LRCLIB provider.                  |
-| `BE-LYRICS-002`  | `GET /api/v1/tracks/:id/lyrics`          | Returns plain unsynced lyrics when synced timestamps are absent.   |
-| `BE-LYRICS-003`  | `GET /api/v1/tracks/:id/lyrics`          | Returns 404 NOT_FOUND when no lyrics exist.                        |
-| `BE-LYRICS-004`  | `POST /api/v1/tracks/:id/lyrics`         | Stores custom user lyrics override in database.                    |
-| `BE-LYRICS-005`  | `PATCH /api/v1/tracks/:id/lyrics/offset` | Updates user playback offset in milliseconds.                      |
-| `BE-LYRICS-006`  | `DELETE /api/v1/tracks/:id/lyrics`       | Clears custom lyrics override for user.                            |
-| `BE-LYR-COV-001` | `parseLrc`                               | Parses LRC string with offset tags and millisecond precision.      |
-| `BE-LYR-COV-002` | `LyricsResolver.resolve`                 | Resolves lyrics via LRCLIB search fuzzy matching.                  |
-| `BE-LYR-COV-003` | `LyricsResolver.resolve`                 | Falls back to Genius search attribution when LRCLIB has no lyrics. |
-| `BE-LYR-COV-004` | `getDbLyricsOverride`                    | Handles undefined user id gracefully.                              |
+| Test ID             | Method / Scope                           | Description & Assertions                                                                               |
+| :------------------ | :--------------------------------------- | :----------------------------------------------------------------------------------------------------- |
+| `BE-LYRICS-001`     | `GET /api/v1/tracks/:id/lyrics`          | Fetches synchronized lyrics from LRCLIB provider.                                                      |
+| `BE-LYRICS-002`     | `GET /api/v1/tracks/:id/lyrics`          | Returns plain unsynced lyrics when synced timestamps are absent.                                       |
+| `BE-LYRICS-003`     | `GET /api/v1/tracks/:id/lyrics`          | Returns 404 NOT_FOUND when no lyrics exist.                                                            |
+| `BE-LYRICS-004`     | `POST /api/v1/tracks/:id/lyrics`         | Stores custom user lyrics override in database.                                                        |
+| `BE-LYRICS-005`     | `PATCH /api/v1/tracks/:id/lyrics/offset` | Updates user playback offset in milliseconds.                                                          |
+| `BE-LYRICS-006`     | `DELETE /api/v1/tracks/:id/lyrics`       | Clears custom lyrics override for user.                                                                |
+| `BE-LYR-COV-001`    | `parseLrc`                               | Parses LRC string with offset tags and millisecond precision.                                          |
+| `BE-LYR-COV-002`    | `LyricsResolver.resolve`                 | Resolves lyrics via LRCLIB search fuzzy matching.                                                      |
+| `BE-LYR-COV-003`    | `LyricsResolver.resolve`                 | Falls back to Genius search attribution when LRCLIB has no lyrics.                                     |
+| `BE-LYR-COV-004`    | `getDbLyricsOverride`                    | Handles undefined user id gracefully.                                                                  |
+| `BE-LYRICS-007`     | `GET /api/v1/tracks/:id/lyrics?script=`  | `script=latin` swaps Devanagari lyrics for the romanised LRCLIB version; no script keeps the original. |
+| `BE-LYRICS-008`     | `GET /api/v1/tracks/:id/lyrics?script=`  | Lyrics already in the preferred script are served without searching LRCLIB again.                      |
+| `BE-LYRICS-009`     | `GET /api/v1/tracks/:id/lyrics?script=`  | No version in that script: the original stays and the miss is cached (no second search).               |
+| `BE-LYRICS-010`     | `GET /api/v1/tracks/:id/lyrics?script=`  | The user's own lyrics win over the preferred script.                                                   |
+| `BE-LYRICS-011`     | `GET /api/v1/tracks/:id/lyrics?script=`  | An unknown script is a 400; `original` behaves like no preference.                                     |
+| `BE-LYRICS-012`     | `GET /api/v1/tracks/:id/lyrics?script=`  | A failing version search still serves the original lyrics.                                             |
+| `BE-LYR-SCRIPT-001` | `isInScript`                             | Tells scripts apart by most of the letters; digits, timestamps and symbols don't count.                |
+| `BE-LYR-SCRIPT-002` | `lyricsInScript`                         | Reads synced lines, else the plain text.                                                               |
+| `BE-LYR-SCRIPT-003` | `resolveLyricsInScript`                  | Picks the synced candidate in that script, within 15s of the song's length.                            |
+| `BE-LYR-SCRIPT-004` | `resolveLyricsInScript`                  | Null when no candidate is in that script, or LRCLIB fails.                                             |
 
 ---
 
 ## 5. User Personal Library & Preferences
 
-| Test ID           | Method / Scope                                | Description & Assertions                                      |
-| :---------------- | :-------------------------------------------- | :------------------------------------------------------------ |
-| `BE-ME-001`       | `GET /api/v1/me`                              | Returns authenticated user profile.                           |
-| `BE-ME-002`       | `GET /api/v1/me/library/tracks`               | Returns user favourited tracks sorted.                        |
-| `BE-ME-003`       | `GET /api/v1/me/library/albums`               | Resolves user saved albums from catalog cache.                |
-| `BE-ME-004`       | `GET /api/v1/me/library/artists`              | Resolves followed artists from channel cache.                 |
-| `BE-ME-005`       | `GET /api/v1/me/library/genres`               | Returns library genres payload.                               |
-| `BE-ME-006`       | `GET /api/v1/me/favourites/tracks`            | Returns favourited tracks list.                               |
-| `BE-ME-007`       | `PUT /api/v1/me/favourites/tracks/:id`        | Adds track to favourites.                                     |
-| `BE-ME-008`       | `DELETE /api/v1/me/favourites/tracks/:id`     | Removes track from favourites.                                |
-| `BE-ME-009`       | `GET /api/v1/me/favourites/albums`            | Returns saved favourite albums.                               |
-| `BE-ME-010`       | `PUT /api/v1/me/favourites/albums/:id`        | Adds album to favourites.                                     |
-| `BE-ME-011`       | `DELETE /api/v1/me/favourites/albums/:id`     | Removes album from favourites.                                |
-| `BE-ME-012`       | `GET /api/v1/me/library/artists`              | Returns list of followed artists.                             |
-| `BE-ME-013`       | `PUT /api/v1/me/following/artists/:id`        | Follows an artist channel.                                    |
-| `BE-ME-014`       | `DELETE /api/v1/me/following/artists/:id`     | Unfollows an artist channel.                                  |
-| `BE-ME-015`       | `GET /api/v1/me/recently-played`              | Returns hydrated play history.                                |
-| `BE-ME-016`       | `POST /api/v1/me/sync`                        | Syncs play history events and favourites idempotently.        |
-| `BE-ME-017`       | `GET /api/v1/me/most-played`                  | Aggregates playback history counts.                           |
-| `BE-ME-018`       | `GET /api/v1/me/playlists`                    | Lists user created playlists with track counts.               |
-| `BE-ME-019`       | `POST /api/v1/me/playlists`                   | Creates new playlist with custom title and description.       |
-| `BE-ME-020`       | `GET /api/v1/me/playlists/:id`                | Returns playlist details and track listing.                   |
-| `BE-ME-021`       | `PATCH /api/v1/me/playlists/:id`              | Updates playlist name and metadata.                           |
-| `BE-ME-022`       | `DELETE /api/v1/me/playlists/:id`             | Deletes user playlist.                                        |
-| `BE-ME-023`       | `POST /api/v1/me/playlists/:id/tracks`        | Adds tracks to playlist.                                      |
-| `BE-ME-024`       | `DELETE /api/v1/me/playlists/:id/tracks`      | Removes track from playlist by ID.                            |
-| `BE-ME-025`       | `PATCH /api/v1/me/playlists/:id/tracks/order` | Reorders tracks in playlist.                                  |
-| `BE-ME-026`       | `GET /api/v1/me/settings`                     | Returns user audio and playback settings.                     |
-| `BE-ME-027`       | `PUT /api/v1/me/settings`                     | Updates user equalizer and streaming preferences.             |
-| `BE-ME-028`       | `GET /api/v1/me/player-state`                 | Restores persisted playback queue and position.               |
-| `BE-ME-029`       | `PUT /api/v1/me/player-state`                 | Saves current player state and queue.                         |
-| `BE-ME-EXTRA-001` | `GET /api/v1/me/playlists/:id`                | Returns 404 for missing playlist.                             |
-| `BE-ME-EXTRA-002` | `PATCH /api/v1/me/playlists/:id`              | Returns 404 when attempting to edit another user's playlist.  |
-| `BE-ME-EXTRA-003` | `DELETE /api/v1/me/playlists/:id`             | Returns 200 idempotently when playlist is not found.          |
-| `BE-ME-EXTRA-004` | `POST /api/v1/me/playlists`                   | Rejects empty playlist name with 400 BAD_REQUEST.             |
-| `BE-ME-EXTRA-005` | `POST /api/v1/me/playlists/:id/tracks`        | Rejects non-array track IDs payload with 400 BAD_REQUEST.     |
-| `BE-ME-EXTRA-006` | `PATCH /api/v1/me/playlists/:id/tracks/order` | Rejects missing from/to reorder indices with 400 BAD_REQUEST. |
-| `BE-ME-EXTRA-007` | `GET /api/v1/me/library/genres`               | Verifies genres placeholder response format.                  |
-| `BE-ME-EXTRA-008` | `GET /api/v1/me/new-releases`                 | Verifies new releases payload format.                         |
-| `BE-ME-BR-001`    | `PATCH /api/v1/me/playlists/:id`              | Updates description when title is unchanged.                  |
-| `BE-ME-BR-002`    | `PATCH /api/v1/me/playlists/:id/tracks/order` | Returns 404 for non-existent playlist.                        |
-| `BE-ME-BR-003`    | `DELETE /api/v1/me/playlists/:id/tracks`      | Handles local track IDs removal.                              |
-| `BE-ME-BR2-001`   | `POST /api/v1/me/playlists/:id/tracks`        | Adds local track format IDs to playlist.                      |
-| `BE-EXP-001`      | `POST /api/v1/me/playlists`                   | Creates offline-kind playlists.                               |
-| `BE-EXP-002`      | `DELETE /api/v1/me/playlists/:id/tracks`      | Deletes tracks by numerical index position.                   |
-| `BE-EXP-003`      | `DELETE /api/v1/me/playlists/:id/tracks`      | Returns 404 when modifying playlist owned by another user.    |
-| `BE-EXP-004`      | `PUT /api/v1/me/settings`                     | Updates normalization, gapless, and offline settings.         |
-| `BE-EXP-005`      | `PUT /api/v1/me/settings`                     | Handles empty changes object gracefully.                      |
-| `BE-EXP-006`      | `PUT /api/v1/me/settings`                     | Normalizes lossless quality setting to high.                  |
-| `BE-EXP-007`      | `PUT /api/v1/me/player-state`                 | Handles shuffle and repeat modes.                             |
-| `BE-SETT-001`     | `PUT /api/v1/me/settings`                     | Updates download format preference.                           |
-| `BE-SETT-002`     | `PUT /api/v1/me/player-state`                 | Saves local trackRef player state.                            |
-| `BE-SYNC-001`     | `POST /api/v1/me/sync`                        | Syncs multiple favourite items idempotently.                  |
-| `BE-SYNC-002`     | `GET /api/v1/me/library/tracks`               | Sorts tracks by title ascending and descending.               |
-| `BE-SYNC-003`     | `GET /api/v1/me/library/tracks`               | Sorts tracks by playCount.                                    |
+| Test ID           | Method / Scope                                | Description & Assertions                                                                             |
+| :---------------- | :-------------------------------------------- | :--------------------------------------------------------------------------------------------------- |
+| `BE-ME-001`       | `GET /api/v1/me`                              | Returns authenticated user profile.                                                                  |
+| `BE-ME-002`       | `GET /api/v1/me/library/tracks`               | Returns user favourited tracks sorted.                                                               |
+| `BE-ME-003`       | `GET /api/v1/me/library/albums`               | Resolves user saved albums from catalog cache.                                                       |
+| `BE-ME-004`       | `GET /api/v1/me/library/artists`              | Resolves followed artists from channel cache.                                                        |
+| `BE-LIBART-001`   | `GET /api/v1/me/library/artists`              | Followed artists first, then artists of liked and playlisted songs by song count, each counted once. |
+| `BE-LIBART-002`   | `GET /api/v1/me/library/artists`              | Unavailable songs, local songs and other users' playlists add no artists.                            |
+| `BE-ME-005`       | `GET /api/v1/me/library/genres`               | Returns library genres payload.                                                                      |
+| `BE-ME-006`       | `GET /api/v1/me/favourites/tracks`            | Returns favourited tracks list.                                                                      |
+| `BE-ME-007`       | `PUT /api/v1/me/favourites/tracks/:id`        | Adds track to favourites.                                                                            |
+| `BE-ME-008`       | `DELETE /api/v1/me/favourites/tracks/:id`     | Removes track from favourites.                                                                       |
+| `BE-ME-009`       | `GET /api/v1/me/favourites/albums`            | Returns saved favourite albums.                                                                      |
+| `BE-ME-010`       | `PUT /api/v1/me/favourites/albums/:id`        | Adds album to favourites.                                                                            |
+| `BE-ME-011`       | `DELETE /api/v1/me/favourites/albums/:id`     | Removes album from favourites.                                                                       |
+| `BE-ME-012`       | `GET /api/v1/me/library/artists`              | Returns list of followed artists.                                                                    |
+| `BE-ME-013`       | `PUT /api/v1/me/following/artists/:id`        | Follows an artist channel.                                                                           |
+| `BE-ME-014`       | `DELETE /api/v1/me/following/artists/:id`     | Unfollows an artist channel.                                                                         |
+| `BE-ME-015`       | `GET /api/v1/me/recently-played`              | Returns hydrated play history.                                                                       |
+| `BE-ME-016`       | `POST /api/v1/me/sync`                        | Syncs play history events and favourites idempotently.                                               |
+| `BE-ME-017`       | `GET /api/v1/me/most-played`                  | Aggregates playback history counts.                                                                  |
+| `BE-ME-018`       | `GET /api/v1/me/playlists`                    | Lists user created playlists with track counts.                                                      |
+| `BE-ME-019`       | `POST /api/v1/me/playlists`                   | Creates new playlist with custom title and description.                                              |
+| `BE-ME-020`       | `GET /api/v1/me/playlists/:id`                | Returns playlist details and track listing.                                                          |
+| `BE-ME-021`       | `PATCH /api/v1/me/playlists/:id`              | Updates playlist name and metadata.                                                                  |
+| `BE-ME-022`       | `DELETE /api/v1/me/playlists/:id`             | Deletes user playlist.                                                                               |
+| `BE-ME-023`       | `POST /api/v1/me/playlists/:id/tracks`        | Adds tracks to playlist.                                                                             |
+| `BE-ME-024`       | `DELETE /api/v1/me/playlists/:id/tracks`      | Removes track from playlist by ID.                                                                   |
+| `BE-ME-025`       | `PATCH /api/v1/me/playlists/:id/tracks/order` | Reorders tracks in playlist.                                                                         |
+| `BE-ME-026`       | `GET /api/v1/me/settings`                     | Returns user audio and playback settings.                                                            |
+| `BE-ME-027`       | `PUT /api/v1/me/settings`                     | Updates user equalizer and streaming preferences.                                                    |
+| `BE-ME-028`       | `GET /api/v1/me/player-state`                 | Restores persisted playback queue and position.                                                      |
+| `BE-ME-029`       | `PUT /api/v1/me/player-state`                 | Saves current player state and queue.                                                                |
+| `BE-ME-EXTRA-001` | `GET /api/v1/me/playlists/:id`                | Returns 404 for missing playlist.                                                                    |
+| `BE-ME-EXTRA-002` | `PATCH /api/v1/me/playlists/:id`              | Returns 404 when attempting to edit another user's playlist.                                         |
+| `BE-ME-EXTRA-003` | `DELETE /api/v1/me/playlists/:id`             | Returns 200 idempotently when playlist is not found.                                                 |
+| `BE-ME-EXTRA-004` | `POST /api/v1/me/playlists`                   | Rejects empty playlist name with 400 BAD_REQUEST.                                                    |
+| `BE-ME-EXTRA-005` | `POST /api/v1/me/playlists/:id/tracks`        | Rejects non-array track IDs payload with 400 BAD_REQUEST.                                            |
+| `BE-ME-EXTRA-006` | `PATCH /api/v1/me/playlists/:id/tracks/order` | Rejects missing from/to reorder indices with 400 BAD_REQUEST.                                        |
+| `BE-ME-EXTRA-007` | `GET /api/v1/me/library/genres`               | Verifies genres placeholder response format.                                                         |
+| `BE-ME-EXTRA-008` | `GET /api/v1/me/new-releases`                 | Verifies new releases payload format.                                                                |
+| `BE-ME-BR-001`    | `PATCH /api/v1/me/playlists/:id`              | Updates description when title is unchanged.                                                         |
+| `BE-ME-BR-002`    | `PATCH /api/v1/me/playlists/:id/tracks/order` | Returns 404 for non-existent playlist.                                                               |
+| `BE-ME-BR-003`    | `DELETE /api/v1/me/playlists/:id/tracks`      | Handles local track IDs removal.                                                                     |
+| `BE-ME-BR2-001`   | `POST /api/v1/me/playlists/:id/tracks`        | Adds local track format IDs to playlist.                                                             |
+| `BE-EXP-001`      | `POST /api/v1/me/playlists`                   | Creates offline-kind playlists.                                                                      |
+| `BE-EXP-002`      | `DELETE /api/v1/me/playlists/:id/tracks`      | Deletes tracks by numerical index position.                                                          |
+| `BE-EXP-003`      | `DELETE /api/v1/me/playlists/:id/tracks`      | Returns 404 when modifying playlist owned by another user.                                           |
+| `BE-EXP-004`      | `PUT /api/v1/me/settings`                     | Updates normalization, gapless, and offline settings.                                                |
+| `BE-EXP-005`      | `PUT /api/v1/me/settings`                     | Handles empty changes object gracefully.                                                             |
+| `BE-EXP-006`      | `PUT /api/v1/me/settings`                     | Normalizes lossless quality setting to high.                                                         |
+| `BE-EXP-007`      | `PUT /api/v1/me/player-state`                 | Handles shuffle and repeat modes.                                                                    |
+| `BE-SETT-001`     | `PUT /api/v1/me/settings`                     | Updates download format preference.                                                                  |
+| `BE-SETT-002`     | `PUT /api/v1/me/player-state`                 | Saves local trackRef player state.                                                                   |
+| `BE-SYNC-001`     | `POST /api/v1/me/sync`                        | Syncs multiple favourite items idempotently.                                                         |
+| `BE-SYNC-002`     | `GET /api/v1/me/library/tracks`               | Sorts tracks by title ascending and descending.                                                      |
+| `BE-SYNC-003`     | `GET /api/v1/me/library/tracks`               | Sorts tracks by playCount.                                                                           |
 
 ---
 
@@ -230,32 +244,34 @@ This document maps all backend test IDs to their specifications, assertions, and
 
 ## 7. App Routes & Image Proxy
 
-| Test ID         | Method / Scope                            | Description & Assertions                                   |
-| :-------------- | :---------------------------------------- | :--------------------------------------------------------- |
-| `BE-APP-001`    | `GET /api/v1/trending`                    | Returns filtered trending music tracks.                    |
-| `BE-APP-002`    | `GET /api/v1/tracks/:id/artwork`          | Redirects to standard track artwork thumbnail.             |
-| `BE-APP-003`    | `GET /api/v1/tracks/:id/artwork?size=640` | Redirects to large artwork thumbnail.                      |
-| `BE-APP-004`    | `GET /api/v1/albums/:id/artwork`          | Redirects to proxy album cover artwork route.              |
-| `BE-APP-005`    | `GET /api/v1/artists/:id/artwork`         | Redirects to artist avatar artwork image route.            |
-| `BE-APP-006`    | `GET /api/v1/image/:token`                | Proxies image buffer with headers from upstream.           |
-| `BE-APP-007`    | `GET /api/v1/image/:token`                | Returns 502 when image upstream fails.                     |
-| `BE-APP-008`    | `GET /api/v1/lyrics/search`               | Queries LRCLIB search endpoint.                            |
-| `BE-APP-009`    | `GET /api/v1/lyrics/search`               | Rejects missing track parameter with 400 BAD_REQUEST.      |
-| `BE-APP-010`    | Route Not Found                           | Returns 404 NOT_FOUND for unmatched endpoints.             |
-| `BE-APP-011`    | `GET /api/v1/stream/:token`               | Handles 416 range past end with proper total size header.  |
-| `BE-ERR-001`    | `POST /api/v1/client-errors`              | Accepts crash report from web client.                      |
-| `BE-ERR-002`    | `POST /api/v1/client-errors`              | Accepts warning report from linux client.                  |
-| `BE-ERR-003`    | `POST /api/v1/client-errors`              | Rejects invalid source name with 400 BAD_REQUEST.          |
-| `BE-ERR-004`    | `POST /api/v1/client-errors`              | Rejects missing error message with 400 BAD_REQUEST.        |
-| `BE-ERR-005`    | `POST /api/v1/client-errors`              | Rejects excessive context keys (>20) with 400 BAD_REQUEST. |
-| `BE-ERR-BR-001` | Error handling                            | Handles invalid tokens returning 403 FORBIDDEN.            |
-| `BE-RESIL-001`  | Stream token                              | Verifies signing with custom TTL.                          |
-| `BE-RESIL-002`  | Stream range                              | Tests audio slice Range request header.                    |
-| `BE-RESIL-003`  | Single stream                             | Tests track with single audio stream format.               |
-| `BE-RESIL-004`  | High quality                              | Tests quality=high stream resolution.                      |
-| `BE-RESIL-005`  | Normal quality                            | Tests quality=normal stream resolution.                    |
-| `BE-RESIL-006`  | Muxed stream                              | Tests fallback to muxed video stream.                      |
-| `BE-RESIL-007`  | Dynamic albums                            | Tests search fallback when channel releases tab is absent. |
+| Test ID         | Method / Scope                            | Description & Assertions                                                                   |
+| :-------------- | :---------------------------------------- | :----------------------------------------------------------------------------------------- |
+| `BE-APP-001`    | `GET /api/v1/trending`                    | Returns filtered trending music tracks.                                                    |
+| `BE-APP-002`    | `GET /api/v1/tracks/:id/artwork`          | Redirects to standard track artwork thumbnail.                                             |
+| `BE-APP-003`    | `GET /api/v1/tracks/:id/artwork?size=640` | Redirects to large artwork thumbnail.                                                      |
+| `BE-APP-004`    | `GET /api/v1/albums/:id/artwork`          | Redirects to proxy album cover artwork route.                                              |
+| `BE-APP-005`    | `GET /api/v1/artists/:id/artwork`         | Redirects to artist avatar artwork image route.                                            |
+| `BE-APP-006`    | `GET /api/v1/image/:token`                | Proxies image buffer with headers from upstream.                                           |
+| `BE-APP-007`    | `GET /api/v1/image/:token`                | Returns 502 when image upstream fails.                                                     |
+| `BE-APP-008`    | `GET /api/v1/lyrics/search`               | Queries LRCLIB search endpoint.                                                            |
+| `BE-APP-009`    | `GET /api/v1/lyrics/search`               | Rejects missing track parameter with 400 BAD_REQUEST.                                      |
+| `BE-APP-010`    | Route Not Found                           | Returns 404 NOT_FOUND for unmatched endpoints.                                             |
+| `BE-APP-011`    | `GET /api/v1/stream/:token`               | Handles 416 range past end with proper total size header.                                  |
+| `BE-ERR-001`    | `POST /api/v1/client-errors`              | Accepts crash report from web client.                                                      |
+| `BE-ERR-002`    | `POST /api/v1/client-errors`              | Accepts warning report from linux client.                                                  |
+| `BE-ERR-003`    | `POST /api/v1/client-errors`              | Rejects invalid source name with 400 BAD_REQUEST.                                          |
+| `BE-ERR-004`    | `POST /api/v1/client-errors`              | Rejects missing error message with 400 BAD_REQUEST.                                        |
+| `BE-ERR-005`    | `POST /api/v1/client-errors`              | Rejects excessive context keys (>20) with 400 BAD_REQUEST.                                 |
+| `BE-ERR-BR-001` | Error handling                            | Handles invalid tokens returning 403 FORBIDDEN.                                            |
+| `BE-RESIL-001`  | Stream token                              | Verifies signing with custom TTL.                                                          |
+| `BE-RESIL-002`  | Stream range                              | Tests audio slice Range request header.                                                    |
+| `BE-RESIL-003`  | Single stream                             | Tests track with single audio stream format.                                               |
+| `BE-RESIL-004`  | High quality                              | Tests quality=high stream resolution.                                                      |
+| `BE-RESIL-005`  | Normal quality                            | Tests quality=normal stream resolution.                                                    |
+| `BE-RESIL-006`  | Muxed stream                              | Tests fallback to muxed video stream.                                                      |
+| `BE-RESIL-007`  | Dynamic albums                            | Tests search fallback when channel releases tab is absent.                                 |
+| `BE-COVER-001`  | `GET /api/v1/albums/:id/artwork`          | A cover hint kept in Redis serves a small cover without asking Piped (survives a restart). |
+| `BE-COVER-002`  | `GET /api/v1/search`                      | Album covers seen in search results are written to Redis.                                  |
 
 ---
 

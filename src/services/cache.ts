@@ -186,4 +186,18 @@ export const PermanentCache = {
   async setPeaks(key: string, data: number[]) {
     return setCached(`peaks:${key}`, data);
   },
+  /** Lyrics in a preferred script; `lyrics: null` records that LRCLIB has none, so it isn't asked every play. */
+  async getScriptLyrics(trackId: string, script: string) {
+    return getCached<{ lyrics: ResolvedLyrics | null }>(`lyricsScript:${trackId}:${script}`);
+  },
+  async setScriptLyrics(trackId: string, script: string, lyrics: ResolvedLyrics | null) {
+    // Found ones keep like other lyrics; misses are retried after a week, LRCLIB grows.
+    return setCached(`lyricsScript:${trackId}:${script}`, { lyrics }, lyrics ? undefined : 7 * 24 * 3600);
+  },
+  async getAlbumThumb(albumId: string) {
+    return getCached<string>(`albumThumb:${albumId}`);
+  },
+  async setAlbumThumb(albumId: string, url: string) {
+    return setCached(`albumThumb:${albumId}`, url, 30 * 24 * 3600);
+  },
 };
