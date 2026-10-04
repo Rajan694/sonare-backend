@@ -90,6 +90,8 @@ Development values are in `.env.example`, production ones in `.env.production.ex
 | `SMTP_PASS`         | unset                          | yes                    | Resend API key                                                      |
 | `MAIL_FROM`         | `Sonare <no-reply@sonare.dev>` | yes                    | Sender of account emails                                            |
 | `APP_URL`           | `http://localhost:5183`        | yes (https)            | Base of the links in verification and reset emails                  |
+| `RELEASES_DIR`      | `data/releases`                | no                     | Where app builds uploaded on the admin page are stored              |
+| `RELEASE_MAX_MB`    | `500`                          | no                     | Largest build the admin page may upload                             |
 
 ## Folder layout
 
@@ -156,6 +158,12 @@ refuses them, and the analytics leave them out of the user counts. The migration
   request, kept 30 days). The apps tag their requests with an `X-Sonare-Client` header.
 - **Errors**: backend 5xx errors and app crash reports (`POST /api/v1/client-errors`) from
   `error_logs`. Repeats of one error share a row with a count; kept 90 days after last seen.
+- **Releases**: upload the Android APK, Linux packages (.AppImage, .deb, .rpm, .tar.gz,
+  .zip) and Windows installers (.exe, .msi, .zip). The web app's Settings → About offers the
+  newest upload of each platform and file type (`GET /api/v1/releases`); the same version
+  and type again replaces the file. Files are kept in `RELEASES_DIR` (a `releases-data`
+  volume in the Docker stack), metadata in `app_releases`. Behind nginx, raise
+  `client_max_body_size` to `RELEASE_MAX_MB`. `../build.sh` makes the builds.
 
 Piped settings are not on the admin page: `PIPED_API_URL` is in this `.env`, and the proxy
 URL and NewPipeExtractor commit are in `../sonare-piped-backend/.env`.

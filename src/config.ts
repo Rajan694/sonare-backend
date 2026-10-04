@@ -28,6 +28,9 @@ const envSchema = z.object({
   SMTP_PASS: z.string().optional(),
   MAIL_FROM: z.string().default('Sonare <no-reply@sonare.dev>'),
   APP_URL: z.string().url().default('http://localhost:5183'),
+  // App builds uploaded from the admin page (APK, Linux packages, Windows installers).
+  RELEASES_DIR: z.string().default('data/releases'),
+  RELEASE_MAX_MB: z.coerce.number().int().positive().default(500),
 });
 
 export type Config = z.infer<typeof envSchema>;

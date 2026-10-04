@@ -9,6 +9,8 @@ import {
   jsonb,
   index,
   bigserial,
+  bigint,
+  unique,
 } from 'drizzle-orm/pg-core';
 
 export const users = pgTable('users', {
@@ -238,5 +240,32 @@ export const errorLogs = pgTable(
   },
   (t) => ({
     lastSeenIdx: index('error_logs_last_seen_at_idx').on(t.lastSeenAt),
+  }),
+);
+
+/**
+ * App builds uploaded from the admin page and offered in Settings → About. The file lives in
+ * RELEASES_DIR as `<id><ext>`; file_name is only what the download is called.
+ */
+export const appReleases = pgTable(
+  'app_releases',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    /** android | linux | windows */
+    platform: text('platform').notNull(),
+    /** apk | appimage | deb | rpm | tar.gz | zip | exe | msi, from the file's extension. */
+    format: text('format').notNull(),
+    version: text('version').notNull(),
+    fileName: text('file_name').notNull(),
+    sizeBytes: bigint('size_bytes', { mode: 'number' }).notNull(),
+    sha256: text('sha256').notNull(),
+    notes: text('notes'),
+    downloads: integer('downloads').default(0).notNull(),
+    uploadedBy: uuid('uploaded_by').references(() => users.id, { onDelete: 'set null' }),
+    uploadedAt: timestamp('uploaded_at').defaultNow().notNull(),
+  },
+  (t) => ({
+    // Uploading the same version and format again replaces the file.
+    versionUnique: unique('app_releases_platform_format_version_key').on(t.platform, t.format, t.version),
   }),
 );

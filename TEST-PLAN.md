@@ -239,6 +239,21 @@ This document maps all backend test IDs to their specifications, assertions, and
 | `BE-ADM-COV-002`   | `GET /api/v1/admin/analytics/overview` | Accepts timezone query parameter.                                             |
 | `BE-ADM-BR-001`    | `requireAdmin` middleware              | Handles database errors during admin authentication.                          |
 
+### App releases
+
+| Test ID      | Method / Scope                      | Description & Assertions                                                    |
+| :----------- | :---------------------------------- | :-------------------------------------------------------------------------- |
+| `BE-REL-001` | `POST /api/v1/admin/releases`       | Stores the raw-body upload with its format, size and sha256.                |
+| `BE-REL-002` | `POST /api/v1/admin/releases`       | Rejects a file type the platform does not take (400, lists accepted types). |
+| `BE-REL-003` | `POST /api/v1/admin/releases`       | Rejects a bad version and an empty file with 400.                           |
+| `BE-REL-004` | `POST /api/v1/admin/releases`       | Refuses files over RELEASE_MAX_MB with 413 and leaves no temp file.         |
+| `BE-REL-005` | `POST /api/v1/admin/releases`       | Rejects app (non-admin) tokens with 401.                                    |
+| `BE-REL-006` | `POST /api/v1/admin/releases`       | Same platform, format and version again replaces the file (200, same id).   |
+| `BE-REL-007` | `GET /api/v1/releases`              | Lists the newest build per platform and format, without download counts.    |
+| `BE-REL-008` | `GET /api/v1/releases/:id/download` | Serves the file as an attachment with its type and counts the download.     |
+| `BE-REL-009` | `GET /api/v1/releases/:id/download` | Answers 404 for unknown and malformed ids.                                  |
+| `BE-REL-010` | `DELETE /api/v1/admin/releases/:id` | Removes the row and the file; a second delete is 404.                       |
+
 ---
 
 ## 7. App Routes & Image Proxy

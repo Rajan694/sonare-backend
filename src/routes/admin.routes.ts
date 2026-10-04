@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import fs from 'node:fs/promises';
 import { Router, type Request, type Response } from 'express';
 import bcrypt from 'bcrypt';
 import { and, count, desc, eq, ilike, sql as sqlExpr, sum, type SQL } from 'drizzle-orm';
@@ -7,11 +8,21 @@ import { requireAdmin, signAdminToken } from '../middleware/adminAuth.js';
 import { isRedisAvailable } from '../services/cache.js';
 import { hasFfmpeg } from '../services/peaks.js';
 import { db, sql } from '../db/index.js';
-import { errorLogs, users } from '../db/schema.js';
+import { appReleases, errorLogs, users } from '../db/schema.js';
 import { config } from '../config.js';
 import { createRateLimiter } from '../middleware/rateLimit.js';
 import { Piped } from '../upstream/piped.js';
-import { parseBody } from '../validation.js';
+import { parseBody, parseQuery } from '../validation.js';
+import {
+  PLATFORMS,
+  UploadTooLargeError,
+  acceptedExtensions,
+  cleanFileName,
+  formatFor,
+  receiveUpload,
+  releasePath,
+  releaseView,
+} from '../services/releases.js';
 
 // The admin page's API (/admin on the web build). Every route but /login needs an admin token.
 // Admins are rows in users with role 'admin'; the app's own login refuses them.
@@ -406,4 +417,100 @@ adminRouter.delete('/errors/:id', async (req, res) => {
 adminRouter.delete('/errors', async (req, res) => {
   const deleted = await db.delete(errorLogs).where(errorFilter(req)).returning({ id: errorLogs.id });
   res.json({ deleted: deleted.length });
+});
+
+// ---- App releases ----
+//
+// Builds offered in Settings → About. The file is the raw request body (no multipart), so a
+// 300 MB installer streams straight to disk.
+
+adminRouter.get('/releases', async (_req, res) => {
+  const rows = await db.select().from(appReleases).orderBy(desc(appReleases.uploadedAt));
+  res.json({
+    items: rows.map((r) => ({ ...releaseView(r), downloads: r.downloads })),
+    accepts: Object.fromEntries(PLATFORMS.map((p) => [p, acceptedExtensions(p)])),
+  });
+});
+
+const uploadSchema = z.object({
+  platform: z.enum(PLATFORMS, { message: 'Pick android, linux or windows' }),
+  version: z
+    .string()
+    .trim()
+    .regex(/^[0-9A-Za-z][0-9A-Za-z.+-]{0,39}$/, 'Use a version like 1.2.0 (letters, digits, . + -)'),
+  fileName: z.string().trim().min(1, 'The file needs a name').max(255),
+  notes: z.string().trim().max(500, 'Keep the notes under 500 characters').optional(),
+});
+
+adminRouter.post('/releases', async (req, res) => {
+  const query = parseQuery(uploadSchema, req);
+  const fileName = cleanFileName(query.fileName);
+  const match = formatFor(query.platform, fileName);
+  if (!match) {
+    return fail(
+      res,
+      400,
+      'BAD_REQUEST',
+      `A ${query.platform} build must be one of: ${acceptedExtensions(query.platform).join(', ')}`,
+    );
+  }
+
+  let upload: Awaited<ReturnType<typeof receiveUpload>>;
+  try {
+    upload = await receiveUpload(req);
+  } catch (err) {
+    if (err instanceof UploadTooLargeError) return fail(res, 413, 'PAYLOAD_TOO_LARGE', err.message);
+    throw err;
+  }
+  if (upload.size === 0) {
+    await fs.rm(upload.tmpPath, { force: true });
+    return fail(res, 400, 'BAD_REQUEST', 'The file is empty');
+  }
+
+  // The same version and format again replaces the earlier file (a rebuild).
+  const values = {
+    platform: query.platform,
+    format: match.format,
+    version: query.version,
+    fileName,
+    sizeBytes: upload.size,
+    sha256: upload.sha256,
+    notes: query.notes || null,
+    uploadedBy: req.admin!.id,
+  };
+  const [existing] = await db
+    .select({ id: appReleases.id })
+    .from(appReleases)
+    .where(
+      and(
+        eq(appReleases.platform, values.platform),
+        eq(appReleases.format, values.format),
+        eq(appReleases.version, values.version),
+      ),
+    )
+    .limit(1);
+
+  try {
+    const [release] = existing
+      ? await db
+          .update(appReleases)
+          .set({ ...values, downloads: 0, uploadedAt: new Date() })
+          .where(eq(appReleases.id, existing.id))
+          .returning()
+      : await db.insert(appReleases).values(values).returning();
+    await fs.rename(upload.tmpPath, releasePath(release));
+    res.status(existing ? 200 : 201).json({ ...releaseView(release), downloads: release.downloads });
+  } catch (err) {
+    await fs.rm(upload.tmpPath, { force: true });
+    throw err;
+  }
+});
+
+adminRouter.delete('/releases/:id', async (req, res) => {
+  const parsed = z.string().uuid().safeParse(req.params.id);
+  if (!parsed.success) return fail(res, 400, 'BAD_REQUEST', 'Bad release id');
+  const [deleted] = await db.delete(appReleases).where(eq(appReleases.id, parsed.data)).returning();
+  if (!deleted) return fail(res, 404, 'NOT_FOUND', 'That build is already gone');
+  await fs.rm(releasePath(deleted), { force: true });
+  res.status(204).end();
 });
