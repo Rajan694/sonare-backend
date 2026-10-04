@@ -77,7 +77,6 @@ Development values are in `.env.example`, production ones in `.env.production.ex
 | `DATABASE_URL`      | —                              | yes                    | Postgres connection URL                                             |
 | `REDIS_URL`         | `redis://127.0.0.1:6379/1`     | no                     | Redis for the cache and rate limits                                 |
 | `PIPED_API_URL`     | `http://localhost:8090`        | yes                    | Piped API (can be overridden live from the admin page)              |
-| `PIPED_PROXY_URL`   | `http://localhost:8091`        | no                     | Piped's media proxy (media URLs come from Piped's `PROXY_PART`)     |
 | `PIPED_BACKEND_DIR` | `../sonare-piped-backend`      | no                     | Where the admin page reads Piped's build settings                   |
 | `JWT_SECRET`        | dev placeholder                | yes (≥ 32 chars)       | Signs access tokens; the server refuses the default in production   |
 | `CORS_ORIGINS`      | empty                          | yes                    | Comma-separated allowed origins (localhost is allowed outside prod) |
