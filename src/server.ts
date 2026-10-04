@@ -1,19 +1,17 @@
 import { createApp } from './app.js';
 import { config } from './config.js';
 import { verifyDatabase } from './db/index.js';
-import { loadSystemConfig, pipedApiUrl } from './services/systemConfig.js';
 import { flushTelemetry, startTelemetry } from './services/telemetry.js';
 import { logger } from './logger.js';
 import { hasFfmpeg } from './services/peaks.js';
 
 async function start() {
   await verifyDatabase();
-  await loadSystemConfig();
   startTelemetry();
   const app = createApp();
   const server = app.listen(config.PORT, () => {
     logger.info(`Sonare backend listening on port ${config.PORT}`);
-    logger.info(`Piped upstream mapped to ${pipedApiUrl()}`);
+    logger.info(`Piped upstream mapped to ${config.PIPED_API_URL}`);
     if (!hasFfmpeg()) logger.warn('ffmpeg is not on the PATH: waveforms will be placeholders, not the real audio');
   });
 

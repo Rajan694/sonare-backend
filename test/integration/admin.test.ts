@@ -1,40 +1,39 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import request from 'supertest';
 import { createApp } from '../../src/app.js';
-import { createAdminUser, createUser, isLocalTestHost } from '../factories.js';
+import { createAdminUser, createUser } from '../factories.js';
 import { db } from '../../src/db/index.js';
 import { errorLogs } from '../../src/db/schema.js';
-import { MockAgent, getGlobalDispatcher, setGlobalDispatcher, type Dispatcher } from 'undici';
 import { requireAdmin } from '../../src/middleware/adminAuth.js';
 import type { Request, Response } from 'express';
 
-describe('Admin: login, config, analytics & errors', () => {
+describe('Admin: login, analytics & errors', () => {
   const app = createApp();
 
   it('BE-ADMIN-001: POST /api/v1/admin/login succeeds with valid admin credentials', async () => {
     const { admin, rawPassword } = await createAdminUser();
     const res = await request(app).post('/api/v1/admin/login').send({
-      username: admin.username,
+      email: admin.email,
       password: rawPassword,
     });
     expect(res.status).toBe(200);
     expect(res.body).toHaveProperty('token');
-    expect(res.body.admin.username).toBe(admin.username);
+    expect(res.body.admin.email).toBe(admin.email);
   });
 
   it('BE-ADMIN-002: POST /api/v1/admin/login rejects invalid password with 401', async () => {
     const { admin } = await createAdminUser();
     const res = await request(app).post('/api/v1/admin/login').send({
-      username: admin.username,
+      email: admin.email,
       password: 'wrongpasswordhere',
     });
     expect(res.status).toBe(401);
     expect(res.body.error.code).toBe('INVALID_CREDENTIALS');
   });
 
-  it('BE-ADMIN-003: POST /api/v1/admin/login rejects missing username or password with 400', async () => {
+  it('BE-ADMIN-003: POST /api/v1/admin/login rejects missing email or password with 400', async () => {
     const res = await request(app).post('/api/v1/admin/login').send({
-      username: 'admin',
+      email: 'admin@example.com',
     });
     expect(res.status).toBe(400);
     expect(res.body.error.code).toBe('BAD_REQUEST');
@@ -45,7 +44,7 @@ describe('Admin: login, config, analytics & errors', () => {
     const res = await request(app).get('/api/v1/admin/me').set('Authorization', `Bearer ${token}`);
 
     expect(res.status).toBe(200);
-    expect(res.body.username).toBe(admin.username);
+    expect(res.body.email).toBe(admin.email);
   });
 
   it('BE-ADMIN-005: GET /api/v1/admin/me rejects standard user JWT with 401', async () => {
@@ -81,35 +80,31 @@ describe('Admin: login, config, analytics & errors', () => {
     expect(res.body.error.code).toBe('WRONG_PASSWORD');
   });
 
-  it('BE-ADMIN-008: GET /api/v1/admin/config returns system settings list', async () => {
-    const { token } = await createAdminUser();
-    const res = await request(app).get('/api/v1/admin/config').set('Authorization', `Bearer ${token}`);
+  it('BE-ADMIN-008: POST /api/v1/admin/login rejects an app account with 401', async () => {
+    const { user, rawPassword } = await createUser();
+    const res = await request(app).post('/api/v1/admin/login').send({ email: user.email, password: rawPassword });
 
-    expect(res.status).toBe(200);
-    expect(res.body).toHaveProperty('settings');
-    expect(Array.isArray(res.body.settings)).toBe(true);
+    expect(res.status).toBe(401);
+    expect(res.body.error.code).toBe('INVALID_CREDENTIALS');
   });
 
-  it('BE-ADMIN-009: PUT /api/v1/admin/config/:key rejects unknown setting key with 404', async () => {
-    const { token } = await createAdminUser();
-    const res = await request(app)
-      .put('/api/v1/admin/config/nonexistent.key')
-      .set('Authorization', `Bearer ${token}`)
-      .send({ value: 'somevalue' });
+  it('BE-ADMIN-009: POST /api/v1/auth/login refuses the admin account', async () => {
+    const { admin, rawPassword } = await createAdminUser();
+    const res = await request(app).post('/api/v1/auth/login').send({ email: admin.email, password: rawPassword });
 
-    expect(res.status).toBe(404);
-    expect(res.body.error.code).toBe('NOT_FOUND');
+    expect(res.status).toBe(401);
+    expect(res.body.error.code).toBe('UNAUTHORIZED');
   });
 
-  it('BE-ADMIN-010: PUT /api/v1/admin/config/:key rejects invalid URL setting with 400', async () => {
+  it('BE-ADMIN-010: overview user counts leave out the admin account', async () => {
     const { token } = await createAdminUser();
-    const res = await request(app)
-      .put('/api/v1/admin/config/piped.apiUrl')
-      .set('Authorization', `Bearer ${token}`)
-      .send({ value: 'not-a-valid-url' });
+    const before = await request(app).get('/api/v1/admin/analytics/overview').set('Authorization', `Bearer ${token}`);
+    await createAdminUser();
+    await createUser();
+    const after = await request(app).get('/api/v1/admin/analytics/overview').set('Authorization', `Bearer ${token}`);
 
-    expect(res.status).toBe(400);
-    expect(res.body.error.code).toBe('BAD_REQUEST');
+    expect(after.body.totals.users).toBe(before.body.totals.users + 1);
+    expect(after.body.totals.newUsers).toBe(before.body.totals.newUsers + 1);
   });
 
   it('BE-ADMIN-011: GET /api/v1/admin/analytics/overview returns aggregated overview stats', async () => {
@@ -164,13 +159,13 @@ describe('Admin: security, rate limiting & filters', () => {
   it('BE-ADM-SEC-001: admin login enforces rate limiting after multiple failed attempts', async () => {
     for (let i = 0; i < 5; i++) {
       await request(app).post('/api/v1/admin/login').send({
-        username: 'nonexistent_admin_brute',
+        email: 'nonexistent_admin_brute@example.com',
         password: 'badpassword',
       });
     }
 
     const lockedRes = await request(app).post('/api/v1/admin/login').send({
-      username: 'nonexistent_admin_brute',
+      email: 'nonexistent_admin_brute@example.com',
       password: 'badpassword',
     });
 
@@ -219,102 +214,8 @@ describe('Admin: security, rate limiting & filters', () => {
   });
 });
 
-describe('Admin: config & extractor commit', () => {
+describe('Admin: error log & analytics edge cases', () => {
   const app = createApp();
-  let mockAgent: MockAgent | null = null;
-  let originalDispatcher: Dispatcher;
-
-  beforeEach(() => {
-    originalDispatcher = getGlobalDispatcher();
-    mockAgent = new MockAgent();
-    mockAgent.disableNetConnect();
-    mockAgent.enableNetConnect(isLocalTestHost);
-    setGlobalDispatcher(mockAgent);
-  });
-
-  afterEach(async () => {
-    if (mockAgent) {
-      await mockAgent.close();
-      mockAgent = null;
-    }
-    setGlobalDispatcher(originalDispatcher);
-  });
-
-  it('BE-ADM-CFG-001: GET /api/v1/admin/config/piped.extractorCommit/latest returns commit info', async () => {
-    const { token } = await createAdminUser();
-
-    const ghClient = mockAgent!.get('https://api.github.com');
-    ghClient
-      .intercept({
-        path: '/repos/TeamNewPipe/NewPipeExtractor/commits/dev',
-        method: 'GET',
-      })
-      .reply(200, {
-        sha: 'c'.repeat(40),
-        commit: {
-          message: 'Feat: Add extractor improvements',
-          committer: { date: '2026-09-30T15:00:00Z' },
-        },
-      });
-
-    const res = await request(app)
-      .get('/api/v1/admin/config/piped.extractorCommit/latest')
-      .set('Authorization', `Bearer ${token}`);
-
-    expect(res.status).toBe(200);
-    expect(res.body.sha).toBe('c'.repeat(40));
-    expect(res.body.message).toBe('Feat: Add extractor improvements');
-  });
-
-  it('BE-ADM-CFG-002: PUT /api/v1/admin/config/piped.extractorCommit saves valid commit hash', async () => {
-    const { token } = await createAdminUser();
-    const validSha = 'd'.repeat(40);
-
-    const ghClient = mockAgent!.get('https://api.github.com');
-    ghClient
-      .intercept({
-        path: `/repos/TeamNewPipe/NewPipeExtractor/commits/${validSha}`,
-        method: 'GET',
-      })
-      .reply(200, { sha: validSha });
-
-    const res = await request(app)
-      .put('/api/v1/admin/config/piped.extractorCommit')
-      .set('Authorization', `Bearer ${token}`)
-      .send({ value: validSha, force: true });
-
-    expect(res.status).toBe(200);
-    expect(res.body).toHaveProperty('setting');
-    expect(res.body.setting.key).toBe('piped.extractorCommit');
-  });
-});
-
-describe('Admin: config values, error log & analytics edge cases', () => {
-  const app = createApp();
-
-  it('BE-ADM-EXTRA-001: PUT /api/v1/admin/config/piped.apiUrl updates valid apiUrl', async () => {
-    const { token } = await createAdminUser();
-    const res = await request(app)
-      .put('/api/v1/admin/config/piped.apiUrl')
-      .set('Authorization', `Bearer ${token}`)
-      .send({ value: 'http://127.0.0.1:8090', force: true });
-
-    expect(res.status).toBe(200);
-    expect(res.body).toHaveProperty('setting');
-    expect(res.body.setting.key).toBe('piped.apiUrl');
-  });
-
-  it('BE-ADM-EXTRA-002: PUT /api/v1/admin/config/piped.apiUrl allows setting to null (resetting to fallback)', async () => {
-    const { token } = await createAdminUser();
-    const res = await request(app)
-      .put('/api/v1/admin/config/piped.apiUrl')
-      .set('Authorization', `Bearer ${token}`)
-      .send({ value: null, force: true });
-
-    expect(res.status).toBe(200);
-    expect(res.body).toHaveProperty('setting');
-    expect(res.body.setting.value).toBeNull();
-  });
 
   it('BE-ADM-EXTRA-003: DELETE /api/v1/admin/errors/:id returns 404 for non-existent error id', async () => {
     const { token } = await createAdminUser();
@@ -351,19 +252,8 @@ describe('Admin: config values, error log & analytics edge cases', () => {
   });
 });
 
-describe('Admin: invalid config values & analytics tz', () => {
+describe('Admin: analytics tz', () => {
   const app = createApp();
-
-  it('BE-ADM-COV-001: PUT /api/v1/admin/config/:key rejects unparseable setting value', async () => {
-    const { token } = await createAdminUser();
-    const res = await request(app)
-      .put('/api/v1/admin/config/piped.extractorCommit')
-      .set('Authorization', `Bearer ${token}`)
-      .send({ value: 'short-invalid-commit' });
-
-    expect(res.status).toBe(400);
-    expect(res.body.error.code).toBe('BAD_REQUEST');
-  });
 
   it('BE-ADM-COV-002: GET /api/v1/admin/analytics/overview accepts tz query parameter', async () => {
     const { token } = await createAdminUser();

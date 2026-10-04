@@ -124,7 +124,8 @@ authRouter.post('/login', async (req, res) => {
   if (lockout.blocked) return rateLimited(res, lockout.retryAfterSec);
 
   const user = await findUserByEmail(body.email);
-  if (!user || !(await bcrypt.compare(body.password, user.passwordHash))) {
+  // The admin account signs in on /admin only.
+  if (!user || user.role !== 'user' || !(await bcrypt.compare(body.password, user.passwordHash))) {
     await loginLimiter.hit(limitKey);
     res.status(401).json({ error: { code: 'UNAUTHORIZED', message: 'Invalid credentials' } });
     return;
@@ -205,7 +206,7 @@ authRouter.post('/forgot-password', async (req, res) => {
   if (!byEmail.allowed) return rateLimited(res, byEmail.retryAfterSec);
 
   const user = await findUserByEmail(body.email);
-  if (user) await sendResetEmail(req, user);
+  if (user?.role === 'user') await sendResetEmail(req, user);
   res.json({ ok: true });
 });
 

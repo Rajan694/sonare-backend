@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import { db, verifyDatabase } from '../../src/db/index.js';
 import { hashToken } from '../../src/middleware/auth.js';
 import {
-  adminUsers,
   artistFollows,
   errorLogs,
   favouriteAlbums,
@@ -14,7 +13,6 @@ import {
   playlists,
   refreshTokens,
   requestLogs,
-  systemConfiguration,
   userSettings,
   users,
 } from '../../src/db/schema.js';
@@ -170,14 +168,15 @@ describe('db: models & helpers', () => {
     expect(override.trackId).toBe('lyrOver1');
   });
 
-  it('BE-DB-011: manages admin users credentials and token version increments', async () => {
+  it('BE-DB-011: stores the admin in users with its role and token version', async () => {
     const { admin } = await createAdminUser();
     await db
-      .update(adminUsers)
+      .update(users)
       .set({ tokenVersion: admin.tokenVersion + 1 })
-      .where(eq(adminUsers.id, admin.id));
+      .where(eq(users.id, admin.id));
 
-    const [updated] = await db.select().from(adminUsers).where(eq(adminUsers.id, admin.id));
+    const [updated] = await db.select().from(users).where(eq(users.id, admin.id));
+    expect(updated.role).toBe('admin');
     expect(updated.tokenVersion).toBe(admin.tokenVersion + 1);
   });
 
@@ -210,22 +209,6 @@ describe('db: models & helpers', () => {
     const [found] = await db.select().from(requestLogs).where(eq(requestLogs.id, reqLog.id));
     expect(found.route).toBe('/api/v1/healthz');
     expect(found.status).toBe(200);
-  });
-
-  it('BE-DB-014: inserts and reads system configuration table', async () => {
-    await db
-      .insert(systemConfiguration)
-      .values({
-        key: 'piped.apiUrl',
-        value: 'http://localhost:8090',
-      })
-      .onConflictDoUpdate({
-        target: systemConfiguration.key,
-        set: { value: 'http://localhost:8090' },
-      });
-
-    const [cfg] = await db.select().from(systemConfiguration).where(eq(systemConfiguration.key, 'piped.apiUrl'));
-    expect(cfg.value).toBe('http://localhost:8090');
   });
 
   it('BE-DB-015: getUserTrackDataMap batches multiple track lookups accurately', async () => {
@@ -418,17 +401,11 @@ describe('db: schema tables & columns', () => {
     expect(lyricsOverrides.offsetMs).toBeDefined();
   });
 
-  it('BE-SCH-012: adminUsers schema table has username and tokenVersion', () => {
-    expect(adminUsers.id).toBeDefined();
-    expect(adminUsers.username).toBeDefined();
-    expect(adminUsers.passwordHash).toBeDefined();
-    expect(adminUsers.tokenVersion).toBeDefined();
-  });
-
-  it('BE-SCH-013: systemConfiguration schema table has key and value columns', () => {
-    expect(systemConfiguration.key).toBeDefined();
-    expect(systemConfiguration.value).toBeDefined();
-    expect(systemConfiguration.updatedAt).toBeDefined();
+  it('BE-SCH-012: users schema table has the admin columns', () => {
+    expect(users.role).toBeDefined();
+    expect(users.tokenVersion).toBeDefined();
+    expect(users.lastLoginAt).toBeDefined();
+    expect(users.passwordChangedAt).toBeDefined();
   });
 
   it('BE-SCH-014: requestLogs schema table has status, durationMs and client', () => {

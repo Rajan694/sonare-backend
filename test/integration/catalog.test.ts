@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import net from 'node:net';
 import request from 'supertest';
-import { saveSetting } from '../../src/services/systemConfig.js';
+import { config } from '../../src/config.js';
 import { createApp } from '../../src/app.js';
 import { hasFfmpeg, placeholderPeaks } from '../../src/services/peaks.js';
 import { MockAgent, getGlobalDispatcher, setGlobalDispatcher, type Dispatcher } from 'undici';
@@ -19,6 +19,8 @@ import { signStreamToken } from '../../src/services/token.js';
 import { PermanentCache } from '../../src/services/cache.js';
 
 describe('Catalog & public endpoints', () => {
+  // Tests point the backend at a dead Piped by changing the config, then put it back.
+  const pipedApiUrl = config.PIPED_API_URL;
   const app = createApp();
   let mockAgent: MockAgent | null = null;
   let originalDispatcher: Dispatcher;
@@ -282,13 +284,13 @@ describe('Catalog & public endpoints', () => {
     await new Promise<void>((resolve) => probe.listen(0, '127.0.0.1', resolve));
     const { port } = probe.address() as net.AddressInfo;
     await new Promise((resolve) => probe.close(resolve));
-    await saveSetting('piped.apiUrl', `http://127.0.0.1:${port}`, 'test');
+    config.PIPED_API_URL = `http://127.0.0.1:${port}`;
     try {
       const res = await request(app).get('/api/v1/tracks/yt:offline123');
       expect(res.status).toBe(502);
       expect(res.body.error.code).toBe('UPSTREAM_UNAVAILABLE');
     } finally {
-      await saveSetting('piped.apiUrl', null, 'test');
+      config.PIPED_API_URL = pipedApiUrl;
     }
   });
 

@@ -50,6 +50,13 @@
       "when": 1790972265820,
       "tag": "0006_email_tokens",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1791124877142,
+      "tag": "0007_admin_in_users",
+      "breakpoints": true
     }
   ]
 }

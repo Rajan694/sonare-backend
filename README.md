@@ -76,8 +76,7 @@ Development values are in `.env.example`, production ones in `.env.production.ex
 | `PORT`              | `3010`                         | no                     | Listen port                                                         |
 | `DATABASE_URL`      | —                              | yes                    | Postgres connection URL                                             |
 | `REDIS_URL`         | `redis://127.0.0.1:6379/1`     | no                     | Redis for the cache and rate limits                                 |
-| `PIPED_API_URL`     | `http://localhost:8090`        | yes                    | Piped API (can be overridden live from the admin page)              |
-| `PIPED_BACKEND_DIR` | `../sonare-piped-backend`      | no                     | Where the admin page reads Piped's build settings                   |
+| `PIPED_API_URL`     | `http://localhost:8090`        | yes                    | Piped API the catalog and streams come from                         |
 | `JWT_SECRET`        | dev placeholder                | yes (≥ 32 chars)       | Signs access tokens; the server refuses the default in production   |
 | `CORS_ORIGINS`      | empty                          | yes                    | Comma-separated allowed origins (localhost is allowed outside prod) |
 | `TRUST_PROXY`       | unset                          | behind a proxy         | Express `trust proxy` (hop count, `true`, `loopback`…)              |
@@ -104,7 +103,7 @@ src/
   errors.ts  ids.ts  types.ts
   middleware/       auth (requireAuth, optionalAuth), adminAuth, rateLimit, errorHandler
   routes/           auth, me, admin, clientErrors, catalog, media, lyrics (*.routes.ts)
-  services/         cache, emailTokens, lyrics, mail, peaks, systemConfig, telemetry, token
+  services/         cache, emailTokens, lyrics, mail, peaks, telemetry, token
   db/               index (connection), schema, create, migrate, hydrate, userData
   normalize/        Piped → Sonare shapes
   upstream/         piped (+ piped.types), lrclib
@@ -148,18 +147,18 @@ curl http://127.0.0.1:3010/api/v1/healthz
 
 ## Admin
 
-The web build has an admin page at `/admin` (not linked from the app). It signs in with
-the `admin_users` table, which is separate from app accounts. The migrations create the
-`rajanadmin` account; change its initial password from **Account** after the first sign-in.
+The web build has an admin page at `/admin` (not linked from the app). Admins are rows in
+`users` with `role = 'admin'`; they sign in there by email and password, the apps' login
+refuses them, and the analytics leave them out of the user counts. The migrations create
+`admin@sonare.dev`; change its initial password from **Account** after the first sign-in.
 
 - **Overview** and **API**: usage and request metrics from `request_logs` (one row per API
   request, kept 30 days). The apps tag their requests with an `X-Sonare-Client` header.
 - **Errors**: backend 5xx errors and app crash reports (`POST /api/v1/client-errors`) from
   `error_logs`. Repeats of one error share a row with a count; kept 90 days after last seen.
-- **Configuration**: the `system_configuration` table. `piped.apiUrl` applies immediately.
-  `piped.extractorCommit` and `piped.proxyUrl` are copied into `../sonare-piped-backend`
-  (build.gradle, config.properties) by its `syncAdminConfig.sh`, which `runPiped.sh` and
-  `installPiped.sh` run.
+
+Piped settings are not on the admin page: `PIPED_API_URL` is in this `.env`, and the proxy
+URL and NewPipeExtractor commit are in `../sonare-piped-backend/.env`.
 
 ## Downloads
 

@@ -1,30 +1,20 @@
 import crypto from 'node:crypto';
 import { Router, type Request, type Response } from 'express';
 import bcrypt from 'bcrypt';
-import { and, count, desc, eq, ilike, sum, type SQL } from 'drizzle-orm';
+import { and, count, desc, eq, ilike, sql as sqlExpr, sum, type SQL } from 'drizzle-orm';
 import { z } from 'zod';
 import { requireAdmin, signAdminToken } from '../middleware/adminAuth.js';
 import { isRedisAvailable } from '../services/cache.js';
 import { hasFfmpeg } from '../services/peaks.js';
 import { db, sql } from '../db/index.js';
-import { adminUsers, errorLogs } from '../db/schema.js';
+import { errorLogs, users } from '../db/schema.js';
+import { config } from '../config.js';
 import { createRateLimiter } from '../middleware/rateLimit.js';
-import {
-  checkSetting,
-  ConfigValidationError,
-  describeSettings,
-  latestExtractorCommit,
-  parseSetting,
-  pipedApiUrl,
-  saveSetting,
-  SETTINGS,
-} from '../services/systemConfig.js';
 import { Piped } from '../upstream/piped.js';
 import { parseBody } from '../validation.js';
-import { describeError } from '../errors.js';
 
-// The admin page's API (/admin on the web build). Every route but /login needs an admin token;
-// these accounts are separate from app accounts (admin_users, not users).
+// The admin page's API (/admin on the web build). Every route but /login needs an admin token.
+// Admins are rows in users with role 'admin'; the app's own login refuses them.
 export const adminRouter = Router();
 
 function fail(res: Response, status: number, code: string, message: string) {
@@ -36,20 +26,19 @@ function fail(res: Response, status: number, code: string, message: string) {
 const BCRYPT_COST = 12;
 // Five wrong passwords from one address lock it out for 15 minutes.
 const signInLimiter = createRateLimiter({ name: 'admin', max: 5, windowMs: 15 * 60_000 });
-// Compared against when the username doesn't exist, so both failures take as long.
+// Compared against when no admin has that email, so both failures take as long.
 const dummyHash = bcrypt.hash(crypto.randomUUID(), BCRYPT_COST);
 
-function accountView(admin: typeof adminUsers.$inferSelect) {
+function accountView(admin: typeof users.$inferSelect) {
   return {
-    username: admin.username,
+    email: admin.email,
     lastLoginAt: admin.lastLoginAt,
-    // Only a change made here counts: the seeded account starts at version 0.
-    passwordChangedAt: admin.tokenVersion > 0 ? admin.updatedAt : null,
+    passwordChangedAt: admin.passwordChangedAt,
   };
 }
 
 const credentialsSchema = z.object({
-  username: z.string().trim().min(1, 'Enter the username').max(200),
+  email: z.string().trim().toLowerCase().min(1, 'Enter the email').max(200),
   password: z.string().min(1, 'Enter the password').max(200),
 });
 
@@ -68,26 +57,26 @@ adminRouter.post('/login', async (req, res) => {
 
   const body = parseBody(credentialsSchema, req);
 
-  const [admin] = await db.select().from(adminUsers).where(eq(adminUsers.username, body.username)).limit(1);
+  const [admin] = await db
+    .select()
+    .from(users)
+    .where(and(eq(sqlExpr`lower(${users.email})`, body.email), eq(users.role, 'admin')))
+    .limit(1);
   const valid = await bcrypt.compare(body.password, admin?.passwordHash ?? (await dummyHash));
   if (!admin || !valid) {
     await signInLimiter.hit(ip);
-    return fail(res, 401, 'INVALID_CREDENTIALS', 'Wrong username or password');
+    return fail(res, 401, 'INVALID_CREDENTIALS', 'Wrong email or password');
   }
 
   await signInLimiter.reset(ip);
-  const [signedIn] = await db
-    .update(adminUsers)
-    .set({ lastLoginAt: new Date() })
-    .where(eq(adminUsers.id, admin.id))
-    .returning();
+  const [signedIn] = await db.update(users).set({ lastLoginAt: new Date() }).where(eq(users.id, admin.id)).returning();
   res.json({ token: signAdminToken(signedIn), admin: accountView(signedIn) });
 });
 
 adminRouter.use(requireAdmin);
 
 adminRouter.get('/me', async (req, res) => {
-  const [admin] = await db.select().from(adminUsers).where(eq(adminUsers.id, req.admin!.id)).limit(1);
+  const [admin] = await db.select().from(users).where(eq(users.id, req.admin!.id)).limit(1);
   res.json(accountView(admin));
 });
 
@@ -115,7 +104,7 @@ adminRouter.post('/password', async (req, res) => {
 
   const body = parseBody(passwordSchema, req);
 
-  const [admin] = await db.select().from(adminUsers).where(eq(adminUsers.id, req.admin!.id)).limit(1);
+  const [admin] = await db.select().from(users).where(eq(users.id, req.admin!.id)).limit(1);
   if (!(await bcrypt.compare(body.currentPassword, admin.passwordHash))) {
     await signInLimiter.hit(limitKey);
     return fail(res, 400, 'WRONG_PASSWORD', 'The current password is wrong');
@@ -127,59 +116,15 @@ adminRouter.post('/password', async (req, res) => {
   await signInLimiter.reset(limitKey);
   // A new token version signs out every other admin session; this one gets a fresh token.
   const [updated] = await db
-    .update(adminUsers)
+    .update(users)
     .set({
       passwordHash: await bcrypt.hash(body.newPassword, BCRYPT_COST),
       tokenVersion: admin.tokenVersion + 1,
-      updatedAt: new Date(),
+      passwordChangedAt: new Date(),
     })
-    .where(eq(adminUsers.id, admin.id))
+    .where(eq(users.id, admin.id))
     .returning();
   res.json({ token: signAdminToken(updated), admin: accountView(updated) });
-});
-
-// ---- Configuration ----
-
-adminRouter.get('/config', async (req, res) => {
-  res.json({ settings: await describeSettings() });
-});
-
-const saveSchema = z.object({
-  value: z.string().max(500).nullable(),
-  /** Save even though the value's check failed. */
-  force: z.boolean().optional(),
-});
-
-/** Suggests a value for piped.extractorCommit; nothing is saved. */
-adminRouter.get('/config/piped.extractorCommit/latest', async (req, res) => {
-  try {
-    res.json(await latestExtractorCommit());
-  } catch (e) {
-    fail(res, 502, 'UPSTREAM_ERROR', `Could not get the latest commit from GitHub (${describeError(e)})`);
-  }
-});
-
-adminRouter.put('/config/:key', async (req, res) => {
-  const key = req.params.key as string;
-  if (!Object.hasOwn(SETTINGS, key)) return fail(res, 404, 'NOT_FOUND', `No setting called ${key}`);
-  const body = parseBody(saveSchema, req);
-
-  let value: string | null;
-  try {
-    value = parseSetting(key, body.value);
-  } catch (e) {
-    if (e instanceof ConfigValidationError) return fail(res, 400, 'BAD_REQUEST', e.message);
-    throw e;
-  }
-
-  if (value !== null && !body.force) {
-    const problem = await checkSetting(key, value);
-    if (problem) return fail(res, 422, 'CHECK_FAILED', problem);
-  }
-
-  await saveSetting(key, value, req.admin!.username);
-  const settings = await describeSettings();
-  res.json({ setting: settings.find((s) => s.key === key) });
 });
 
 // ---- Analytics ----
@@ -207,7 +152,7 @@ async function health() {
   const [piped, database] = await Promise.allSettled([Piped.healthcheck(), sql`SELECT 1`]);
   const memory = process.memoryUsage();
   return {
-    piped: { up: piped.status === 'fulfilled', url: pipedApiUrl() },
+    piped: { up: piped.status === 'fulfilled', url: config.PIPED_API_URL },
     database: database.status === 'fulfilled',
     redis: isRedisAvailable(),
     ffmpeg: hasFfmpeg(),
@@ -223,9 +168,9 @@ adminRouter.get('/analytics/overview', async (req, res) => {
 
   const [totals] = await sql`
     SELECT
-      (SELECT count(*)::int FROM users) AS users,
+      (SELECT count(*)::int FROM users WHERE role = 'user') AS users,
       (SELECT count(*)::int FROM users
-        WHERE created_at AT TIME ZONE current_setting('TimeZone') >= now() - make_interval(days => ${days})) AS new_users,
+        WHERE role = 'user' AND created_at AT TIME ZONE current_setting('TimeZone') >= now() - make_interval(days => ${days})) AS new_users,
       (SELECT count(DISTINCT user_id)::int FROM request_logs
         WHERE at >= (now() AT TIME ZONE 'UTC') - make_interval(days => ${days})) AS active_users,
       (SELECT count(*)::int FROM request_logs
@@ -261,7 +206,8 @@ adminRouter.get('/analytics/overview', async (req, res) => {
       SELECT date_trunc('day', (created_at AT TIME ZONE current_setting('TimeZone')) AT TIME ZONE ${tz}) AS day,
              count(*)::int AS signups
       FROM users
-      WHERE created_at AT TIME ZONE current_setting('TimeZone') >= now() - make_interval(days => ${days + 1})
+      WHERE role = 'user'
+        AND created_at AT TIME ZONE current_setting('TimeZone') >= now() - make_interval(days => ${days + 1})
       GROUP BY 1
     ),
     plays AS (

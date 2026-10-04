@@ -2,13 +2,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { isLocalTestHost } from '../factories.js';
 import net from 'node:net';
 import request from 'supertest';
-import { saveSetting } from '../../src/services/systemConfig.js';
+import { config } from '../../src/config.js';
 import { createApp } from '../../src/app.js';
 import { MockAgent, getGlobalDispatcher, setGlobalDispatcher, type Dispatcher } from 'undici';
 import { LyricsResolver } from '../../src/services/lyrics.js';
 import { PermanentCache } from '../../src/services/cache.js';
 
 describe('CORS and Security Headers', () => {
+  // Tests point the backend at a dead Piped by changing the config, then put it back.
+  const pipedApiUrl = config.PIPED_API_URL;
   const app = createApp();
   let mockAgent: MockAgent | null = null;
   let originalDispatcher: Dispatcher;
@@ -110,7 +112,7 @@ describe('CORS and Security Headers', () => {
     const hanging = net.createServer((socket) => sockets.push(socket));
     await new Promise<void>((resolve) => hanging.listen(0, '127.0.0.1', resolve));
     const { port } = hanging.address() as net.AddressInfo;
-    await saveSetting('piped.apiUrl', `http://127.0.0.1:${port}`, 'test');
+    config.PIPED_API_URL = `http://127.0.0.1:${port}`;
     try {
       const started = Date.now();
       const res = await request(app).get('/api/v1/healthz');
@@ -118,7 +120,7 @@ describe('CORS and Security Headers', () => {
       expect(res.status).toBe(200);
       expect(res.body).toMatchObject({ ok: true, db: 'up', piped: 'down' });
     } finally {
-      await saveSetting('piped.apiUrl', null, 'test');
+      config.PIPED_API_URL = pipedApiUrl;
       sockets.forEach((s) => s.destroy());
       await new Promise((resolve) => hanging.close(resolve));
     }
@@ -127,14 +129,14 @@ describe('CORS and Security Headers', () => {
   it('BE-SEC-008: /healthz answers quickly when connecting to Piped never completes', async () => {
     // A non-routable address: the TCP connect hangs (or fails at once on some networks).
     mockAgent!.enableNetConnect('10.255.255.1:8090');
-    await saveSetting('piped.apiUrl', 'http://10.255.255.1:8090', 'test');
+    config.PIPED_API_URL = 'http://10.255.255.1:8090';
     try {
       const started = Date.now();
       const res = await request(app).get('/api/v1/healthz');
       expect(Date.now() - started).toBeLessThan(4000);
       expect(res.body).toMatchObject({ ok: true, db: 'up', piped: 'down' });
     } finally {
-      await saveSetting('piped.apiUrl', null, 'test');
+      config.PIPED_API_URL = pipedApiUrl;
     }
   });
 });

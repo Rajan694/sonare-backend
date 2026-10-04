@@ -17,6 +17,12 @@ export const users = pgTable('users', {
   passwordHash: text('password_hash').notNull(),
   displayName: text('display_name').notNull(),
   emailVerifiedAt: timestamp('email_verified_at'),
+  /** 'user' for app accounts; 'admin' signs in to /admin only and cannot use the apps. */
+  role: text('role').default('user').notNull(),
+  /** Bumped on an admin password change; admin tokens carry it, so older tokens stop working. */
+  tokenVersion: integer('token_version').default(0).notNull(),
+  lastLoginAt: timestamp('last_login_at'),
+  passwordChangedAt: timestamp('password_changed_at'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
 });
 
@@ -184,28 +190,7 @@ export const lyricsOverrides = pgTable(
   }),
 );
 
-// --- Admin (/admin on the web build). Separate from `users`: an app account never gets admin
-// access, and the admin login is not an app account.
-
-export const adminUsers = pgTable('admin_users', {
-  id: uuid('id').defaultRandom().primaryKey(),
-  username: text('username').notNull().unique(),
-  passwordHash: text('password_hash').notNull(),
-  /** Bumped on a password change; admin tokens carry it, so older tokens stop working. */
-  tokenVersion: integer('token_version').default(0).notNull(),
-  lastLoginAt: timestamp('last_login_at'),
-  createdAt: timestamp('created_at').defaultNow().notNull(),
-  updatedAt: timestamp('updated_at').defaultNow().notNull(),
-});
-
-/** System-wide settings, edited from the admin page. A null value means "use the .env default". */
-export const systemConfiguration = pgTable('system_configuration', {
-  key: text('key').primaryKey(),
-  value: jsonb('value').$type<unknown>(),
-  description: text('description'),
-  updatedAt: timestamp('updated_at').defaultNow().notNull(),
-  updatedBy: text('updated_by'),
-});
+// --- Admin analytics (/admin on the web build).
 
 /** One row per API request, for the admin analytics. Pruned after 30 days. */
 export const requestLogs = pgTable(

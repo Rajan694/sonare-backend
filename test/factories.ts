@@ -1,6 +1,6 @@
 import bcrypt from 'bcrypt';
 import { db } from '../src/db/index.js';
-import { users, adminUsers, refreshTokens } from '../src/db/schema.js';
+import { users, refreshTokens } from '../src/db/schema.js';
 import { signAccessToken, generateRefreshToken, hashToken } from '../src/middleware/auth.js';
 import { signAdminToken } from '../src/middleware/adminAuth.js';
 import crypto from 'node:crypto';
@@ -33,16 +33,18 @@ export async function createUser(override: Partial<typeof users.$inferInsert> = 
   return { user, token, refreshToken, rawPassword: password };
 }
 
-export async function createAdminUser(override: Partial<typeof adminUsers.$inferInsert> = {}) {
-  const username = override.username ?? `admin_${crypto.randomBytes(4).toString('hex')}`;
+export async function createAdminUser(override: Partial<typeof users.$inferInsert> = {}) {
+  const email = override.email ?? `admin_${crypto.randomBytes(4).toString('hex')}@example.com`;
   const password = 'adminpassword123';
   const passwordHash = override.passwordHash ?? (await bcrypt.hash(password, 12));
 
   const [admin] = await db
-    .insert(adminUsers)
+    .insert(users)
     .values({
-      username,
+      email,
       passwordHash,
+      displayName: 'Admin',
+      role: 'admin',
       tokenVersion: 1,
       ...override,
     })

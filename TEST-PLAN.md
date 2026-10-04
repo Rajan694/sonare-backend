@@ -210,39 +210,34 @@ This document maps all backend test IDs to their specifications, assertions, and
 
 ---
 
-## 6. Admin Panel & System Configuration
+## 6. Admin Panel
 
-| Test ID            | Method / Scope                                          | Description & Assertions                                                      |
-| :----------------- | :------------------------------------------------------ | :---------------------------------------------------------------------------- |
-| `BE-ADMIN-001`     | `POST /api/v1/admin/login`                              | Admin login returns JWT admin token.                                          |
-| `BE-ADMIN-002`     | `POST /api/v1/admin/login`                              | Rejects invalid admin credentials with 401 INVALID_CREDENTIALS.               |
-| `BE-ADMIN-003`     | `POST /api/v1/admin/login`                              | Rejects missing username or password with 400 BAD_REQUEST.                    |
-| `BE-ADMIN-004`     | `GET /api/v1/admin/me`                                  | Returns admin profile when authenticated.                                     |
-| `BE-ADMIN-005`     | `GET /api/v1/admin/me`                                  | Rejects regular user access tokens with 401 UNAUTHORIZED.                     |
-| `BE-ADMIN-006`     | `POST /api/v1/admin/password`                           | Changes admin password, bumps tokenVersion and invalidates old sessions.      |
-| `BE-ADMIN-007`     | `POST /api/v1/admin/password`                           | Rejects incorrect current password with 400 WRONG_PASSWORD.                   |
-| `BE-ADMIN-008`     | `GET /api/v1/admin/config`                              | Returns all system settings with current and fallback values.                 |
-| `BE-ADMIN-009`     | `PUT /api/v1/admin/config/:key`                         | Rejects unrecognized setting key with 404 NOT_FOUND.                          |
-| `BE-ADMIN-010`     | `PUT /api/v1/admin/config/:key`                         | Rejects invalid setting URL value with 400 BAD_REQUEST.                       |
-| `BE-ADMIN-011`     | `GET /api/v1/admin/analytics/overview`                  | Aggregates daily analytics, play counts, and user metrics.                    |
-| `BE-ADMIN-012`     | `GET /api/v1/admin/analytics/requests`                  | Aggregates request volume, latency percentiles (p50, p95), and route metrics. |
-| `BE-ADMIN-013`     | `GET /api/v1/admin/errors`                              | Returns paginated error logs with totals and breakdown by source.             |
-| `BE-ADMIN-014`     | `DELETE /api/v1/admin/errors/:id`                       | Deletes specific error log entry.                                             |
-| `BE-ADM-EXTRA-001` | `PUT /api/v1/admin/config/:key`                         | Updates valid piped.apiUrl setting.                                           |
-| `BE-ADM-EXTRA-002` | `PUT /api/v1/admin/config/:key`                         | Resets setting to fallback value by passing null.                             |
-| `BE-ADM-EXTRA-003` | `DELETE /api/v1/admin/errors/:id`                       | Returns 404 for non-existent error ID.                                        |
-| `BE-ADM-EXTRA-004` | `DELETE /api/v1/admin/errors/:id`                       | Returns 400 for non-integer ID parameter.                                     |
-| `BE-ADM-EXTRA-005` | `GET /api/v1/admin/analytics/overview`                  | Accepts custom window days query parameter.                                   |
-| `BE-ADM-EXTRA-006` | `GET /api/v1/admin/analytics/requests`                  | Accepts custom window hours query parameter.                                  |
-| `BE-ADM-CFG-001`   | `GET /api/v1/admin/config/piped.extractorCommit/latest` | Queries latest NewPipeExtractor commit from GitHub API.                       |
-| `BE-ADM-CFG-002`   | `PUT /api/v1/admin/config/piped.extractorCommit`        | Saves valid commit hash to system configuration.                              |
-| `BE-ADM-SEC-001`   | `POST /api/v1/admin/login`                              | Enforces rate limiting lockout after 5 consecutive failures.                  |
-| `BE-ADM-SEC-002`   | `POST /api/v1/admin/password`                           | Rejects new password identical to current password.                           |
-| `BE-ADM-SEC-003`   | `POST /api/v1/admin/password`                           | Rejects short new password (<8 characters).                                   |
-| `BE-ADM-SEC-004`   | `GET /api/v1/admin/errors`                              | Filters error logs by source and text search query.                           |
-| `BE-ADM-COV-001`   | `PUT /api/v1/admin/config/:key`                         | Rejects unparseable setting value.                                            |
-| `BE-ADM-COV-002`   | `GET /api/v1/admin/analytics/overview`                  | Accepts timezone query parameter.                                             |
-| `BE-ADM-BR-001`    | `requireAdmin` middleware                               | Handles database errors during admin authentication.                          |
+| Test ID            | Method / Scope                         | Description & Assertions                                                      |
+| :----------------- | :------------------------------------- | :---------------------------------------------------------------------------- |
+| `BE-ADMIN-001`     | `POST /api/v1/admin/login`             | Admin login returns JWT admin token.                                          |
+| `BE-ADMIN-002`     | `POST /api/v1/admin/login`             | Rejects invalid admin credentials with 401 INVALID_CREDENTIALS.               |
+| `BE-ADMIN-003`     | `POST /api/v1/admin/login`             | Rejects missing email or password with 400 BAD_REQUEST.                       |
+| `BE-ADMIN-004`     | `GET /api/v1/admin/me`                 | Returns admin profile when authenticated.                                     |
+| `BE-ADMIN-005`     | `GET /api/v1/admin/me`                 | Rejects regular user access tokens with 401 UNAUTHORIZED.                     |
+| `BE-ADMIN-006`     | `POST /api/v1/admin/password`          | Changes admin password, bumps tokenVersion and invalidates old sessions.      |
+| `BE-ADMIN-007`     | `POST /api/v1/admin/password`          | Rejects incorrect current password with 400 WRONG_PASSWORD.                   |
+| `BE-ADMIN-008`     | `POST /api/v1/admin/login`             | Rejects an app account (role user) with 401 INVALID_CREDENTIALS.              |
+| `BE-ADMIN-009`     | `POST /api/v1/auth/login`              | The app login refuses the admin account with 401.                             |
+| `BE-ADMIN-010`     | `GET /api/v1/admin/analytics/overview` | User and new-user counts leave out admin accounts.                            |
+| `BE-ADMIN-011`     | `GET /api/v1/admin/analytics/overview` | Aggregates daily analytics, play counts, and user metrics.                    |
+| `BE-ADMIN-012`     | `GET /api/v1/admin/analytics/requests` | Aggregates request volume, latency percentiles (p50, p95), and route metrics. |
+| `BE-ADMIN-013`     | `GET /api/v1/admin/errors`             | Returns paginated error logs with totals and breakdown by source.             |
+| `BE-ADMIN-014`     | `DELETE /api/v1/admin/errors/:id`      | Deletes specific error log entry.                                             |
+| `BE-ADM-EXTRA-003` | `DELETE /api/v1/admin/errors/:id`      | Returns 404 for non-existent error ID.                                        |
+| `BE-ADM-EXTRA-004` | `DELETE /api/v1/admin/errors/:id`      | Returns 400 for non-integer ID parameter.                                     |
+| `BE-ADM-EXTRA-005` | `GET /api/v1/admin/analytics/overview` | Accepts custom window days query parameter.                                   |
+| `BE-ADM-EXTRA-006` | `GET /api/v1/admin/analytics/requests` | Accepts custom window hours query parameter.                                  |
+| `BE-ADM-SEC-001`   | `POST /api/v1/admin/login`             | Enforces rate limiting lockout after 5 consecutive failures.                  |
+| `BE-ADM-SEC-002`   | `POST /api/v1/admin/password`          | Rejects new password identical to current password.                           |
+| `BE-ADM-SEC-003`   | `POST /api/v1/admin/password`          | Rejects short new password (<8 characters).                                   |
+| `BE-ADM-SEC-004`   | `GET /api/v1/admin/errors`             | Filters error logs by source and text search query.                           |
+| `BE-ADM-COV-002`   | `GET /api/v1/admin/analytics/overview` | Accepts timezone query parameter.                                             |
+| `BE-ADM-BR-001`    | `requireAdmin` middleware              | Handles database errors during admin authentication.                          |
 
 ---
 
@@ -350,29 +345,20 @@ This document maps all backend test IDs to their specifications, assertions, and
 
 ### Configuration
 
-| Test ID          | Description                                                                   |
-| :--------------- | :---------------------------------------------------------------------------- |
-| `BE-CONF-001`    | Parses TCP PostgreSQL URL.                                                    |
-| `BE-CONF-002`    | Parses Unix socket PostgreSQL URL.                                            |
-| `BE-CONF-003`    | Parses URL with default port.                                                 |
-| `BE-CONF-004`    | Validates environment variables schema.                                       |
-| `BE-CONF-005`    | `assertProductionConfig` accepts a complete production config.                |
-| `BE-CONF-006`    | `assertProductionConfig` rejects the dev or a short JWT_SECRET in production. |
-| `BE-CONF-007`    | `assertProductionConfig` rejects missing SMTP_USER / SMTP_PASS in production. |
-| `BE-CONF-008`    | `assertProductionConfig` rejects a non-https APP_URL in production.           |
-| `BE-CONF-009`    | `assertProductionConfig` skips all checks outside production.                 |
-| `BE-CONF-010`    | `parseTrustProxy` maps TRUST_PROXY to Express's `trust proxy` value.          |
-| `BE-MAIL-001`    | `verifyEmailMessage` has the subject and the link in text and html.           |
-| `BE-MAIL-002`    | `resetPasswordMessage` has the subject and the link in text and html.         |
-| `BE-SYS-001`     | Normalizes and validates configuration URLs.                                  |
-| `BE-SYS-002`     | Validates commit hash format.                                                 |
-| `BE-SYS-003`     | Describes all available settings.                                             |
-| `BE-SYS-004`     | Saves configuration to database.                                              |
-| `BE-SYS-005`     | Tests live Piped API health check.                                            |
-| `BE-SYS-006`     | Reports down status when health check fails.                                  |
-| `BE-SYS-007`     | Fetches latest commit from GitHub API.                                        |
-| `BE-SYS-COV-001` | Validates commit existence via GitHub API.                                    |
-| `BE-SYS-COV-002` | Reports 404 for non-existent commit.                                          |
+| Test ID       | Description                                                                   |
+| :------------ | :---------------------------------------------------------------------------- |
+| `BE-CONF-001` | Parses TCP PostgreSQL URL.                                                    |
+| `BE-CONF-002` | Parses Unix socket PostgreSQL URL.                                            |
+| `BE-CONF-003` | Parses URL with default port.                                                 |
+| `BE-CONF-004` | Validates environment variables schema.                                       |
+| `BE-CONF-005` | `assertProductionConfig` accepts a complete production config.                |
+| `BE-CONF-006` | `assertProductionConfig` rejects the dev or a short JWT_SECRET in production. |
+| `BE-CONF-007` | `assertProductionConfig` rejects missing SMTP_USER / SMTP_PASS in production. |
+| `BE-CONF-008` | `assertProductionConfig` rejects a non-https APP_URL in production.           |
+| `BE-CONF-009` | `assertProductionConfig` skips all checks outside production.                 |
+| `BE-CONF-010` | `parseTrustProxy` maps TRUST_PROXY to Express's `trust proxy` value.          |
+| `BE-MAIL-001` | `verifyEmailMessage` has the subject and the link in text and html.           |
+| `BE-MAIL-002` | `resetPasswordMessage` has the subject and the link in text and html.         |
 
 ### Upstream Clients
 
@@ -429,10 +415,9 @@ This document maps all backend test IDs to their specifications, assertions, and
 | `BE-DB-008`        | User settings persistence.                    |
 | `BE-DB-009`        | Player state persistence.                     |
 | `BE-DB-010`        | Lyrics overrides storage.                     |
-| `BE-DB-011`        | Admin user token version increment.           |
+| `BE-DB-011`        | Admin row in users: role and token version.   |
 | `BE-DB-012`        | Error logs table insert.                      |
 | `BE-DB-013`        | Request logs table insert.                    |
-| `BE-DB-014`        | System configuration table insert.            |
 | `BE-DB-015`        | getUserTrackDataMap batching.                 |
 | `BE-DB-016`        | hydrateTracks formatting.                     |
 | `BE-DB-INT-001`    | Enforces email unique constraint.             |
@@ -449,8 +434,7 @@ This document maps all backend test IDs to their specifications, assertions, and
 | `BE-SCH-009`       | UserSettings schema definition.               |
 | `BE-SCH-010`       | PlayerState schema definition.                |
 | `BE-SCH-011`       | LyricsOverrides schema definition.            |
-| `BE-SCH-012`       | AdminUsers schema definition.                 |
-| `BE-SCH-013`       | SystemConfiguration schema definition.        |
+| `BE-SCH-012`       | Users schema admin columns.                   |
 | `BE-SCH-014`       | RequestLogs schema definition.                |
 | `BE-SCH-015`       | ErrorLogs schema definition.                  |
 | `BE-HYDR-001`      | Empty tracks hydration.                       |
