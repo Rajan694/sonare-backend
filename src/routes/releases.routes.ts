@@ -29,8 +29,9 @@ releasesRouter.get('/releases/:id/download', async (req, res, next) => {
   }
 
   // Resumed downloads come back with a Range; count each download once, at its start.
+  // Express answers HEAD with this handler too; a HEAD is only a look, not a download.
   const range = req.headers.range;
-  if (!range || /^bytes=0-/.test(range)) {
+  if (req.method === 'GET' && (!range || /^bytes=0-/.test(range))) {
     await db
       .update(appReleases)
       .set({ downloads: sql`${appReleases.downloads} + 1` })

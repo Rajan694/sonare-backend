@@ -127,6 +127,10 @@ describe('App releases: admin upload, public list and download', () => {
     expect(res.headers['content-type']).toBe('application/vnd.android.package-archive');
     expect(Buffer.compare(res.body, body)).toBe(0);
 
+    // A HEAD (link previews, download managers checking the size) isn't a download.
+    const head = await request(app).head(`/api/v1/releases/${up.body.id}/download`);
+    expect(head.status).toBe(200);
+
     const list = await request(app).get('/api/v1/admin/releases').set('Authorization', `Bearer ${token}`);
     expect(list.body.items[0].downloads).toBe(1);
   });
