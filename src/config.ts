@@ -36,7 +36,7 @@ const envSchema = z.object({
 export type Config = z.infer<typeof envSchema>;
 
 /** Development defaults are unsafe in production; refuse to start with them. */
-export function assertProductionConfig(cfg: Config): void {
+export const assertProductionConfig = (cfg: Config): void => {
   if (cfg.NODE_ENV !== 'production') return;
   if (cfg.JWT_SECRET === DEV_JWT_SECRET || cfg.JWT_SECRET.length < 32) {
     throw new Error('JWT_SECRET must be set to a non-default value of at least 32 characters in production');
@@ -47,19 +47,19 @@ export function assertProductionConfig(cfg: Config): void {
   if (!cfg.APP_URL.startsWith('https://')) {
     throw new Error('APP_URL must be an https URL in production');
   }
-}
+};
 
 export const config = envSchema.parse(process.env);
 assertProductionConfig(config);
 
 /** Express's `trust proxy` setting from TRUST_PROXY, or undefined to leave it off. */
-export function parseTrustProxy(value: string | undefined): boolean | number | string | undefined {
+export const parseTrustProxy = (value: string | undefined): boolean | number | string | undefined => {
   if (!value) return undefined;
   if (value === 'true') return true;
   if (value === 'false') return false;
   if (/^\d+$/.test(value)) return Number(value);
   return value;
-}
+};
 
 export const corsOrigins: string[] = config.CORS_ORIGINS.split(',')
   .map((s) => s.trim())
@@ -75,7 +75,7 @@ export interface DbConnectionOptions {
   ssl?: boolean;
 }
 
-export function parseDatabaseUrl(urlStr: string): DbConnectionOptions {
+export const parseDatabaseUrl = (urlStr: string): DbConnectionOptions => {
   const parsed = new URL(urlStr);
   const socketHost = parsed.searchParams.get('host');
   const database = parsed.pathname.replace(/^\//, '');
@@ -102,6 +102,6 @@ export function parseDatabaseUrl(urlStr: string): DbConnectionOptions {
     password,
     ssl: parsed.searchParams.get('sslmode') === 'require' ? true : undefined,
   };
-}
+};
 
 export const dbConfig = parseDatabaseUrl(config.DATABASE_URL);

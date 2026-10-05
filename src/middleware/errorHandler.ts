@@ -3,7 +3,7 @@ import { UpstreamError } from '../upstream/piped.js';
 import { BadRequestError, LyricsUnavailableError, NoAudioStreamError, StreamTokenError } from '../errors.js';
 
 // The last middleware: turns thrown errors into the API's { error: { code, message } } shape.
-export function errorHandler(err: unknown, req: Request, res: Response, _next: NextFunction) {
+export const errorHandler = (err: unknown, req: Request, res: Response, _next: NextFunction) => {
   // A body express.json() could not read is the client's mistake, not a server error.
   const bodyError = (err as { type?: unknown } | null)?.type;
   if (bodyError === 'entity.parse.failed') {
@@ -58,4 +58,4 @@ export function errorHandler(err: unknown, req: Request, res: Response, _next: N
       message: 'Internal server error',
     },
   });
-}
+};

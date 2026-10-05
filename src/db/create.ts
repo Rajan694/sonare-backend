@@ -3,7 +3,7 @@ import { dbConfig } from '../config.js';
 import { logger } from '../logger.js';
 import { describeError } from '../errors.js';
 
-async function createDatabase() {
+const createDatabase = async () => {
   const maintenanceConfig = {
     ...dbConfig,
     database: 'postgres',
@@ -30,6 +30,6 @@ async function createDatabase() {
   } finally {
     await sql.end();
   }
-}
+};
 
 createDatabase();

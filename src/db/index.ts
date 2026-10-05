@@ -13,7 +13,7 @@ export const sql = postgres({
 
 export const db = drizzle(sql, { schema });
 
-export async function verifyDatabase() {
+export const verifyDatabase = async () => {
   try {
     await sql`SELECT 1`;
   } catch (error) {
@@ -26,4 +26,4 @@ export async function verifyDatabase() {
     logger.fatal({ err: error }, `Failed to connect to PostgreSQL: ${describeError(error)}`);
     process.exit(1);
   }
-}
+};

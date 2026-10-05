@@ -5,7 +5,7 @@ import { flushTelemetry, startTelemetry } from './services/telemetry.js';
 import { logger } from './logger.js';
 import { hasFfmpeg } from './services/peaks.js';
 
-async function start() {
+const start = async () => {
   await verifyDatabase();
   startTelemetry();
   const app = createApp();
@@ -32,6 +32,6 @@ async function start() {
 
   process.on('SIGTERM', shutdown);
   process.on('SIGINT', shutdown);
-}
+};
 
 start();

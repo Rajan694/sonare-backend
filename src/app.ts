@@ -18,7 +18,7 @@ import { logger } from './logger.js';
 
 const LOCALHOST_ORIGIN_REGEX = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
 
-export function createApp() {
+export const createApp = () => {
   const app = express();
   const trustProxy = parseTrustProxy(config.TRUST_PROXY);
   if (trustProxy !== undefined) app.set('trust proxy', trustProxy);
@@ -85,4 +85,4 @@ export function createApp() {
   app.use(errorHandler);
 
   return app;
-}
+};

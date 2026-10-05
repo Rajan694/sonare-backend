@@ -13,15 +13,15 @@ export interface RateLimitBlockedResult {
 
 let loggedRateLimitRedisWarning = false;
 
-function warnRedisDown() {
+const warnRedisDown = () => {
   if (!loggedRateLimitRedisWarning) {
     logger.warn('Rate limiter: Redis unreachable, failing open');
     loggedRateLimitRedisWarning = true;
   }
-}
+};
 
 /** Fixed-window counter per key backed by Redis. */
-export function createRateLimiter({
+export const createRateLimiter = ({
   name = 'default',
   max,
   windowMs,
@@ -29,7 +29,7 @@ export function createRateLimiter({
   name?: string;
   max: number;
   windowMs: number;
-}) {
+}) => {
   const prefix = `rl:${name}:`;
 
   return {
@@ -91,4 +91,4 @@ export function createRateLimiter({
       }
     },
   };
-}
+};

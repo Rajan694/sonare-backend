@@ -19,19 +19,19 @@ declare global {
   }
 }
 
-export function signAccessToken(payload: AuthUser): string {
+export const signAccessToken = (payload: AuthUser): string => {
   return jwt.sign(payload, config.JWT_SECRET, { expiresIn: '15m' });
-}
+};
 
-export function generateRefreshToken(): string {
+export const generateRefreshToken = (): string => {
   return crypto.randomBytes(32).toString('hex');
-}
+};
 
-export function hashToken(token: string): string {
+export const hashToken = (token: string): string => {
   return crypto.createHash('sha256').update(token).digest('hex');
-}
+};
 
-export async function optionalAuth(req: Request, res: Response, next: NextFunction) {
+export const optionalAuth = async (req: Request, res: Response, next: NextFunction) => {
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
     return next();
@@ -43,9 +43,9 @@ export async function optionalAuth(req: Request, res: Response, next: NextFuncti
     req.user = decoded;
   } catch {}
   next();
-}
+};
 
-export async function requireAuth(req: Request, res: Response, next: NextFunction) {
+export const requireAuth = async (req: Request, res: Response, next: NextFunction) => {
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
     res.status(401).json({
@@ -72,4 +72,4 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
       error: { code: 'UNAUTHORIZED', message: 'Token is invalid or expired' },
     });
   }
-}
+};

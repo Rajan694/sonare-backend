@@ -10,11 +10,11 @@ try {
 }
 
 /** Whether ffmpeg is on the PATH. Without it every waveform is a made-up placeholder. */
-export function hasFfmpeg(): boolean {
+export const hasFfmpeg = (): boolean => {
   return HAS_FFMPEG;
-}
+};
 
-export async function extractPeaks(url: string, trackId: string, bars: number = 150): Promise<number[]> {
+export const extractPeaks = async (url: string, trackId: string, bars: number = 150): Promise<number[]> => {
   if (!HAS_FFMPEG) {
     return placeholderPeaks(trackId, bars);
   }
@@ -82,16 +82,16 @@ export async function extractPeaks(url: string, trackId: string, bars: number = 
 
     ff.on('error', () => resolve(placeholderPeaks(trackId, bars)));
   });
-}
+};
 
 /** True when `peaks` is this track's made-up placeholder, i.e. extraction failed. */
-export function isPlaceholderPeaks(trackId: string, bars: number, peaks: number[]): boolean {
+export const isPlaceholderPeaks = (trackId: string, bars: number, peaks: number[]): boolean => {
   const placeholder = placeholderPeaks(trackId, bars);
   return peaks.length === placeholder.length && peaks.every((p, i) => p === placeholder[i]);
-}
+};
 
 /** A deterministic, waveform-ish shape for when the real audio can't be read. */
-export function placeholderPeaks(trackId: string, bars: number): number[] {
+export const placeholderPeaks = (trackId: string, bars: number): number[] => {
   const hashHex = crypto.createHash('md5').update(trackId).digest('hex');
   const hashBytes = Buffer.from(hashHex, 'hex');
   const result: number[] = [];
@@ -111,4 +111,4 @@ export function placeholderPeaks(trackId: string, bars: number): number[] {
     result.push(val);
   }
   return result;
-}
+};

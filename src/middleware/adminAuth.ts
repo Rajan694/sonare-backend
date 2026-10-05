@@ -25,20 +25,20 @@ declare global {
   }
 }
 
-export function signAdminToken(admin: { id: string; tokenVersion: number }): string {
+export const signAdminToken = (admin: { id: string; tokenVersion: number }): string => {
   return jwt.sign({ ver: admin.tokenVersion }, ADMIN_KEY, {
     subject: admin.id,
     audience: ADMIN_AUDIENCE,
     expiresIn: ADMIN_TOKEN_TTL,
   });
-}
+};
 
-function unauthorized(res: Response, message: string) {
+const unauthorized = (res: Response, message: string) => {
   res.status(401).json({ error: { code: 'UNAUTHORIZED', message } });
-}
+};
 
 /** Admin API guard. A token stops working once the password it was issued under changes. */
-export async function requireAdmin(req: Request, res: Response, next: NextFunction) {
+export const requireAdmin = async (req: Request, res: Response, next: NextFunction) => {
   const header = req.headers.authorization;
   if (!header?.startsWith('Bearer ')) return unauthorized(res, 'Sign in to the admin page');
 
@@ -66,4 +66,4 @@ export async function requireAdmin(req: Request, res: Response, next: NextFuncti
   } catch (err) {
     next(err);
   }
-}
+};

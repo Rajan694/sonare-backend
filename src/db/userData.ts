@@ -9,10 +9,10 @@ export interface UserTrackFields {
   lastPlayedAt?: number;
 }
 
-export async function getUserTrackDataMap(
+export const getUserTrackDataMap = async (
   userId: string | undefined,
   trackIds: string[],
-): Promise<Map<string, UserTrackFields>> {
+): Promise<Map<string, UserTrackFields>> => {
   const map = new Map<string, UserTrackFields>();
   if (!userId || trackIds.length === 0) return map;
 
@@ -65,9 +65,9 @@ export async function getUserTrackDataMap(
   }
 
   return map;
-}
+};
 
-export async function getUserTrackFields(userId: string | undefined, trackId: string): Promise<UserTrackFields> {
+export const getUserTrackFields = async (userId: string | undefined, trackId: string): Promise<UserTrackFields> => {
   const map = await getUserTrackDataMap(userId, [trackId]);
   return (
     map.get(trackId) || {
@@ -77,4 +77,4 @@ export async function getUserTrackFields(userId: string | undefined, trackId: st
       lastPlayedAt: undefined,
     }
   );
-}
+};

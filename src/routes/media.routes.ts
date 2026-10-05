@@ -30,12 +30,12 @@ interface SelectedStream {
   muxed: boolean;
 }
 
-function selectBestAudioStream(
+const selectBestAudioStream = (
   audios: PipedStream[] | undefined,
   quality: string,
   format?: string,
   videoStreams?: PipedStream[],
-): SelectedStream | null {
+): SelectedStream | null => {
   // If adaptive audio streams exist, adaptive audio must still win
   if (audios && audios.length > 0) {
     const sorted = audios.slice().sort((a, b) => b.bitrate - a.bitrate);
@@ -123,13 +123,13 @@ function selectBestAudioStream(
   }
 
   return null;
-}
+};
 
 // Large thumbnails aren't guaranteed: maxresdefault and hq720 are missing for some videos,
 // and a client (the lock screen especially) can't fall back on its own. Probe once per video.
 const largeThumbs = new LRUCache<string, YtThumbName>({ max: 5000, ttl: 7 * 24 * 3600_000 });
 
-async function largestThumb(videoId: string): Promise<YtThumbName> {
+const largestThumb = async (videoId: string): Promise<YtThumbName> => {
   const known = largeThumbs.get(videoId);
   if (known) return known;
   let found: YtThumbName = 'mqdefault';
@@ -147,7 +147,7 @@ async function largestThumb(videoId: string): Promise<YtThumbName> {
   }
   largeThumbs.set(videoId, found);
   return found;
-}
+};
 
 mediaRouter.get('/tracks/:id', async (req, res) => {
   const rawId = idHelpers.extractYtId(req.params.id);

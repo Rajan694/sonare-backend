@@ -27,27 +27,27 @@ const UNREACHABLE_CODES = new Set([
   'UND_ERR_SOCKET',
 ]);
 
-function networkError(e: unknown): UpstreamError {
+const networkError = (e: unknown): UpstreamError => {
   const code = (e as { code?: unknown } | null)?.code;
   if (typeof code === 'string' && UNREACHABLE_CODES.has(code)) {
     return new UpstreamError(`Piped is unreachable at ${config.PIPED_API_URL} (${code})`, 502, true);
   }
   return new UpstreamError(`Piped network error: ${e instanceof Error ? e.message : String(e)}`, 502);
-}
+};
 
 /** Rejects with an "unreachable" UpstreamError if `promise` hasn't settled after `ms`. */
-function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+const withTimeout = <T>(promise: Promise<T>, ms: number): Promise<T> => {
   let timer: NodeJS.Timeout | undefined;
   const timeout = new Promise<never>((_, reject) => {
     timer = setTimeout(() => reject(new UpstreamError(`Piped did not answer within ${ms} ms`, 502, true)), ms);
   });
   return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
-}
+};
 
-async function fetchPiped<TRes>(
+const fetchPiped = async <TRes>(
   path: string,
   options: { method?: Dispatcher.HttpMethod; query?: Record<string, string | number> } = {},
-): Promise<TRes> {
+): Promise<TRes> => {
   const url = new URL(path, config.PIPED_API_URL);
   if (options.query) {
     for (const [key, val] of Object.entries(options.query)) {
@@ -92,7 +92,7 @@ async function fetchPiped<TRes>(
     }
   }
   throw new UpstreamError('Unreachable', 502);
-}
+};
 
 export type PipedClient = typeof Piped;
 

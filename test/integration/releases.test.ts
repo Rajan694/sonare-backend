@@ -11,14 +11,14 @@ describe('App releases: admin upload, public list and download', () => {
 
   afterAll(() => fs.rmSync(releasesDir(), { recursive: true, force: true }));
 
-  function upload(token: string, query: Record<string, string>, body: Buffer) {
+  const upload = (token: string, query: Record<string, string>, body: Buffer) => {
     return request(app)
       .post('/api/v1/admin/releases')
       .query(query)
       .set('Authorization', `Bearer ${token}`)
       .set('Content-Type', 'application/octet-stream')
       .send(body);
-  }
+  };
 
   it('BE-REL-001: POST /api/v1/admin/releases stores the file with its size and sha256', async () => {
     const { token } = await createAdminUser();

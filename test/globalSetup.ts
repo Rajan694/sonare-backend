@@ -9,7 +9,7 @@ dotenv.config({ path: path.resolve(__dirname, '../.env.test'), override: true })
 
 import postgres from 'postgres';
 
-export async function setup() {
+export const setup = async () => {
   const dbUrl = process.env.DATABASE_URL;
   if (!dbUrl) {
     throw new Error('Copy .env.test.example to .env.test and set DATABASE_URL (database sonare_test)');
@@ -63,8 +63,8 @@ export async function setup() {
   } finally {
     await testSql.end();
   }
-}
+};
 
-export async function teardown() {
+export const teardown = async () => {
   // Clean up connections if needed
-}
+};

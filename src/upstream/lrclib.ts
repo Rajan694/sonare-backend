@@ -16,7 +16,7 @@ export interface LrclibTrack {
 type Query = Record<string, string | number | undefined | null>;
 
 /** Null when LRCLIB has no such track (404). */
-async function fetchLrc<T>(path: string, query?: Query): Promise<T | null> {
+const fetchLrc = async <T>(path: string, query?: Query): Promise<T | null> => {
   const url = new URL(path, config.LRCLIB_BASE);
   if (query) {
     for (const [k, v] of Object.entries(query)) {
@@ -44,7 +44,7 @@ async function fetchLrc<T>(path: string, query?: Query): Promise<T | null> {
   }
 
   return (await body.json()) as T;
-}
+};
 
 export const Lrclib = {
   get(track_name: string, artist_name: string, album_name?: string, duration?: number) {

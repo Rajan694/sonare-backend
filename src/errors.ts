@@ -42,8 +42,8 @@ export class LyricsUnavailableError extends Error {
 }
 
 /** A short reason for a caught error: its code (ECONNREFUSED, …) when it has one, else its message. */
-export function describeError(e: unknown): string {
+export const describeError = (e: unknown): string => {
   const code = (e as { code?: unknown } | null)?.code;
   if (typeof code === 'string' && code) return code;
   return e instanceof Error ? e.message : String(e);
-}
+};

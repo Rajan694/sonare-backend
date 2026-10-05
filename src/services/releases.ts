@@ -27,36 +27,36 @@ const FORMATS: { ext: string; format: string; platforms: Platform[] }[] = [
 ];
 
 /** The file types each platform accepts, for error messages and the admin page. */
-export function acceptedExtensions(platform: Platform): string[] {
+export const acceptedExtensions = (platform: Platform): string[] => {
   return FORMATS.filter((f) => f.platforms.includes(platform)).map((f) => f.ext);
-}
+};
 
 /** The format a file name is for on that platform, or null when the platform doesn't take it. */
-export function formatFor(platform: Platform, fileName: string): { format: string; ext: string } | null {
+export const formatFor = (platform: Platform, fileName: string): { format: string; ext: string } | null => {
   const lower = fileName.toLowerCase();
   const match = FORMATS.find((f) => lower.endsWith(f.ext));
   return match && match.platforms.includes(platform) ? { format: match.format, ext: match.ext } : null;
-}
+};
 
 /** A download name safe for Content-Disposition: the base name, printable ASCII only. */
-export function cleanFileName(fileName: string): string {
+export const cleanFileName = (fileName: string): string => {
   const base = fileName.split(/[\\/]/).pop() ?? '';
   return base
     .replace(/[^\w.+~-]/g, '_')
     .replace(/^\.+/, '')
     .slice(0, 200);
-}
+};
 
 export const maxUploadBytes = () => config.RELEASE_MAX_MB * 1024 * 1024;
 
-export function releasesDir(): string {
+export const releasesDir = (): string => {
   return path.resolve(config.RELEASES_DIR);
-}
+};
 
-export function releasePath(release: Pick<typeof appReleases.$inferSelect, 'id' | 'format'>): string {
+export const releasePath = (release: Pick<typeof appReleases.$inferSelect, 'id' | 'format'>): string => {
   const ext = FORMATS.find((f) => f.format === release.format)?.ext ?? '';
   return path.join(releasesDir(), `${release.id}${ext}`);
-}
+};
 
 export class UploadTooLargeError extends Error {
   constructor() {
@@ -68,7 +68,7 @@ export class UploadTooLargeError extends Error {
  * Streams the request body into a temporary file in RELEASES_DIR, hashing it on the way.
  * Leaves nothing behind when it fails; the caller renames the file into place.
  */
-export async function receiveUpload(req: Request): Promise<{ tmpPath: string; size: number; sha256: string }> {
+export const receiveUpload = async (req: Request): Promise<{ tmpPath: string; size: number; sha256: string }> => {
   const limit = maxUploadBytes();
   const declared = Number(req.headers['content-length']);
   if (Number.isFinite(declared) && declared > limit) throw new UploadTooLargeError();
@@ -93,10 +93,10 @@ export async function receiveUpload(req: Request): Promise<{ tmpPath: string; si
     throw err;
   }
   return { tmpPath, size, sha256: hash.digest('hex') };
-}
+};
 
 /** The fields the apps and the admin page see. */
-export function releaseView(r: typeof appReleases.$inferSelect) {
+export const releaseView = (r: typeof appReleases.$inferSelect) => {
   return {
     id: r.id,
     platform: r.platform,
@@ -108,4 +108,4 @@ export function releaseView(r: typeof appReleases.$inferSelect) {
     notes: r.notes,
     uploadedAt: r.uploadedAt,
   };
-}
+};

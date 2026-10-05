@@ -13,16 +13,16 @@ import { directImageUrl } from '../upstream/ytImages.js';
 // keeps them across restarts; the in-memory copy saves the round trip.
 const albumThumbs = new LRUCache<string, string>({ max: 5000, ttl: 7 * 24 * 3600 * 1000 });
 
-function rememberAlbumThumb(rawId: string, proxied: string | undefined) {
+const rememberAlbumThumb = (rawId: string, proxied: string | undefined) => {
   if (rawId === 'unknown' || !proxied || !/=w\d+-h\d+/.test(proxied)) return;
   // Stored without the Piped proxy's address, which can change while this is cached.
   const url = directImageUrl(proxied);
   if (albumThumbs.get(rawId) === url) return;
   albumThumbs.set(rawId, url);
   void PermanentCache.setAlbumThumb(rawId, url);
-}
+};
 
-export async function albumThumbFor(rawId: string): Promise<string | undefined> {
+export const albumThumbFor = async (rawId: string): Promise<string | undefined> => {
   const known = albumThumbs.get(rawId);
   if (known) return known;
   const cached = await PermanentCache.getAlbumThumb(rawId);
@@ -30,9 +30,9 @@ export async function albumThumbFor(rawId: string): Promise<string | undefined> 
   const stored = cached ? directImageUrl(cached) : undefined;
   if (stored) albumThumbs.set(rawId, stored);
   return stored;
-}
+};
 
-export function withUserFields<TObj extends object>(obj: TObj, userFields?: UserTrackFields) {
+export const withUserFields = <TObj extends object>(obj: TObj, userFields?: UserTrackFields) => {
   return {
     ...obj,
     playCount: userFields?.playCount ?? 0,
@@ -40,14 +40,14 @@ export function withUserFields<TObj extends object>(obj: TObj, userFields?: User
     addedAt: userFields?.addedAt ?? Date.now(),
     lastPlayedAt: userFields?.lastPlayedAt ?? undefined,
   };
-}
+};
 
-function sanitizeCount(val: number | null | undefined): number | null {
+const sanitizeCount = (val: number | null | undefined): number | null => {
   if (val === undefined || val === null || val < 0) return null;
   return val;
-}
+};
 
-function stripTitle(title: string): string {
+const stripTitle = (title: string): string => {
   if (!title) return '';
   return title
     .replace(/\(Official (Music )?Video\)/gi, '')
@@ -58,33 +58,33 @@ function stripTitle(title: string): string {
     .replace(/\[Lyrics?\]/gi, '')
     .replace(/\s+/g, ' ')
     .trim();
-}
+};
 
-function stripArtist(uploader: string | undefined): string {
+const stripArtist = (uploader: string | undefined): string => {
   if (!uploader) return '';
   return uploader.replace(/\s*-\s*Topic$/i, '').trim();
-}
+};
 
-function mapCodec(codec: string): string {
+const mapCodec = (codec: string): string => {
   if (codec.toLowerCase().includes('opus')) return 'OPUS';
   if (codec.toLowerCase().includes('mp4a')) return 'AAC';
   if (codec.toLowerCase().includes('aac')) return 'AAC';
   return codec;
-}
+};
 
 /** A 30-day image token; the backend fetches the image straight from Google's CDN. */
-export function proxyImageUrl(url: string | undefined): string | undefined {
+export const proxyImageUrl = (url: string | undefined): string | undefined => {
   if (!url) return undefined;
   return `/api/v1/image/${signStreamToken(directImageUrl(url), 30 * 24 * 3600 * 1000)}`;
-}
+};
 
-export function normalizeStreamToTrack(
+export const normalizeStreamToTrack = (
   streams: T.Streams,
   videoId: string,
   codecStr?: string,
   bitrate?: number,
   userFields?: UserTrackFields,
-): M.Track & { thumbnail: string } {
+): M.Track & { thumbnail: string } => {
   const durationSec = sanitizeCount(streams.duration);
   return withUserFields(
     {
@@ -103,12 +103,12 @@ export function normalizeStreamToTrack(
     },
     userFields,
   );
-}
+};
 
-export function normalizeStreamItemToTrack(
+export const normalizeStreamItemToTrack = (
   item: T.StreamItem,
   userFields?: UserTrackFields,
-): M.Track & { thumbnail: string } {
+): M.Track & { thumbnail: string } => {
   let id = 'unknown';
   if (item.url?.startsWith('/watch?v=')) {
     id = item.url.substring(9);
@@ -133,9 +133,9 @@ export function normalizeStreamItemToTrack(
     },
     userFields,
   );
-}
+};
 
-export function normalizeStreamItemToArtist(item: T.StreamItem) {
+export const normalizeStreamItemToArtist = (item: T.StreamItem) => {
   let id = idHelpers.extractChannelIdFromUrl(item.url) || item.url?.replace('/channel/', '') || 'unknown';
   if (id.startsWith('/')) id = 'unknown';
   const ytid = idHelpers.prefixYt(id);
@@ -149,9 +149,9 @@ export function normalizeStreamItemToArtist(item: T.StreamItem) {
     monthlyListeners: sanitizeCount(item.views) ?? sanitizeCount(item.subscriberCount),
     thumbnail: id !== 'unknown' ? `/api/v1/artists/${ytid}/artwork` : proxyImageUrl(item.thumbnail),
   };
-}
+};
 
-export function normalizeStreamItemToAlbum(item: T.StreamItem) {
+export const normalizeStreamItemToAlbum = (item: T.StreamItem) => {
   const id = idHelpers.extractListIdFromUrl(item.url) || 'unknown';
   const ytid = idHelpers.prefixYt(id);
   rememberAlbumThumb(id, item.thumbnail);
@@ -167,9 +167,9 @@ export function normalizeStreamItemToAlbum(item: T.StreamItem) {
     downloaded: false,
     thumbnail: id !== 'unknown' ? `/api/v1/albums/${ytid}/artwork` : proxyImageUrl(item.thumbnail),
   };
-}
+};
 
-export function normalizeChannelTabAlbum(item: T.ChannelTabItem) {
+export const normalizeChannelTabAlbum = (item: T.ChannelTabItem) => {
   const id = idHelpers.extractListIdFromUrl(item.url) || item.playlistId || 'unknown';
   const ytid = idHelpers.prefixYt(id);
   const thumb = item.thumbnail || item.thumbnails?.[0]?.url;
@@ -186,12 +186,12 @@ export function normalizeChannelTabAlbum(item: T.ChannelTabItem) {
     downloaded: false,
     thumbnail: id !== 'unknown' ? `/api/v1/albums/${ytid}/artwork` : proxyImageUrl(thumb),
   };
-}
+};
 
-export function normalizeChannelToArtist(
+export const normalizeChannelToArtist = (
   channel: T.Channel,
   channelId: string,
-): M.Artist & { thumbnail: string | undefined } {
+): M.Artist & { thumbnail: string | undefined } => {
   const ytid = idHelpers.prefixYt(channelId);
   return {
     id: ytid,
@@ -202,12 +202,12 @@ export function normalizeChannelToArtist(
     monthlyListeners: sanitizeCount(channel.subscriberCount),
     thumbnail: `/api/v1/artists/${ytid}/artwork`,
   };
-}
+};
 
-export function normalizePlaylistToAlbum(
+export const normalizePlaylistToAlbum = (
   playlist: T.Playlist,
   playlistId: string,
-): M.Album & { thumbnail: string | undefined } {
+): M.Album & { thumbnail: string | undefined } => {
   let year = null;
   if (playlist.description) {
     const match = playlist.description.match(/\b(19|20)\d{2}\b/);
@@ -241,4 +241,4 @@ export function normalizePlaylistToAlbum(
     downloaded: false,
     thumbnail: `/api/v1/albums/${ytid}/artwork`,
   };
-}
+};

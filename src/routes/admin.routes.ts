@@ -28,9 +28,9 @@ import {
 // Admins are rows in users with role 'admin'; the app's own login refuses them.
 export const adminRouter = Router();
 
-function fail(res: Response, status: number, code: string, message: string) {
+const fail = (res: Response, status: number, code: string, message: string) => {
   res.status(status).json({ error: { code, message } });
-}
+};
 
 // ---- Sign-in and account ----
 
@@ -40,13 +40,13 @@ const signInLimiter = createRateLimiter({ name: 'admin', max: 5, windowMs: 15 * 
 // Compared against when no admin has that email, so both failures take as long.
 const dummyHash = bcrypt.hash(crypto.randomUUID(), BCRYPT_COST);
 
-function accountView(admin: typeof users.$inferSelect) {
+const accountView = (admin: typeof users.$inferSelect) => {
   return {
     email: admin.email,
     lastLoginAt: admin.lastLoginAt,
     passwordChangedAt: admin.passwordChangedAt,
   };
-}
+};
 
 const credentialsSchema = z.object({
   email: z.string().trim().toLowerCase().min(1, 'Enter the email').max(200),
@@ -144,7 +144,7 @@ adminRouter.post('/password', async (req, res) => {
 // database default, in the session's time zone. Everything is bucketed by the viewer's
 // time zone (?tz=, from the browser).
 
-function timeZone(req: Request): string {
+const timeZone = (req: Request): string => {
   const tz = typeof req.query.tz === 'string' ? req.query.tz : 'UTC';
   try {
     new Intl.DateTimeFormat('en', { timeZone: tz });
@@ -152,14 +152,14 @@ function timeZone(req: Request): string {
   } catch {
     return 'UTC';
   }
-}
+};
 
-function intQuery(req: Request, name: string, fallback: number, min: number, max: number): number {
+const intQuery = (req: Request, name: string, fallback: number, min: number, max: number): number => {
   const n = Number(req.query[name]);
   return Number.isFinite(n) ? Math.min(max, Math.max(min, Math.round(n))) : fallback;
-}
+};
 
-async function health() {
+const health = async () => {
   const [piped, database] = await Promise.allSettled([Piped.healthcheck(), sql`SELECT 1`]);
   const memory = process.memoryUsage();
   return {
@@ -171,7 +171,7 @@ async function health() {
     node: process.version,
     memoryMb: Math.round(memory.rss / 1e6),
   };
-}
+};
 
 adminRouter.get('/analytics/overview', async (req, res) => {
   const days = intQuery(req, 'days', 30, 1, 90);
@@ -377,7 +377,7 @@ adminRouter.get('/analytics/requests', async (req, res) => {
 
 const SOURCES = ['backend', 'web', 'linux', 'mobile'] as const;
 
-function errorFilter(req: Request): SQL | undefined {
+const errorFilter = (req: Request): SQL | undefined => {
   const source =
     typeof req.query.source === 'string' && (SOURCES as readonly string[]).includes(req.query.source)
       ? req.query.source
@@ -387,7 +387,7 @@ function errorFilter(req: Request): SQL | undefined {
     source ? eq(errorLogs.source, source) : undefined,
     q ? ilike(errorLogs.message, `%${q.replace(/[\\%_]/g, '\\$&')}%`) : undefined,
   );
-}
+};
 
 adminRouter.get('/errors', async (req, res) => {
   const limit = intQuery(req, 'limit', 50, 1, 200);

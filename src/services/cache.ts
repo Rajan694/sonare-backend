@@ -53,13 +53,13 @@ redis.on('ready', () => {
   loggedRedisError = false;
 });
 
-export function isRedisAvailable(): boolean {
+export const isRedisAvailable = (): boolean => {
   return redisAvailable;
-}
+};
 
 export { redis };
 
-async function getCached<T>(key: string): Promise<T | null> {
+const getCached = async <T>(key: string): Promise<T | null> => {
   if (!redisAvailable) return null;
   try {
     const data = await redis.get(key);
@@ -67,9 +67,9 @@ async function getCached<T>(key: string): Promise<T | null> {
   } catch {
     return null;
   }
-}
+};
 
-async function setCached(key: string, data: unknown, ttlSeconds?: number): Promise<void> {
+const setCached = async (key: string, data: unknown, ttlSeconds?: number): Promise<void> => {
   if (!redisAvailable) return;
   try {
     const serialized = JSON.stringify(data);
@@ -79,32 +79,32 @@ async function setCached(key: string, data: unknown, ttlSeconds?: number): Promi
       await redis.set(key, serialized); // permanent
     }
   } catch {}
-}
+};
 
-async function delCached(key: string): Promise<void> {
+const delCached = async (key: string): Promise<void> => {
   if (!redisAvailable) return;
   try {
     await redis.del(key);
   } catch {}
-}
+};
 
 /**
  * How long a /streams answer may be cached: its googlevideo urls stop working at their
  * `expire` time (about 6 hours out), so never past that, less 5 minutes for the playback
  * that starts just before it. 0 means don't cache.
  */
-export function streamTtl(res: T.Streams, now = Date.now()): number {
+export const streamTtl = (res: T.Streams, now = Date.now()): number => {
   const url = res.audioStreams?.[0]?.url ?? res.videoStreams?.[0]?.url ?? '';
   const expire = Number(/[?&]expire=(\d+)/.exec(url)?.[1]);
   if (!expire) return TTL.streamsMeta;
   const left = Math.floor(expire - now / 1000) - 300;
   return Math.max(0, Math.min(TTL.streamsMeta, left));
-}
+};
 
-async function cacheStream(videoId: string, res: T.Streams) {
+const cacheStream = async (videoId: string, res: T.Streams) => {
   const ttl = streamTtl(res);
   if (ttl > 0) await setCached(`stream:${videoId}`, res, ttl);
-}
+};
 
 export const CachedPiped = {
   async getStream(videoId: string): Promise<T.Streams> {
