@@ -81,13 +81,6 @@ const setCached = async (key: string, data: unknown, ttlSeconds?: number): Promi
   } catch {}
 };
 
-const delCached = async (key: string): Promise<void> => {
-  if (!redisAvailable) return;
-  try {
-    await redis.del(key);
-  } catch {}
-};
-
 /**
  * How long a /streams answer may be cached: its googlevideo urls stop working at their
  * `expire` time (about 6 hours out), so never past that, less 5 minutes for the playback
@@ -205,18 +198,10 @@ export const PermanentCache = {
     return setCached(`lyrics:${key}`, data);
   },
   async getPeaks(key: string) {
-    return getCached<number[]>(`peaks:${key}`);
+    return getCached<number[]>(`peaks:v2:${key}`);
   },
   async setPeaks(key: string, data: number[]) {
-    return setCached(`peaks:${key}`, data);
-  },
-  /** Extraction failed lately (Piped down, dead url, no ffmpeg): serve the placeholder, retry in an hour. */
-  async peaksFailedRecently(key: string) {
-    return !!(await getCached<boolean>(`peaksFailed:${key}`));
-  },
-  async markPeaksFailed(key: string) {
-    await delCached(`peaks:${key}`);
-    return setCached(`peaksFailed:${key}`, true, 3600);
+    return setCached(`peaks:v2:${key}`, data);
   },
   /** Lyrics in a preferred script; `lyrics: null` records that LRCLIB has none, so it isn't asked every play. */
   async getScriptLyrics(trackId: string, script: string) {

@@ -3,7 +3,7 @@ import net from 'node:net';
 import request from 'supertest';
 import { config } from '../../src/config.js';
 import { createApp } from '../../src/app.js';
-import { hasFfmpeg, placeholderPeaks } from '../../src/services/peaks.js';
+import { placeholderPeaks } from '../../src/services/peaks.js';
 import { MockAgent, getGlobalDispatcher, setGlobalDispatcher, type Dispatcher } from 'undici';
 import {
   createUser,
@@ -41,7 +41,7 @@ describe('Catalog & public endpoints', () => {
     setGlobalDispatcher(originalDispatcher);
   });
 
-  it('BE-CATALOG-001: GET /api/v1/healthz reports database, Redis, Piped and ffmpeg with the package version', async () => {
+  it('BE-CATALOG-001: GET /api/v1/healthz reports database, Redis and Piped with the package version', async () => {
     const pipedMock = mockAgent!.get('http://localhost:8090');
     pipedMock.intercept({ path: '/healthcheck', method: 'GET' }).reply(200, { ok: true });
 
@@ -53,7 +53,6 @@ describe('Catalog & public endpoints', () => {
       db: 'up',
       redis: 'up',
       piped: 'up',
-      ffmpeg: hasFfmpeg() ? 'found' : 'missing',
     });
   });
 
@@ -295,27 +294,19 @@ describe('Catalog & public endpoints', () => {
   });
 
   it('BE-CATALOG-016: GET /api/v1/tracks/:id/peaks returns audio peaks array', async () => {
-    const pipedMock = mockAgent!.get('http://localhost:8090');
-    pipedMock.intercept({ path: '/streams/peakTrack1', method: 'GET' }).reply(200, samplePipedStream('peakTrack1'));
-
     const res = await request(app).get('/api/v1/tracks/yt:peakTrack1/peaks');
     expect(res.status).toBe(200);
     expect(res.body).toHaveProperty('peaks');
     expect(Array.isArray(res.body.peaks)).toBe(true);
+    expect(res.body.placeholder).toBe(true);
   });
 
-  it('BE-CATALOG-023: GET /api/v1/tracks/:id/peaks keeps only real waveforms for good', async () => {
-    const pipedMock = mockAgent!.get('http://localhost:8090');
-    pipedMock.intercept({ path: '/streams/peakFail1', method: 'GET' }).reply(500, {});
-    // A placeholder an older version cached permanently.
-    await PermanentCache.setPeaks('peakFail1:150', placeholderPeaks('peakFail1', 150));
-
+  it('BE-CATALOG-023: GET /api/v1/tracks/:id/peaks serves placeholder when no real waveform cached', async () => {
     const res = await request(app).get('/api/v1/tracks/yt:peakFail1/peaks');
     expect(res.status).toBe(200);
-    expect(res.body.peaks).toEqual(placeholderPeaks('peakFail1', 150));
-    // Extraction failed again: no permanent entry, a one-hour "failed" marker instead.
-    expect(await PermanentCache.getPeaks('peakFail1:150')).toBeNull();
-    expect(await PermanentCache.peaksFailedRecently('peakFail1:150')).toBe(true);
+    expect(res.body.peaks).toEqual(placeholderPeaks('yt:peakFail1', 150));
+    expect(res.body.placeholder).toBe(true);
+    expect(await PermanentCache.getPeaks('peakFail1')).toBeNull();
   });
 
   it('BE-CATALOG-017: GET /api/v1/albums/:id returns normalized album details', async () => {

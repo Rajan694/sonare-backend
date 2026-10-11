@@ -6,7 +6,6 @@ import { and, count, desc, eq, ilike, sql as sqlExpr, sum, type SQL } from 'driz
 import { z } from 'zod';
 import { requireAdmin, signAdminToken } from '../middleware/adminAuth.js';
 import { isRedisAvailable } from '../services/cache.js';
-import { hasFfmpeg } from '../services/peaks.js';
 import { db, sql } from '../db/index.js';
 import { appReleases, errorLogs, users } from '../db/schema.js';
 import { config } from '../config.js';
@@ -297,7 +296,6 @@ const health = async () => {
     piped: { up: piped.status === 'fulfilled', url: pipedApiUrl() },
     database: database.status === 'fulfilled',
     redis: isRedisAvailable(),
-    ffmpeg: hasFfmpeg(),
     uptimeSec: Math.round(process.uptime()),
     node: process.version,
     memoryMb: Math.round(memory.rss / 1e6),

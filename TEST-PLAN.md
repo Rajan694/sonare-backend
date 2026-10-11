@@ -547,39 +547,50 @@ with the first problem as the message, and nothing is written.
 
 ## 10. Catalog Metadata (Phase B2)
 
-| Test ID       | Method / Scope                            | Description & Assertions                                                                                           |
-| :------------ | :---------------------------------------- | :----------------------------------------------------------------------------------------------------------------- |
-| `BE-META-001` | `PUT /api/v1/me/favourites/tracks/:id`    | Accepts optional `meta` body; stores `TrackMeta` in `favourite_tracks.meta`.                                       |
-| `BE-META-002` | `PUT /api/v1/me/favourites/tracks/:id`    | Invalid `meta` is stored as null; valid meta overwrites previous.                                                  |
-| `BE-META-003` | `PUT /api/v1/me/favourites/albums/:id`    | Accepts optional `meta` body; stores `AlbumMeta` in `favourite_albums.meta`.                                       |
-| `BE-META-004` | `PUT /api/v1/me/following/artists/:id`    | Accepts optional `meta` body; stores `ArtistMeta` in `artist_follows.meta`.                                        |
-| `BE-META-005` | `POST /api/v1/me/playlists/:id/tracks`    | Accepts `metas` map keyed by track ID; stores `TrackMeta` in `playlist_tracks.meta`.                               |
-| `BE-META-006` | `POST /api/v1/me/sync`                    | Accepts optional `meta` on favourite items; stores and persists across sync.                                       |
-| `BE-META-007` | `GET /api/v1/me/library/tracks`           | Hydrates tracks using `row.meta` → `catalog_items` → Piped read order; metadata stored in row wins.                |
-| `BE-META-008` | `GET /api/v1/me/favourites/tracks`        | Falls back to `catalog_items` when row `meta` is null; still works when Piped is unreachable.                      |
-| `BE-META-009` | `GET /api/v1/tracks/:id`                  | Remembers `TrackMeta` to `catalog_items` on first fetch; future reads use cached data.                             |
-| `BE-META-010` | `GET /api/v1/albums/:id`                  | Remembers `AlbumMeta` to `catalog_items` on first fetch; future reads use cached data.                             |
-| `BE-META-011` | `GET /api/v1/artists/:id`                 | Remembers `ArtistMeta` to `catalog_items` on first fetch; future reads use cached data.                            |
-| `BE-META-012` | `GET /api/v1/tracks/:id/lyrics`           | Accepts `title`, `artist`, `durationMs` query params; skips Piped stream lookup when provided.                     |
-| `BE-META-013` | `GET /api/v1/tracks/:id/lyrics`           | When `title` and `artist` present, still searches preferred script without Piped round-trip.                       |
-| `BE-META-014` | `GET /api/v1/tracks/:id/lyrics`           | Returns 404 when lyrics not found even with provided metadata.                                                     |
-| `BE-META-015` | `catalogMeta.parseTrackMeta`              | Validates all required fields; rejects missing `title`/`artist`/`artistId`/`durationMs`.                           |
-| `BE-META-016` | `catalogMeta.parseTrackMeta`              | Accepts optional `album`, `albumId`, `thumbnail`; drops invalid thumbnails without rejecting parent.               |
-| `BE-META-017` | `catalogMeta.parseAlbumMeta`              | Validates required fields; accepts optional `year`, `trackCount`, `thumbnail`.                                     |
-| `BE-META-018` | `catalogMeta.parseArtistMeta`             | Validates required `name`; accepts optional `thumbnail`, `monthlyListeners`.                                       |
-| `BE-META-019` | `catalogMeta.rememberCatalogItem`         | Stores metadata under raw YouTube ID; also indexed by `yt:` prefixed ID.                                           |
-| `BE-META-020` | `catalogMeta.getCatalogItems`             | Returns Map with both raw and `yt:` prefixed keys for flexible lookup.                                             |
-| `BE-META-021` | `GET /api/v1/me/recently-played`          | Uses row metadata for hydration; still works with missing Piped.                                                   |
-| `BE-META-022` | `GET /api/v1/me/most-played`              | Falls back to `catalog_items` or Piped when aggregated play data lacks row meta.                                   |
-| `BE-META-023` | `GET /api/v1/me/playlists/:id/tracks`     | Hydrates using row metadata; no Piped call needed if metadata exists.                                              |
-| `BE-META-024` | Thumbnail validation                      | Only accepts `/api/v1/...` URLs and `https://` URLs for `ytimg.com`, `googleusercontent.com`, `ggpht.com`.         |
-| `BE-META-025` | `PUT /api/v1/me/favourites/tracks/:id`    | Idempotent update: repeated calls with same ID do not create duplicates; updates `addedAt` and `meta`.             |
-| `BE-META-026` | `PUT /api/v1/me/favourites/albums/:id`    | Idempotent update: repeated calls with same album ID do not create duplicates.                                     |
-| `BE-META-027` | `PUT /api/v1/me/following/artists/:id`    | Idempotent update: repeated calls with same artist ID do not create duplicates.                                    |
-| `BE-META-028` | `SECURITY: catalog_items protection`      | Client-supplied metadata is saved to user row meta only; never written to shared `catalog_items`.                  |
-| `BE-META-029` | `ISOLATION: user metadata boundary`       | User-customized track metadata is never leaked or visible to other users; other users fetch from Piped / catalog.  |
-| `BE-META-030` | `GET /api/v1/me/library/{albums,artists}` | Offline resilience: returns stored library items without error when Piped is offline.                              |
-| `BE-META-031` | `Hydration normalized track shape`        | Tracks hydrated from metadata have identical fields to `normalizeStreamToTrack` (`durationMs: null`, null codecs). |
-| `BE-META-032` | `Artist ID prefix preservation`           | Empty `artistId` remains empty string without double-prefixing or corruption to `yt:unknown`.                      |
-| `BE-META-033` | `GET /api/v1/tracks/:id/lyrics`           | Client metadata cache isolation: wrong client title does not pollute plain request cache.                          |
-| `BE-META-034` | `GET /api/v1/tracks/:id/lyrics`           | Server catalog precedence: server-known track metadata in `catalog_items` overrides client query params.           |
+| Test ID       | Method / Scope                             | Description & Assertions                                                                                           |
+| :------------ | :----------------------------------------- | :----------------------------------------------------------------------------------------------------------------- |
+| `BE-META-001` | `PUT /api/v1/me/favourites/tracks/:id`     | Accepts optional `meta` body; stores `TrackMeta` in `favourite_tracks.meta`.                                       |
+| `BE-META-002` | `PUT /api/v1/me/favourites/tracks/:id`     | Invalid `meta` is stored as null; valid meta overwrites previous.                                                  |
+| `BE-META-003` | `PUT /api/v1/me/favourites/albums/:id`     | Accepts optional `meta` body; stores `AlbumMeta` in `favourite_albums.meta`.                                       |
+| `BE-META-004` | `PUT /api/v1/me/following/artists/:id`     | Accepts optional `meta` body; stores `ArtistMeta` in `artist_follows.meta`.                                        |
+| `BE-META-005` | `POST /api/v1/me/playlists/:id/tracks`     | Accepts `metas` map keyed by track ID; stores `TrackMeta` in `playlist_tracks.meta`.                               |
+| `BE-META-006` | `POST /api/v1/me/sync`                     | Accepts optional `meta` on favourite items; stores and persists across sync.                                       |
+| `BE-META-007` | `GET /api/v1/me/library/tracks`            | Hydrates tracks using `row.meta` → `catalog_items` → Piped read order; metadata stored in row wins.                |
+| `BE-META-008` | `GET /api/v1/me/favourites/tracks`         | Falls back to `catalog_items` when row `meta` is null; still works when Piped is unreachable.                      |
+| `BE-META-009` | `GET /api/v1/tracks/:id`                   | Remembers `TrackMeta` to `catalog_items` on first fetch; future reads use cached data.                             |
+| `BE-META-010` | `GET /api/v1/albums/:id`                   | Remembers `AlbumMeta` to `catalog_items` on first fetch; future reads use cached data.                             |
+| `BE-META-011` | `GET /api/v1/artists/:id`                  | Remembers `ArtistMeta` to `catalog_items` on first fetch; future reads use cached data.                            |
+| `BE-META-012` | `GET /api/v1/tracks/:id/lyrics`            | Accepts `title`, `artist`, `durationMs` query params; skips Piped stream lookup when provided.                     |
+| `BE-META-013` | `GET /api/v1/tracks/:id/lyrics`            | When `title` and `artist` present, still searches preferred script without Piped round-trip.                       |
+| `BE-META-014` | `GET /api/v1/tracks/:id/lyrics`            | Returns 404 when lyrics not found even with provided metadata.                                                     |
+| `BE-META-015` | `catalogMeta.parseTrackMeta`               | Validates all required fields; rejects missing `title`/`artist`/`artistId`/`durationMs`.                           |
+| `BE-META-016` | `catalogMeta.parseTrackMeta`               | Accepts optional `album`, `albumId`, `thumbnail`; drops invalid thumbnails without rejecting parent.               |
+| `BE-META-017` | `catalogMeta.parseAlbumMeta`               | Validates required fields; accepts optional `year`, `trackCount`, `thumbnail`.                                     |
+| `BE-META-018` | `catalogMeta.parseArtistMeta`              | Validates required `name`; accepts optional `thumbnail`, `monthlyListeners`.                                       |
+| `BE-META-019` | `catalogMeta.rememberCatalogItem`          | Stores metadata under raw YouTube ID; also indexed by `yt:` prefixed ID.                                           |
+| `BE-META-020` | `catalogMeta.getCatalogItems`              | Returns Map with both raw and `yt:` prefixed keys for flexible lookup.                                             |
+| `BE-META-021` | `GET /api/v1/me/recently-played`           | Uses row metadata for hydration; still works with missing Piped.                                                   |
+| `BE-META-022` | `GET /api/v1/me/most-played`               | Falls back to `catalog_items` or Piped when aggregated play data lacks row meta.                                   |
+| `BE-META-023` | `GET /api/v1/me/playlists/:id/tracks`      | Hydrates using row metadata; no Piped call needed if metadata exists.                                              |
+| `BE-META-024` | Thumbnail validation                       | Only accepts `/api/v1/...` URLs and `https://` URLs for `ytimg.com`, `googleusercontent.com`, `ggpht.com`.         |
+| `BE-META-025` | `PUT /api/v1/me/favourites/tracks/:id`     | Idempotent update: repeated calls with same ID do not create duplicates; updates `addedAt` and `meta`.             |
+| `BE-META-026` | `PUT /api/v1/me/favourites/albums/:id`     | Idempotent update: repeated calls with same album ID do not create duplicates.                                     |
+| `BE-META-027` | `PUT /api/v1/me/following/artists/:id`     | Idempotent update: repeated calls with same artist ID do not create duplicates.                                    |
+| `BE-META-028` | `SECURITY: catalog_items protection`       | Client-supplied metadata is saved to user row meta only; never written to shared `catalog_items`.                  |
+| `BE-META-029` | `ISOLATION: user metadata boundary`        | User-customized track metadata is never leaked or visible to other users; other users fetch from Piped / catalog.  |
+| `BE-META-030` | `GET /api/v1/me/library/{albums,artists}`  | Offline resilience: returns stored library items without error when Piped is offline.                              |
+| `BE-META-031` | `Hydration normalized track shape`         | Tracks hydrated from metadata have identical fields to `normalizeStreamToTrack` (`durationMs: null`, null codecs). |
+| `BE-META-032` | `Artist ID prefix preservation`            | Empty `artistId` remains empty string without double-prefixing or corruption to `yt:unknown`.                      |
+| `BE-META-033` | `GET /api/v1/tracks/:id/lyrics`            | Client metadata cache isolation: wrong client title does not pollute plain request cache.                          |
+| `BE-META-034` | `GET /api/v1/tracks/:id/lyrics`            | Server catalog precedence: server-known track metadata in `catalog_items` overrides client query params.           |
+| `BE-PEAK-001` | `placeholderPeaks` pinned literal          | Matches pinned literal array for yt:NJAv_7lHUIU with 8 bars.                                                       |
+| `BE-PEAK-002` | `placeholderPeaks` deterministic bounds    | Generates bounded values in [0.3, 1] deterministically across multiple calls.                                      |
+| `BE-PEAK-003` | `resamplePeaks` downsample max-pooling     | Max-pooling over window when shrinking peaks array.                                                                |
+| `BE-PEAK-004` | `resamplePeaks` upsample linear interp     | Linear interpolation when expanding peaks array.                                                                   |
+| `BE-PEAK-005` | `resamplePeaks` edge cases                 | Handles empty array, zero bars, negative bars, same length, and single element arrays safely.                      |
+| `BE-PEAK-006` | `GET /api/v1/tracks/:id/peaks` uncached    | Returns placeholder:true and makes zero Piped/upstream/ffmpeg calls.                                               |
+| `BE-PEAK-007` | `PUT /api/v1/tracks/:id/peaks` upload      | Stores canonical 150 bars waveform in permanent cache; subsequent GET returns resampled 76 bars with max-pooling.  |
+| `BE-PEAK-008` | `PUT /api/v1/tracks/:id/peaks` idempotency | Second PUT returns stored:false and first uploaded waveform remains unchanged (first upload wins).                 |
+| `BE-PEAK-009` | `PUT /api/v1/tracks/:id/peaks` auth        | Requires authentication; returns 401 when unauthenticated.                                                         |
+| `BE-PEAK-010` | `PUT /api/v1/tracks/:id/peaks` validation  | Rejects invalid bodies (149/151 bars, NaN, >1, <0, missing) with 400 Bad Request.                                  |
+| `BE-PEAK-011` | `GET /api/v1/tracks/:id/peaks` pinned      | GET with ?bars=8 returns pinned placeholder literal and placeholder:true.                                          |

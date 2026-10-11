@@ -7,13 +7,17 @@ import { normalizeStreamToTrack, albumThumbFor, proxyImageUrl } from '../normali
 import { directImageUrl, ytThumbUrl, type YtThumbName } from '../upstream/ytImages.js';
 import { idHelpers } from '../ids.js';
 import { signStreamToken, verifyStreamToken } from '../services/token.js';
-import { extractPeaks, isPlaceholderPeaks, placeholderPeaks } from '../services/peaks.js';
-import { NoAudioStreamError } from '../errors.js';
+import { placeholderPeaks, resamplePeaks, CANONICAL_BARS } from '../services/peaks.js';
+import { BadRequestError, NoAudioStreamError } from '../errors.js';
 import { getUserTrackFields } from '../db/userData.js';
 import { db } from '../db/index.js';
 import type { PipedStream } from '../upstream/piped.types.js';
 import { playlistTracks } from '../db/schema.js';
 import { rememberCatalogItem, toCatalogTrackData } from '../services/catalogMeta.js';
+import { requireAuth } from '../middleware/auth.js';
+import { createRateLimiter } from '../middleware/rateLimit.js';
+import { parseBody } from '../validation.js';
+import { z } from 'zod';
 
 // Media: track details, artwork, image proxy, stream urls, the stream relay and peaks.
 export const mediaRouter = Router();
@@ -317,35 +321,68 @@ mediaRouter.get('/tracks/:id/stream', async (req, res) => {
   });
 });
 
+const putPeaksSchema = z.object({
+  peaks: z
+    .array(
+      z
+        .number({ invalid_type_error: 'Peaks must be numbers' })
+        .finite('Peak values must be finite')
+        .min(0, 'Peak values must be >= 0')
+        .max(1, 'Peak values must be <= 1'),
+    )
+    .length(CANONICAL_BARS, `Peaks array must contain exactly ${CANONICAL_BARS} values`),
+});
+
+const peaksUploadLimiter = createRateLimiter({ name: 'peaks-upload', max: 60, windowMs: 60_000 });
+
 mediaRouter.get('/tracks/:id/peaks', async (req, res) => {
-  const rawId = idHelpers.extractYtId(req.params.id);
-  const barsStr = req.query.bars as string;
-  const bars = barsStr ? parseInt(barsStr, 10) : 150;
-
-  const cacheKey = `${rawId}:${bars}`;
-  let peaks = await PermanentCache.getPeaks(cacheKey);
-  // Older versions cached the placeholder for good when extraction failed; look again.
-  if (peaks && isPlaceholderPeaks(rawId, bars, peaks)) peaks = null;
-  if (!peaks && (await PermanentCache.peaksFailedRecently(cacheKey))) peaks = placeholderPeaks(rawId, bars);
-  if (!peaks) {
-    let urlStr = '';
-    try {
-      const streams = await CachedPiped.getStream(rawId);
-      const best = selectBestAudioStream(streams.audioStreams, 'low', undefined, streams.videoStreams);
-      if (best) {
-        urlStr = best.url;
-      }
-    } catch (e) {
-      // Suppress piped errors for peaks
-    }
-
-    peaks = await extractPeaks(urlStr, rawId, bars);
-    // Only real waveforms are kept for good; a placeholder is retried in an hour.
-    if (isPlaceholderPeaks(rawId, bars, peaks)) await PermanentCache.markPeaksFailed(cacheKey);
-    else await PermanentCache.setPeaks(cacheKey, peaks);
+  const trackId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+  let rawId: string;
+  try {
+    rawId = idHelpers.extractYtId(trackId);
+  } catch {
+    rawId = trackId;
   }
 
-  res.json({ peaks });
+  let bars = 150;
+  if (req.query.bars) {
+    const parsed = parseInt(req.query.bars as string, 10);
+    if (Number.isFinite(parsed)) {
+      bars = Math.min(600, Math.max(8, parsed));
+    }
+  }
+
+  const real = await PermanentCache.getPeaks(rawId);
+  if (real) {
+    res.json({ peaks: resamplePeaks(real, bars), placeholder: false });
+  } else {
+    res.json({ peaks: placeholderPeaks(trackId, bars), placeholder: true });
+  }
+});
+
+mediaRouter.put('/tracks/:id/peaks', requireAuth, async (req, res) => {
+  const limit = await peaksUploadLimiter.hit(req.user?.id ?? req.ip ?? 'unknown');
+  if (!limit.allowed) {
+    res.setHeader('Retry-After', String(limit.retryAfterSec));
+    res.status(429).json({ error: { code: 'RATE_LIMITED', message: 'Too many peaks uploads' } });
+    return;
+  }
+
+  const { peaks } = parseBody(putPeaksSchema, req);
+
+  // Only YouTube tracks are shared between users; device files keep their waveform on the device.
+  const trackId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+  const rawId = idHelpers.extractYtId(trackId);
+  if (!/^[\w-]{1,64}$/.test(rawId)) throw new BadRequestError(`Invalid yt ID: ${trackId}`);
+
+  const existing = await PermanentCache.getPeaks(rawId);
+  if (existing) {
+    res.status(200).json({ stored: false });
+    return;
+  }
+
+  await PermanentCache.setPeaks(rawId, peaks);
+  res.status(201).json({ stored: true });
 });
 
 mediaRouter.get('/stream/:token', async (req, res) => {

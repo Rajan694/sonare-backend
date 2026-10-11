@@ -12,8 +12,6 @@ to it under `/api/v1`; the full contract is [`../docs/api-contract.md`](../docs/
 - Node 22 (`nvm use 22`)
 - Postgres 17 (16 works for development)
 - Redis 7 — optional at runtime: without it caching passes through and rate limits fail open
-- ffmpeg on the PATH — optional: without it waveforms are placeholders (warned at startup,
-  shown on `/healthz` and the admin overview). The production image installs it.
 - Piped running locally (`../sonare-piped-backend/runPiped.sh up`) — API on :8090, proxy on :8091
 - Docker, for Mailpit in development and for the production stack
 
@@ -144,7 +142,7 @@ curl http://127.0.0.1:3010/api/v1/healthz
   `redis-data` volumes.
 - Piped runs from its own compose file. Its ports are bound to the host's 127.0.0.1,
   which a container cannot reach — see the Piped notes in `.env.production.example`.
-- `/api/v1/healthz` answers `{ ok, version, db, redis, piped, ffmpeg }`, with 503 when the
+- `/api/v1/healthz` answers `{ ok, version, db, redis, piped }`, with 503 when the
   database is down; the image's `HEALTHCHECK` uses it.
 
 ## Admin
