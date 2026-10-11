@@ -581,3 +581,5 @@ with the first problem as the message, and nothing is written.
 | `BE-META-030` | `GET /api/v1/me/library/{albums,artists}` | Offline resilience: returns stored library items without error when Piped is offline.                              |
 | `BE-META-031` | `Hydration normalized track shape`        | Tracks hydrated from metadata have identical fields to `normalizeStreamToTrack` (`durationMs: null`, null codecs). |
 | `BE-META-032` | `Artist ID prefix preservation`           | Empty `artistId` remains empty string without double-prefixing or corruption to `yt:unknown`.                      |
+| `BE-META-033` | `GET /api/v1/tracks/:id/lyrics`           | Client metadata cache isolation: wrong client title does not pollute plain request cache.                          |
+| `BE-META-034` | `GET /api/v1/tracks/:id/lyrics`           | Server catalog precedence: server-known track metadata in `catalog_items` overrides client query params.           |

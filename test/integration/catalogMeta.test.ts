@@ -907,4 +907,115 @@ describe('Catalog metadata (Phase B2)', () => {
     expect(res.status).toBe(200);
     expect(res.body.items[0].artistId).toBe(''); // Must stay empty string, not yt: or yt:unknown
   });
+
+  it('BE-META-033: Wrong client title on lyrics request does not pollute plain request cache', async () => {
+    const trackId = 'clientLyricsMeta033';
+
+    const lrclibMock = mockAgent!.get('https://lrclib.net');
+    // First intercept for wrong client title
+    lrclibMock
+      .intercept({
+        path: (p: string) =>
+          p.includes('track_name=Wrong+Client+Title') || p.includes('track_name=Wrong%20Client%20Title'),
+        method: 'GET',
+      })
+      .reply(200, {
+        id: 1,
+        trackName: 'Wrong Client Title',
+        artistName: 'Wrong Artist',
+        plainLyrics: 'Wrong Lyrics',
+        duration: 180,
+      });
+
+    // 1. Client sends wrong title
+    const res1 = await request(app).get(
+      `/api/v1/tracks/yt:${trackId}/lyrics?title=Wrong%20Client%20Title&artist=Wrong%20Artist`,
+    );
+    expect(res1.status).toBe(200);
+    expect(res1.body.plain).toBe('Wrong Lyrics');
+
+    // Second intercept for real title when request has NO query params
+    lrclibMock
+      .intercept({
+        path: (p: string) =>
+          p.includes('track_name=Real+Stream+Title') || p.includes('track_name=Real%20Stream%20Title'),
+        method: 'GET',
+      })
+      .reply(200, {
+        id: 2,
+        trackName: 'Real Stream Title',
+        artistName: 'Real Artist',
+        plainLyrics: 'Real Lyrics',
+        duration: 180,
+      });
+
+    const pipedMock = mockAgent!.get('http://localhost:8090');
+    pipedMock.intercept({ path: `/streams/${trackId}`, method: 'GET' }).reply(200, {
+      ...samplePipedStream(trackId),
+      title: 'Real Stream Title',
+      uploader: 'Real Artist',
+    });
+
+    // 2. Client sends request without params -> gets real lyrics, not wrong cached lyrics
+    const res2 = await request(app).get(`/api/v1/tracks/yt:${trackId}/lyrics`);
+    expect(res2.status).toBe(200);
+    expect(res2.body.plain).toBe('Real Lyrics');
+  });
+
+  it('BE-META-034: With a catalog_items row the server title wins over query title in lyrics lookup', async () => {
+    const trackId = 'serverLyricsMeta034';
+
+    // Seed server-known track in catalog_items
+    await db.insert(catalogItems).values({
+      kind: 'track',
+      id: trackId,
+      data: {
+        id: `yt:${trackId}`,
+        title: 'Canonical Server Title',
+        artist: 'Canonical Server Artist',
+        artistId: 'yt:UCserverArtist',
+        album: null,
+        albumId: null,
+        durationMs: 200000,
+        source: 'server',
+        codec: null,
+        bitrateKbps: null,
+        thumbnail: `/api/v1/tracks/yt:${trackId}/artwork`,
+      },
+      updatedAt: new Date(),
+    });
+
+    let requestedTrackName: string | null = null;
+    let requestedArtistName: string | null = null;
+
+    const lrclibMock = mockAgent!.get('https://lrclib.net');
+    lrclibMock
+      .intercept({
+        path: (p: string) => {
+          const u = new URL(`https://lrclib.net${p}`);
+          requestedTrackName = u.searchParams.get('track_name');
+          requestedArtistName = u.searchParams.get('artist_name');
+          return true;
+        },
+        method: 'GET',
+      })
+      .reply(200, {
+        id: 999,
+        trackName: 'Canonical Server Title',
+        artistName: 'Canonical Server Artist',
+        plainLyrics: 'Canonical Lyrics',
+        duration: 200,
+      });
+
+    // Client sends bogus title and artist in query
+    const res = await request(app).get(
+      `/api/v1/tracks/yt:${trackId}/lyrics?title=Bogus%20Client%20Title&artist=Bogus%20Client%20Artist`,
+    );
+
+    expect(res.status).toBe(200);
+    expect(res.body.plain).toBe('Canonical Lyrics');
+    // LRCLIB was called with the server-known title and artist, NOT the client query params
+    expect(requestedTrackName).toBe('Canonical Server Title');
+    expect(requestedArtistName).toBe('Canonical Server Artist');
+  });
 });
