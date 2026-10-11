@@ -46,29 +46,29 @@ const topTracksQuery = z.object({ limit: queryInt(1, 100).default(20) });
 
 const APP_VERSION: string = JSON.parse(fs.readFileSync(new URL('../../package.json', import.meta.url), 'utf8')).version;
 
-function encodeCursor(nextpage: string | null | undefined): string | undefined {
+const encodeCursor = (nextpage: string | null | undefined): string | undefined => {
   if (!nextpage) return undefined;
   return Buffer.from(nextpage).toString('base64url');
-}
+};
 
-function decodeCursor(cursor: unknown): string | undefined {
+const decodeCursor = (cursor: unknown): string | undefined => {
   if (typeof cursor !== 'string' || !cursor) return undefined;
   return Buffer.from(cursor, 'base64url').toString('utf8');
-}
+};
 
 // Auto-generated "- Topic" artist channels come back from the extractor with no videos
 // and no tabs, so pull the artist's catalog from YouTube Music search instead, keeping
 // only results credited to this exact channel.
-async function searchArtistCatalog(
+const searchArtistCatalog = async (
   channelId: string,
   channelName: string | undefined,
   filter: 'music_songs' | 'music_albums',
-): Promise<T.StreamItem[]> {
+): Promise<T.StreamItem[]> => {
   const name = (channelName || '').replace(/\s+-\s+Topic$/i, '').trim();
   if (!name) return [];
   const page = await CachedPiped.search(name, filter);
   return (page.items || []).filter((i) => i.uploaderUrl === `/channel/${channelId}`);
-}
+};
 
 // Placeholder: the apps call it, but there are no recommendations yet.
 catalogRouter.get('/discover/made-for-you', (req, res) => {

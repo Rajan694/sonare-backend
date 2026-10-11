@@ -1,10 +1,10 @@
 import crypto from 'node:crypto';
 import jwt from 'jsonwebtoken';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import type { NextFunction, Request, Response } from 'express';
 import { config } from '../config.js';
 import { db } from '../db/index.js';
-import { adminUsers } from '../db/schema.js';
+import { users } from '../db/schema.js';
 
 const ADMIN_AUDIENCE = 'sonare-admin';
 // Its own key, derived from JWT_SECRET, so an app token can never pass as an admin token
@@ -14,7 +14,7 @@ const ADMIN_TOKEN_TTL = '8h';
 
 export interface AdminPrincipal {
   id: string;
-  username: string;
+  email: string;
 }
 
 declare global {
@@ -25,20 +25,20 @@ declare global {
   }
 }
 
-export function signAdminToken(admin: { id: string; tokenVersion: number }): string {
+export const signAdminToken = (admin: { id: string; tokenVersion: number }): string => {
   return jwt.sign({ ver: admin.tokenVersion }, ADMIN_KEY, {
     subject: admin.id,
     audience: ADMIN_AUDIENCE,
     expiresIn: ADMIN_TOKEN_TTL,
   });
-}
+};
 
-function unauthorized(res: Response, message: string) {
+const unauthorized = (res: Response, message: string) => {
   res.status(401).json({ error: { code: 'UNAUTHORIZED', message } });
-}
+};
 
 /** Admin API guard. A token stops working once the password it was issued under changes. */
-export async function requireAdmin(req: Request, res: Response, next: NextFunction) {
+export const requireAdmin = async (req: Request, res: Response, next: NextFunction) => {
   const header = req.headers.authorization;
   if (!header?.startsWith('Bearer ')) return unauthorized(res, 'Sign in to the admin page');
 
@@ -55,15 +55,15 @@ export async function requireAdmin(req: Request, res: Response, next: NextFuncti
   try {
     const [admin] = await db
       .select()
-      .from(adminUsers)
-      .where(eq(adminUsers.id, String(payload.sub)))
+      .from(users)
+      .where(and(eq(users.id, String(payload.sub)), eq(users.role, 'admin')))
       .limit(1);
     if (!admin || admin.tokenVersion !== payload.ver) {
       return unauthorized(res, 'Your admin session has ended');
     }
-    req.admin = { id: admin.id, username: admin.username };
+    req.admin = { id: admin.id, email: admin.email };
     next();
   } catch (err) {
     next(err);
   }
-}
+};

@@ -137,14 +137,14 @@ describe('Browse categories, library artists, lyrics script, cover hints', () =>
   const romanLrc = '[00:10.50]Tum hi ho\n[00:14.50]Ab tum hi ho';
 
   /** LRCLIB's exact match is the Devanagari version. */
-  function exactMatchIsHindi() {
+  const exactMatchIsHindi = () => {
     lrclib()
       .intercept({ path: (p) => p.startsWith('/api/get?'), method: 'GET' })
       .reply(200, { id: 1, syncedLyrics: hindiLrc, plainLyrics: 'तुम ही हो\nअब तुम ही हो' });
-  }
+  };
 
   /** Answers LRCLIB searches with `results`; returns how many were made. */
-  function searchResults(results: object[], times = 2) {
+  const searchResults = (results: object[], times = 2) => {
     const calls = { count: 0 };
     lrclib()
       .intercept({ path: (p) => p.startsWith('/api/search'), method: 'GET' })
@@ -158,7 +158,7 @@ describe('Browse categories, library artists, lyrics script, cover hints', () =>
       })
       .times(times);
     return calls;
-  }
+  };
 
   const romanCandidate = {
     id: 2,

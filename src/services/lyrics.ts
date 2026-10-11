@@ -19,10 +19,10 @@ export interface ResolvedLyrics {
 }
 
 /** Logs an LRCLIB failure and returns null, so callers can tell "down" from "no match". */
-function lrclibFailed(e: unknown): null {
+const lrclibFailed = (e: unknown): null => {
   logger.warn({ err: describeError(e) }, 'LRCLIB request failed');
   return null;
-}
+};
 
 /**
  * Scripts a user can prefer lyrics in. LRCLIB has no language field, but often holds the
@@ -54,32 +54,32 @@ const SCRIPT_LETTERS: Record<Exclude<LyricsScript, 'original'>, RegExp> = {
 };
 
 /** True when most of the letters in `text` are in `script`. */
-export function isInScript(text: string, script: Exclude<LyricsScript, 'original'>): boolean {
+export const isInScript = (text: string, script: Exclude<LyricsScript, 'original'>): boolean => {
   const letters = text.match(/\p{L}/gu)?.length ?? 0;
   if (letters === 0) return false;
   const inScript = text.match(SCRIPT_LETTERS[script])?.length ?? 0;
   return inScript / letters >= 0.6;
-}
+};
 
-function lyricsText(l: Pick<ResolvedLyrics, 'lines' | 'plain'>): string {
+const lyricsText = (l: Pick<ResolvedLyrics, 'lines' | 'plain'>): string => {
   return l.lines.length > 0 ? l.lines.map((x) => x.text).join('\n') : (l.plain ?? '');
-}
+};
 
 /** Whether resolved lyrics are already in the preferred script. */
-export function lyricsInScript(l: ResolvedLyrics, script: Exclude<LyricsScript, 'original'>): boolean {
+export const lyricsInScript = (l: ResolvedLyrics, script: Exclude<LyricsScript, 'original'>): boolean => {
   return isInScript(lyricsText(l), script);
-}
+};
 
 /**
  * The LRCLIB version of a song written in `script`, synced first and closest in length.
  * Null when LRCLIB has none; throws LyricsUnavailableError when LRCLIB didn't answer.
  */
-export async function resolveLyricsInScript(
+export const resolveLyricsInScript = async (
   trackName: string,
   artistName: string,
   durationMs: number | undefined,
   script: Exclude<LyricsScript, 'original'>,
-): Promise<ResolvedLyrics | null> {
+): Promise<ResolvedLyrics | null> => {
   // undefined = that search failed (null is LRCLIB's 404).
   const [byFields, byQuery] = await Promise.all([
     Lrclib.search(undefined, trackName, artistName).catch((e: unknown) => void lrclibFailed(e)),
@@ -112,9 +112,9 @@ export async function resolveLyricsInScript(
         plain: best.plainLyrics ?? undefined,
       }
     : { synced: false, provider: 'lrclib', offsetMs: 0, lines: [], plain: best.plainLyrics ?? undefined };
-}
+};
 
-export async function getDbLyricsOverride(trackId: string, userId?: string) {
+export const getDbLyricsOverride = async (trackId: string, userId?: string) => {
   try {
     if (userId) {
       const [row] = await db
@@ -130,9 +130,9 @@ export async function getDbLyricsOverride(trackId: string, userId?: string) {
   } catch {
     return null;
   }
-}
+};
 
-export async function saveDbLyricsOverride(trackId: string, userId: string, data: { lrc?: string; plain?: string }) {
+export const saveDbLyricsOverride = async (trackId: string, userId: string, data: { lrc?: string; plain?: string }) => {
   const now = new Date();
   await db
     .insert(lyricsOverrides)
@@ -151,9 +151,9 @@ export async function saveDbLyricsOverride(trackId: string, userId: string, data
         updatedAt: now,
       },
     });
-}
+};
 
-export async function saveDbLyricsOffset(trackId: string, userId: string, offsetMs: number) {
+export const saveDbLyricsOffset = async (trackId: string, userId: string, offsetMs: number) => {
   const now = new Date();
   await db
     .insert(lyricsOverrides)
@@ -170,9 +170,9 @@ export async function saveDbLyricsOffset(trackId: string, userId: string, offset
         updatedAt: now,
       },
     });
-}
+};
 
-export async function deleteDbLyricsOverride(trackId: string, userId?: string) {
+export const deleteDbLyricsOverride = async (trackId: string, userId?: string) => {
   if (userId) {
     await db
       .delete(lyricsOverrides)
@@ -180,9 +180,9 @@ export async function deleteDbLyricsOverride(trackId: string, userId?: string) {
   } else {
     await db.delete(lyricsOverrides).where(eq(lyricsOverrides.trackId, trackId));
   }
-}
+};
 
-export function parseLrc(lrc: string): LyricsLine[] {
+export const parseLrc = (lrc: string): LyricsLine[] => {
   const lines = lrc.split('\n');
   const result: LyricsLine[] = [];
   const tagRegex = /\[(\d+):(\d+(?:\.\d+)?)\]/g;
@@ -209,7 +209,7 @@ export function parseLrc(lrc: string): LyricsLine[] {
   }
 
   return result.sort((a, b) => a.atMs - b.atMs);
-}
+};
 
 export const LyricsResolver = {
   async resolve(

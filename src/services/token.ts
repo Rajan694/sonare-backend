@@ -13,11 +13,11 @@ export interface StreamTokenData {
   itag?: number;
 }
 
-export function signStreamToken(
+export const signStreamToken = (
   url: string,
   expiresInMs: number = 3600_000,
   source?: { vid: string; itag: number },
-): string {
+): string => {
   const exp = Date.now() + expiresInMs;
   const payload = JSON.stringify({ url, exp, ...source });
   const payloadB64 = Buffer.from(payload).toString('base64url');
@@ -27,9 +27,9 @@ export function signStreamToken(
   const signature = hmac.digest('base64url');
 
   return `${payloadB64}.${signature}`;
-}
+};
 
-export function verifyStreamToken(token: string): StreamTokenData {
+export const verifyStreamToken = (token: string): StreamTokenData => {
   const [payloadB64, signature] = token.split('.');
   if (!payloadB64 || !signature) {
     throw new StreamTokenError('Invalid token format');
@@ -54,4 +54,4 @@ export function verifyStreamToken(token: string): StreamTokenData {
   }
 
   return payload;
-}
+};

@@ -935,10 +935,10 @@ describe('Me: sync & library sorting', () => {
 describe('Me: request validation', () => {
   const app = createApp();
 
-  async function ownPlaylist(userId: string, id: string) {
+  const ownPlaylist = async (userId: string, id: string) => {
     const [pl] = await db.insert(playlists).values({ id, userId, name: 'Validation', kind: 'online' }).returning();
     return pl;
-  }
+  };
 
   it('BE-VAL-001: POST /api/v1/me/playlists rejects a name over 100 characters', async () => {
     const { user, token } = await createUser();

@@ -1,55 +1,55 @@
 import crypto from 'node:crypto';
+import fs from 'node:fs/promises';
 import { Router, type Request, type Response } from 'express';
 import bcrypt from 'bcrypt';
-import { and, count, desc, eq, ilike, sum, type SQL } from 'drizzle-orm';
+import { and, count, desc, eq, ilike, sql as sqlExpr, sum, type SQL } from 'drizzle-orm';
 import { z } from 'zod';
 import { requireAdmin, signAdminToken } from '../middleware/adminAuth.js';
 import { isRedisAvailable } from '../services/cache.js';
 import { hasFfmpeg } from '../services/peaks.js';
 import { db, sql } from '../db/index.js';
-import { adminUsers, errorLogs } from '../db/schema.js';
+import { appReleases, errorLogs, users } from '../db/schema.js';
+import { config } from '../config.js';
 import { createRateLimiter } from '../middleware/rateLimit.js';
-import {
-  checkSetting,
-  ConfigValidationError,
-  describeSettings,
-  latestExtractorCommit,
-  parseSetting,
-  pipedApiUrl,
-  saveSetting,
-  SETTINGS,
-} from '../services/systemConfig.js';
 import { Piped } from '../upstream/piped.js';
-import { parseBody } from '../validation.js';
-import { describeError } from '../errors.js';
+import { parseBody, parseQuery } from '../validation.js';
+import {
+  PLATFORMS,
+  UploadTooLargeError,
+  acceptedExtensions,
+  cleanFileName,
+  formatFor,
+  receiveUpload,
+  releasePath,
+  releaseView,
+} from '../services/releases.js';
 
-// The admin page's API (/admin on the web build). Every route but /login needs an admin token;
-// these accounts are separate from app accounts (admin_users, not users).
+// The admin page's API (/admin on the web build). Every route but /login needs an admin token.
+// Admins are rows in users with role 'admin'; the app's own login refuses them.
 export const adminRouter = Router();
 
-function fail(res: Response, status: number, code: string, message: string) {
+const fail = (res: Response, status: number, code: string, message: string) => {
   res.status(status).json({ error: { code, message } });
-}
+};
 
 // ---- Sign-in and account ----
 
 const BCRYPT_COST = 12;
 // Five wrong passwords from one address lock it out for 15 minutes.
 const signInLimiter = createRateLimiter({ name: 'admin', max: 5, windowMs: 15 * 60_000 });
-// Compared against when the username doesn't exist, so both failures take as long.
+// Compared against when no admin has that email, so both failures take as long.
 const dummyHash = bcrypt.hash(crypto.randomUUID(), BCRYPT_COST);
 
-function accountView(admin: typeof adminUsers.$inferSelect) {
+const accountView = (admin: typeof users.$inferSelect) => {
   return {
-    username: admin.username,
+    email: admin.email,
     lastLoginAt: admin.lastLoginAt,
-    // Only a change made here counts: the seeded account starts at version 0.
-    passwordChangedAt: admin.tokenVersion > 0 ? admin.updatedAt : null,
+    passwordChangedAt: admin.passwordChangedAt,
   };
-}
+};
 
 const credentialsSchema = z.object({
-  username: z.string().trim().min(1, 'Enter the username').max(200),
+  email: z.string().trim().toLowerCase().min(1, 'Enter the email').max(200),
   password: z.string().min(1, 'Enter the password').max(200),
 });
 
@@ -68,26 +68,26 @@ adminRouter.post('/login', async (req, res) => {
 
   const body = parseBody(credentialsSchema, req);
 
-  const [admin] = await db.select().from(adminUsers).where(eq(adminUsers.username, body.username)).limit(1);
+  const [admin] = await db
+    .select()
+    .from(users)
+    .where(and(eq(sqlExpr`lower(${users.email})`, body.email), eq(users.role, 'admin')))
+    .limit(1);
   const valid = await bcrypt.compare(body.password, admin?.passwordHash ?? (await dummyHash));
   if (!admin || !valid) {
     await signInLimiter.hit(ip);
-    return fail(res, 401, 'INVALID_CREDENTIALS', 'Wrong username or password');
+    return fail(res, 401, 'INVALID_CREDENTIALS', 'Wrong email or password');
   }
 
   await signInLimiter.reset(ip);
-  const [signedIn] = await db
-    .update(adminUsers)
-    .set({ lastLoginAt: new Date() })
-    .where(eq(adminUsers.id, admin.id))
-    .returning();
+  const [signedIn] = await db.update(users).set({ lastLoginAt: new Date() }).where(eq(users.id, admin.id)).returning();
   res.json({ token: signAdminToken(signedIn), admin: accountView(signedIn) });
 });
 
 adminRouter.use(requireAdmin);
 
 adminRouter.get('/me', async (req, res) => {
-  const [admin] = await db.select().from(adminUsers).where(eq(adminUsers.id, req.admin!.id)).limit(1);
+  const [admin] = await db.select().from(users).where(eq(users.id, req.admin!.id)).limit(1);
   res.json(accountView(admin));
 });
 
@@ -115,7 +115,7 @@ adminRouter.post('/password', async (req, res) => {
 
   const body = parseBody(passwordSchema, req);
 
-  const [admin] = await db.select().from(adminUsers).where(eq(adminUsers.id, req.admin!.id)).limit(1);
+  const [admin] = await db.select().from(users).where(eq(users.id, req.admin!.id)).limit(1);
   if (!(await bcrypt.compare(body.currentPassword, admin.passwordHash))) {
     await signInLimiter.hit(limitKey);
     return fail(res, 400, 'WRONG_PASSWORD', 'The current password is wrong');
@@ -127,59 +127,15 @@ adminRouter.post('/password', async (req, res) => {
   await signInLimiter.reset(limitKey);
   // A new token version signs out every other admin session; this one gets a fresh token.
   const [updated] = await db
-    .update(adminUsers)
+    .update(users)
     .set({
       passwordHash: await bcrypt.hash(body.newPassword, BCRYPT_COST),
       tokenVersion: admin.tokenVersion + 1,
-      updatedAt: new Date(),
+      passwordChangedAt: new Date(),
     })
-    .where(eq(adminUsers.id, admin.id))
+    .where(eq(users.id, admin.id))
     .returning();
   res.json({ token: signAdminToken(updated), admin: accountView(updated) });
-});
-
-// ---- Configuration ----
-
-adminRouter.get('/config', async (req, res) => {
-  res.json({ settings: await describeSettings() });
-});
-
-const saveSchema = z.object({
-  value: z.string().max(500).nullable(),
-  /** Save even though the value's check failed. */
-  force: z.boolean().optional(),
-});
-
-/** Suggests a value for piped.extractorCommit; nothing is saved. */
-adminRouter.get('/config/piped.extractorCommit/latest', async (req, res) => {
-  try {
-    res.json(await latestExtractorCommit());
-  } catch (e) {
-    fail(res, 502, 'UPSTREAM_ERROR', `Could not get the latest commit from GitHub (${describeError(e)})`);
-  }
-});
-
-adminRouter.put('/config/:key', async (req, res) => {
-  const key = req.params.key as string;
-  if (!Object.hasOwn(SETTINGS, key)) return fail(res, 404, 'NOT_FOUND', `No setting called ${key}`);
-  const body = parseBody(saveSchema, req);
-
-  let value: string | null;
-  try {
-    value = parseSetting(key, body.value);
-  } catch (e) {
-    if (e instanceof ConfigValidationError) return fail(res, 400, 'BAD_REQUEST', e.message);
-    throw e;
-  }
-
-  if (value !== null && !body.force) {
-    const problem = await checkSetting(key, value);
-    if (problem) return fail(res, 422, 'CHECK_FAILED', problem);
-  }
-
-  await saveSetting(key, value, req.admin!.username);
-  const settings = await describeSettings();
-  res.json({ setting: settings.find((s) => s.key === key) });
 });
 
 // ---- Analytics ----
@@ -188,7 +144,7 @@ adminRouter.put('/config/:key', async (req, res) => {
 // database default, in the session's time zone. Everything is bucketed by the viewer's
 // time zone (?tz=, from the browser).
 
-function timeZone(req: Request): string {
+const timeZone = (req: Request): string => {
   const tz = typeof req.query.tz === 'string' ? req.query.tz : 'UTC';
   try {
     new Intl.DateTimeFormat('en', { timeZone: tz });
@@ -196,18 +152,18 @@ function timeZone(req: Request): string {
   } catch {
     return 'UTC';
   }
-}
+};
 
-function intQuery(req: Request, name: string, fallback: number, min: number, max: number): number {
+const intQuery = (req: Request, name: string, fallback: number, min: number, max: number): number => {
   const n = Number(req.query[name]);
   return Number.isFinite(n) ? Math.min(max, Math.max(min, Math.round(n))) : fallback;
-}
+};
 
-async function health() {
+const health = async () => {
   const [piped, database] = await Promise.allSettled([Piped.healthcheck(), sql`SELECT 1`]);
   const memory = process.memoryUsage();
   return {
-    piped: { up: piped.status === 'fulfilled', url: pipedApiUrl() },
+    piped: { up: piped.status === 'fulfilled', url: config.PIPED_API_URL },
     database: database.status === 'fulfilled',
     redis: isRedisAvailable(),
     ffmpeg: hasFfmpeg(),
@@ -215,7 +171,7 @@ async function health() {
     node: process.version,
     memoryMb: Math.round(memory.rss / 1e6),
   };
-}
+};
 
 adminRouter.get('/analytics/overview', async (req, res) => {
   const days = intQuery(req, 'days', 30, 1, 90);
@@ -223,9 +179,9 @@ adminRouter.get('/analytics/overview', async (req, res) => {
 
   const [totals] = await sql`
     SELECT
-      (SELECT count(*)::int FROM users) AS users,
+      (SELECT count(*)::int FROM users WHERE role = 'user') AS users,
       (SELECT count(*)::int FROM users
-        WHERE created_at AT TIME ZONE current_setting('TimeZone') >= now() - make_interval(days => ${days})) AS new_users,
+        WHERE role = 'user' AND created_at AT TIME ZONE current_setting('TimeZone') >= now() - make_interval(days => ${days})) AS new_users,
       (SELECT count(DISTINCT user_id)::int FROM request_logs
         WHERE at >= (now() AT TIME ZONE 'UTC') - make_interval(days => ${days})) AS active_users,
       (SELECT count(*)::int FROM request_logs
@@ -261,7 +217,8 @@ adminRouter.get('/analytics/overview', async (req, res) => {
       SELECT date_trunc('day', (created_at AT TIME ZONE current_setting('TimeZone')) AT TIME ZONE ${tz}) AS day,
              count(*)::int AS signups
       FROM users
-      WHERE created_at AT TIME ZONE current_setting('TimeZone') >= now() - make_interval(days => ${days + 1})
+      WHERE role = 'user'
+        AND created_at AT TIME ZONE current_setting('TimeZone') >= now() - make_interval(days => ${days + 1})
       GROUP BY 1
     ),
     plays AS (
@@ -420,7 +377,7 @@ adminRouter.get('/analytics/requests', async (req, res) => {
 
 const SOURCES = ['backend', 'web', 'linux', 'mobile'] as const;
 
-function errorFilter(req: Request): SQL | undefined {
+const errorFilter = (req: Request): SQL | undefined => {
   const source =
     typeof req.query.source === 'string' && (SOURCES as readonly string[]).includes(req.query.source)
       ? req.query.source
@@ -430,7 +387,7 @@ function errorFilter(req: Request): SQL | undefined {
     source ? eq(errorLogs.source, source) : undefined,
     q ? ilike(errorLogs.message, `%${q.replace(/[\\%_]/g, '\\$&')}%`) : undefined,
   );
-}
+};
 
 adminRouter.get('/errors', async (req, res) => {
   const limit = intQuery(req, 'limit', 50, 1, 200);
@@ -460,4 +417,100 @@ adminRouter.delete('/errors/:id', async (req, res) => {
 adminRouter.delete('/errors', async (req, res) => {
   const deleted = await db.delete(errorLogs).where(errorFilter(req)).returning({ id: errorLogs.id });
   res.json({ deleted: deleted.length });
+});
+
+// ---- App releases ----
+//
+// Builds offered in Settings → About. The file is the raw request body (no multipart), so a
+// 300 MB installer streams straight to disk.
+
+adminRouter.get('/releases', async (_req, res) => {
+  const rows = await db.select().from(appReleases).orderBy(desc(appReleases.uploadedAt));
+  res.json({
+    items: rows.map((r) => ({ ...releaseView(r), downloads: r.downloads })),
+    accepts: Object.fromEntries(PLATFORMS.map((p) => [p, acceptedExtensions(p)])),
+  });
+});
+
+const uploadSchema = z.object({
+  platform: z.enum(PLATFORMS, { message: 'Pick android, linux or windows' }),
+  version: z
+    .string()
+    .trim()
+    .regex(/^[0-9A-Za-z][0-9A-Za-z.+-]{0,39}$/, 'Use a version like 1.2.0 (letters, digits, . + -)'),
+  fileName: z.string().trim().min(1, 'The file needs a name').max(255),
+  notes: z.string().trim().max(500, 'Keep the notes under 500 characters').optional(),
+});
+
+adminRouter.post('/releases', async (req, res) => {
+  const query = parseQuery(uploadSchema, req);
+  const fileName = cleanFileName(query.fileName);
+  const match = formatFor(query.platform, fileName);
+  if (!match) {
+    return fail(
+      res,
+      400,
+      'BAD_REQUEST',
+      `A ${query.platform} build must be one of: ${acceptedExtensions(query.platform).join(', ')}`,
+    );
+  }
+
+  let upload: Awaited<ReturnType<typeof receiveUpload>>;
+  try {
+    upload = await receiveUpload(req);
+  } catch (err) {
+    if (err instanceof UploadTooLargeError) return fail(res, 413, 'PAYLOAD_TOO_LARGE', err.message);
+    throw err;
+  }
+  if (upload.size === 0) {
+    await fs.rm(upload.tmpPath, { force: true });
+    return fail(res, 400, 'BAD_REQUEST', 'The file is empty');
+  }
+
+  // The same version and format again replaces the earlier file (a rebuild).
+  const values = {
+    platform: query.platform,
+    format: match.format,
+    version: query.version,
+    fileName,
+    sizeBytes: upload.size,
+    sha256: upload.sha256,
+    notes: query.notes || null,
+    uploadedBy: req.admin!.id,
+  };
+  const [existing] = await db
+    .select({ id: appReleases.id })
+    .from(appReleases)
+    .where(
+      and(
+        eq(appReleases.platform, values.platform),
+        eq(appReleases.format, values.format),
+        eq(appReleases.version, values.version),
+      ),
+    )
+    .limit(1);
+
+  try {
+    const [release] = existing
+      ? await db
+          .update(appReleases)
+          .set({ ...values, downloads: 0, uploadedAt: new Date() })
+          .where(eq(appReleases.id, existing.id))
+          .returning()
+      : await db.insert(appReleases).values(values).returning();
+    await fs.rename(upload.tmpPath, releasePath(release));
+    res.status(existing ? 200 : 201).json({ ...releaseView(release), downloads: release.downloads });
+  } catch (err) {
+    await fs.rm(upload.tmpPath, { force: true });
+    throw err;
+  }
+});
+
+adminRouter.delete('/releases/:id', async (req, res) => {
+  const parsed = z.string().uuid().safeParse(req.params.id);
+  if (!parsed.success) return fail(res, 400, 'BAD_REQUEST', 'Bad release id');
+  const [deleted] = await db.delete(appReleases).where(eq(appReleases.id, parsed.data)).returning();
+  if (!deleted) return fail(res, 404, 'NOT_FOUND', 'That build is already gone');
+  await fs.rm(releasePath(deleted), { force: true });
+  res.status(204).end();
 });

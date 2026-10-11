@@ -14,11 +14,11 @@ export interface MailMessage {
   html: string;
 }
 
-export async function sendMail(opts: { to: string; subject: string; text: string; html: string }): Promise<void> {
+export const sendMail = async (opts: { to: string; subject: string; text: string; html: string }): Promise<void> => {
   await transport.sendMail({ from: config.MAIL_FROM, ...opts });
-}
+};
 
-export function verifyEmailMessage(link: string): MailMessage {
+export const verifyEmailMessage = (link: string): MailMessage => {
   return {
     subject: 'Verify your Sonare email address',
     text: `Welcome to Sonare!\n\nVerify your email by clicking the link below. It expires in 24 hours.\n\n${link}\n\nIf you did not create an account, ignore this email.`,
@@ -32,9 +32,9 @@ export function verifyEmailMessage(link: string): MailMessage {
   <p style="color:#999;font-size:12px">If you did not create a Sonare account, you can ignore this email.</p>
 </div>`,
   };
-}
+};
 
-export function resetPasswordMessage(link: string): MailMessage {
+export const resetPasswordMessage = (link: string): MailMessage => {
   return {
     subject: 'Reset your Sonare password',
     text: `You requested a password reset for your Sonare account.\n\nClick the link below to set a new password. It expires in 1 hour.\n\n${link}\n\nIf you did not request this, ignore this email. Your password will not change.`,
@@ -48,4 +48,4 @@ export function resetPasswordMessage(link: string): MailMessage {
   <p style="color:#999;font-size:12px">If you did not request a password reset, ignore this email. Your password will not change.</p>
 </div>`,
   };
-}
+};

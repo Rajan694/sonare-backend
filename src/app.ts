@@ -9,6 +9,7 @@ import { clientErrorsRouter } from './routes/clientErrors.routes.js';
 import { catalogRouter } from './routes/catalog.routes.js';
 import { mediaRouter } from './routes/media.routes.js';
 import { lyricsRouter } from './routes/lyrics.routes.js';
+import { releasesRouter } from './routes/releases.routes.js';
 import { requestLogger } from './services/telemetry.js';
 import { optionalAuth } from './middleware/auth.js';
 import { errorHandler } from './middleware/errorHandler.js';
@@ -17,7 +18,7 @@ import { logger } from './logger.js';
 
 const LOCALHOST_ORIGIN_REGEX = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
 
-export function createApp() {
+export const createApp = () => {
   const app = express();
   const trustProxy = parseTrustProxy(config.TRUST_PROXY);
   if (trustProxy !== undefined) app.set('trust proxy', trustProxy);
@@ -73,6 +74,7 @@ export function createApp() {
   v1.use(catalogRouter);
   v1.use(mediaRouter);
   v1.use(lyricsRouter);
+  v1.use(releasesRouter);
 
   app.use('/api/v1', v1);
 
@@ -83,4 +85,4 @@ export function createApp() {
   app.use(errorHandler);
 
   return app;
-}
+};

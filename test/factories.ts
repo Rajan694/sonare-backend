@@ -1,12 +1,12 @@
 import bcrypt from 'bcrypt';
 import { db } from '../src/db/index.js';
-import { users, adminUsers, refreshTokens } from '../src/db/schema.js';
+import { users, refreshTokens } from '../src/db/schema.js';
 import { signAccessToken, generateRefreshToken, hashToken } from '../src/middleware/auth.js';
 import { signAdminToken } from '../src/middleware/adminAuth.js';
 import crypto from 'node:crypto';
 import type { PipedStream } from '../src/upstream/piped.types.js';
 
-export async function createUser(override: Partial<typeof users.$inferInsert> = {}) {
+export const createUser = async (override: Partial<typeof users.$inferInsert> = {}) => {
   const email = override.email ?? `user_${crypto.randomBytes(6).toString('hex')}@example.com`;
   const displayName = override.displayName ?? 'Test User';
   const password = 'password123';
@@ -31,18 +31,20 @@ export async function createUser(override: Partial<typeof users.$inferInsert> = 
   });
 
   return { user, token, refreshToken, rawPassword: password };
-}
+};
 
-export async function createAdminUser(override: Partial<typeof adminUsers.$inferInsert> = {}) {
-  const username = override.username ?? `admin_${crypto.randomBytes(4).toString('hex')}`;
+export const createAdminUser = async (override: Partial<typeof users.$inferInsert> = {}) => {
+  const email = override.email ?? `admin_${crypto.randomBytes(4).toString('hex')}@example.com`;
   const password = 'adminpassword123';
   const passwordHash = override.passwordHash ?? (await bcrypt.hash(password, 12));
 
   const [admin] = await db
-    .insert(adminUsers)
+    .insert(users)
     .values({
-      username,
+      email,
       passwordHash,
+      displayName: 'Admin',
+      role: 'admin',
       tokenVersion: 1,
       ...override,
     })
@@ -50,9 +52,9 @@ export async function createAdminUser(override: Partial<typeof adminUsers.$infer
 
   const token = signAdminToken(admin);
   return { admin, token, rawPassword: password };
-}
+};
 
-export function samplePipedStream(id: string = 'dQw4w9WgXcQ') {
+export const samplePipedStream = (id: string = 'dQw4w9WgXcQ') => {
   return {
     id,
     title: 'Never Gonna Give You Up',
@@ -127,9 +129,9 @@ export function samplePipedStream(id: string = 'dQw4w9WgXcQ') {
       },
     ],
   };
-}
+};
 
-export function samplePipedSearchItem(id: string = 'dQw4w9WgXcQ') {
+export const samplePipedSearchItem = (id: string = 'dQw4w9WgXcQ') => {
   return {
     url: `/watch?v=${id}`,
     title: 'Never Gonna Give You Up',
@@ -144,9 +146,9 @@ export function samplePipedSearchItem(id: string = 'dQw4w9WgXcQ') {
     uploaded: 1500000000000,
     uploaderVerified: true,
   };
-}
+};
 
-export function samplePipedPlaylist(id: string = 'PL1234567890') {
+export const samplePipedPlaylist = (id: string = 'PL1234567890') => {
   return {
     id,
     name: 'Greatest Hits Album',
@@ -159,9 +161,9 @@ export function samplePipedPlaylist(id: string = 'PL1234567890') {
     relatedStreams: [samplePipedSearchItem('dQw4w9WgXcQ')],
     nextpage: null,
   };
-}
+};
 
-export function samplePipedChannel(id: string = 'UCuAXFkgsw1L7xaCfnd5JJOw') {
+export const samplePipedChannel = (id: string = 'UCuAXFkgsw1L7xaCfnd5JJOw') => {
   return {
     id,
     name: 'Rick Astley',
@@ -190,12 +192,12 @@ export function samplePipedChannel(id: string = 'UCuAXFkgsw1L7xaCfnd5JJOw') {
     ],
     nextpage: null,
   };
-}
+};
 
 /**
  * For MockAgent.enableNetConnect: lets tests reach servers they start themselves on localhost,
  * but never a real Piped (8090/8091) that may be running on the developer's machine.
  */
-export function isLocalTestHost(host: string): boolean {
+export const isLocalTestHost = (host: string): boolean => {
   return /^(127\.0\.0\.1|localhost)(:\d+)?$/.test(host) && !/:(8090|8091)$/.test(host);
-}
+};

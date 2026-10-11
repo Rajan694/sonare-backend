@@ -22,6 +22,9 @@ yarn-error.log*
 # Test output
 coverage/
 
+# App builds uploaded from the admin page (RELEASES_DIR)
+data/
+
 # Editors
 .vscode/*
 !.vscode/extensions.json

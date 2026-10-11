@@ -43,28 +43,28 @@ const refreshSchema = z.object({
 });
 const logoutSchema = z.object({ refreshToken: z.string().max(500).optional() });
 
-function rateLimited(res: Response, retryAfterSec: number) {
+const rateLimited = (res: Response, retryAfterSec: number) => {
   res.setHeader('Retry-After', String(retryAfterSec));
   res.status(429).json({
     error: { code: 'RATE_LIMITED', message: `Too many attempts. Try again in ${Math.ceil(retryAfterSec / 60)} min.` },
   });
-}
+};
 
-function invalidToken(res: Response) {
+const invalidToken = (res: Response) => {
   res.status(400).json({ error: { code: 'INVALID_TOKEN', message: 'This link is invalid or has expired' } });
-}
+};
 
 // Accounts made before emails were lowercased keep their original case.
-function findUserByEmail(address: string) {
+const findUserByEmail = (address: string) => {
   return db
     .select()
     .from(users)
     .where(eq(sql`lower(${users.email})`, address))
     .limit(1)
     .then((rows) => rows[0]);
-}
+};
 
-function userView(user: typeof users.$inferSelect) {
+const userView = (user: typeof users.$inferSelect) => {
   return {
     id: user.id,
     email: user.email,
@@ -72,30 +72,30 @@ function userView(user: typeof users.$inferSelect) {
     emailVerified: user.emailVerifiedAt !== null,
     createdAt: user.createdAt,
   };
-}
+};
 
-async function startSession(user: typeof users.$inferSelect) {
+const startSession = async (user: typeof users.$inferSelect) => {
   const refreshToken = generateRefreshToken();
   await db.insert(refreshTokens).values({ userId: user.id, token: hashToken(refreshToken) });
   return { accessToken: signAccessToken({ id: user.id, email: user.email }), refreshToken, user: userView(user) };
-}
+};
 
 /** Mail failures are logged, never surfaced: the account action itself already succeeded. */
-async function sendVerifyEmail(req: Request, user: typeof users.$inferSelect) {
+const sendVerifyEmail = async (req: Request, user: typeof users.$inferSelect) => {
   const raw = await createEmailToken(user.id, 'verify', VERIFY_TOKEN_TTL_MS);
   const link = `${config.APP_URL}/verify-email?token=${raw}`;
   await sendMail({ to: user.email, ...verifyEmailMessage(link) }).catch((err) =>
     req.log.warn({ err }, 'verification email failed'),
   );
-}
+};
 
-async function sendResetEmail(req: Request, user: typeof users.$inferSelect) {
+const sendResetEmail = async (req: Request, user: typeof users.$inferSelect) => {
   const raw = await createEmailToken(user.id, 'reset', RESET_TOKEN_TTL_MS);
   const link = `${config.APP_URL}/reset-password?token=${raw}`;
   await sendMail({ to: user.email, ...resetPasswordMessage(link) }).catch((err) =>
     req.log.warn({ err }, 'password reset email failed'),
   );
-}
+};
 
 authRouter.post('/register', async (req, res) => {
   const limit = await registerLimiter.hit(req.ip ?? 'unknown');
@@ -124,7 +124,8 @@ authRouter.post('/login', async (req, res) => {
   if (lockout.blocked) return rateLimited(res, lockout.retryAfterSec);
 
   const user = await findUserByEmail(body.email);
-  if (!user || !(await bcrypt.compare(body.password, user.passwordHash))) {
+  // The admin account signs in on /admin only.
+  if (!user || user.role !== 'user' || !(await bcrypt.compare(body.password, user.passwordHash))) {
     await loginLimiter.hit(limitKey);
     res.status(401).json({ error: { code: 'UNAUTHORIZED', message: 'Invalid credentials' } });
     return;
@@ -205,7 +206,7 @@ authRouter.post('/forgot-password', async (req, res) => {
   if (!byEmail.allowed) return rateLimited(res, byEmail.retryAfterSec);
 
   const user = await findUserByEmail(body.email);
-  if (user) await sendResetEmail(req, user);
+  if (user?.role === 'user') await sendResetEmail(req, user);
   res.json({ ok: true });
 });
 

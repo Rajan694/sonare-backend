@@ -9,6 +9,8 @@ import {
   jsonb,
   index,
   bigserial,
+  bigint,
+  unique,
 } from 'drizzle-orm/pg-core';
 
 export const users = pgTable('users', {
@@ -17,6 +19,12 @@ export const users = pgTable('users', {
   passwordHash: text('password_hash').notNull(),
   displayName: text('display_name').notNull(),
   emailVerifiedAt: timestamp('email_verified_at'),
+  /** 'user' for app accounts; 'admin' signs in to /admin only and cannot use the apps. */
+  role: text('role').default('user').notNull(),
+  /** Bumped on an admin password change; admin tokens carry it, so older tokens stop working. */
+  tokenVersion: integer('token_version').default(0).notNull(),
+  lastLoginAt: timestamp('last_login_at'),
+  passwordChangedAt: timestamp('password_changed_at'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
 });
 
@@ -184,28 +192,7 @@ export const lyricsOverrides = pgTable(
   }),
 );
 
-// --- Admin (/admin on the web build). Separate from `users`: an app account never gets admin
-// access, and the admin login is not an app account.
-
-export const adminUsers = pgTable('admin_users', {
-  id: uuid('id').defaultRandom().primaryKey(),
-  username: text('username').notNull().unique(),
-  passwordHash: text('password_hash').notNull(),
-  /** Bumped on a password change; admin tokens carry it, so older tokens stop working. */
-  tokenVersion: integer('token_version').default(0).notNull(),
-  lastLoginAt: timestamp('last_login_at'),
-  createdAt: timestamp('created_at').defaultNow().notNull(),
-  updatedAt: timestamp('updated_at').defaultNow().notNull(),
-});
-
-/** System-wide settings, edited from the admin page. A null value means "use the .env default". */
-export const systemConfiguration = pgTable('system_configuration', {
-  key: text('key').primaryKey(),
-  value: jsonb('value').$type<unknown>(),
-  description: text('description'),
-  updatedAt: timestamp('updated_at').defaultNow().notNull(),
-  updatedBy: text('updated_by'),
-});
+// --- Admin analytics (/admin on the web build).
 
 /** One row per API request, for the admin analytics. Pruned after 30 days. */
 export const requestLogs = pgTable(
@@ -253,5 +240,32 @@ export const errorLogs = pgTable(
   },
   (t) => ({
     lastSeenIdx: index('error_logs_last_seen_at_idx').on(t.lastSeenAt),
+  }),
+);
+
+/**
+ * App builds uploaded from the admin page and offered in Settings → About. The file lives in
+ * RELEASES_DIR as `<id><ext>`; file_name is only what the download is called.
+ */
+export const appReleases = pgTable(
+  'app_releases',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    /** android | linux | windows */
+    platform: text('platform').notNull(),
+    /** apk | appimage | deb | rpm | tar.gz | zip | exe | msi, from the file's extension. */
+    format: text('format').notNull(),
+    version: text('version').notNull(),
+    fileName: text('file_name').notNull(),
+    sizeBytes: bigint('size_bytes', { mode: 'number' }).notNull(),
+    sha256: text('sha256').notNull(),
+    notes: text('notes'),
+    downloads: integer('downloads').default(0).notNull(),
+    uploadedBy: uuid('uploaded_by').references(() => users.id, { onDelete: 'set null' }),
+    uploadedAt: timestamp('uploaded_at').defaultNow().notNull(),
+  },
+  (t) => ({
+    // Uploading the same version and format again replaces the file.
+    versionUnique: unique('app_releases_platform_format_version_key').on(t.platform, t.format, t.version),
   }),
 );

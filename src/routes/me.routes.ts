@@ -32,9 +32,9 @@ const trackRef = z.union([
 ]);
 
 /** The stored id: a YouTube video id for server tracks, the file fingerprint for local ones. */
-function refId(ref: z.infer<typeof trackRef>): string {
+const refId = (ref: z.infer<typeof trackRef>): string => {
   return ref.kind === 'server' ? ref.id : ref.fingerprint;
-}
+};
 
 const libraryQuery = z.object({
   sort: z.enum(['addedAt', 'title', 'playCount']).default('addedAt'),
@@ -596,14 +596,14 @@ meRouter.post('/playlists/:id/tracks', async (req, res) => {
 });
 
 // Every playlist mutation must be scoped to the caller: ids are guessable once shared.
-async function ownsPlaylist(userId: string, playlistId: string): Promise<boolean> {
+const ownsPlaylist = async (userId: string, playlistId: string): Promise<boolean> => {
   const [p] = await db
     .select({ id: playlists.id })
     .from(playlists)
     .where(and(eq(playlists.id, playlistId), eq(playlists.userId, userId)))
     .limit(1);
   return !!p;
-}
+};
 
 meRouter.delete('/playlists/:id/tracks', async (req, res) => {
   const { index, trackIds } = parseBody(removeTracksSchema, req);

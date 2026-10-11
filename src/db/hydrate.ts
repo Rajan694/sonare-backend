@@ -22,11 +22,11 @@ export interface HydrateOptions {
   failIfPipedDown?: boolean;
 }
 
-export async function hydrateTracks(
+export const hydrateTracks = async (
   userId: string | undefined,
   inputs: TrackRefInput[],
-  { failIfPipedDown = false }: HydrateOptions = {},
-) {
+  { failIfPipedDown = true }: HydrateOptions = {},
+) => {
   const allIds = inputs.map((i) =>
     i.trackRefKind === 'server' ? idHelpers.prefixYt(i.trackRefId) : idHelpers.prefixLocal(i.trackRefId),
   );
@@ -89,4 +89,4 @@ export async function hydrateTracks(
   );
 
   return results;
-}
+};

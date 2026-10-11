@@ -16,10 +16,10 @@ import { hashToken } from '../../src/middleware/auth.js';
 import { createUser } from '../factories.js';
 
 /** The raw token from the link in the most recent email. */
-function lastMailToken(): string {
+const lastMailToken = (): string => {
   const { text } = sendMail.mock.calls.at(-1)![0] as { text: string };
   return text.match(/token=([0-9a-f]+)/)![1];
-}
+};
 
 describe('Email verification and password reset', () => {
   const app = createApp();
@@ -29,9 +29,9 @@ describe('Email verification and password reset', () => {
     sendMail.mockResolvedValue(undefined);
   });
 
-  async function register(email = 'new@example.com', password = 'password123') {
+  const register = async (email = 'new@example.com', password = 'password123') => {
     return request(app).post('/api/v1/auth/register').send({ email, password, displayName: 'New' });
-  }
+  };
 
   it('BE-EMAIL-001: register sends a verify link and stores only the token hash', async () => {
     const res = await register('Mixed@Example.com ');

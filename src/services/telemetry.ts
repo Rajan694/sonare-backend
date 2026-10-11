@@ -39,15 +39,15 @@ let pendingRequests: (typeof requestLogs.$inferInsert)[] = [];
 // one error is a single write with a count.
 let pendingErrors = new Map<string, { report: ErrorReport; count: number; at: Date }>();
 
-function truncate(s: string | null | undefined, max: number): string | null {
+const truncate = (s: string | null | undefined, max: number): string | null => {
   if (!s) return null;
   return s.length > max ? `${s.slice(0, max)}…` : s;
-}
+};
 
-export function clientOf(req: Request): ClientName | null {
+export const clientOf = (req: Request): ClientName | null => {
   const header = req.get('x-sonare-client');
   return (CLIENTS as readonly string[]).includes(header ?? '') ? (header as ClientName) : null;
-}
+};
 
 const routePatterns = new Map<string, RegExp>();
 
@@ -56,7 +56,7 @@ const routePatterns = new Map<string, RegExp>();
  * by endpoint. req.baseUrl is reset once an error leaves a router, so the mount prefix is
  * rebuilt from the url instead: its tail matched the route's path, and the rest is the prefix.
  */
-function routeOf(req: Request, res: Response): string {
+const routeOf = (req: Request, res: Response): string => {
   const routePath = req.route?.path;
   if (typeof routePath !== 'string') return res.statusCode === 404 ? '(no route)' : '(unrouted)';
   const pathname = req.originalUrl.split('?')[0];
@@ -73,13 +73,13 @@ function routeOf(req: Request, res: Response): string {
   }
   const m = pattern.exec(pathname);
   return m ? pathname.slice(0, m.index) + routePath : routePath;
-}
+};
 
 /**
  * Logs every API request (except CORS preflights and the admin API itself), and records a
  * server error for any 5xx the error handler answered (it leaves the error in res.locals).
  */
-export function requestLogger(): RequestHandler {
+export const requestLogger = (): RequestHandler => {
   return (req, res, next) => {
     const start = performance.now();
     // Time to the response headers, not to the last byte: a stream relay stays open for the
@@ -122,9 +122,9 @@ export function requestLogger(): RequestHandler {
     });
     next();
   };
-}
+};
 
-export function recordError(report: ErrorReport): void {
+export const recordError = (report: ErrorReport): void => {
   const r: ErrorReport = {
     ...report,
     message: truncate(report.message, 2_000) || '(no message)',
@@ -140,10 +140,10 @@ export function recordError(report: ErrorReport): void {
   } else if (pendingErrors.size < MAX_PENDING_ERRORS) {
     pendingErrors.set(key, { report: r, count: 1, at: new Date() });
   }
-}
+};
 
 /** Adds to the matching row (same source, code, route and message), or starts a new one. */
-async function writeError({ report: r, count, at }: { report: ErrorReport; count: number; at: Date }) {
+const writeError = async ({ report: r, count, at }: { report: ErrorReport; count: number; at: Date }) => {
   const latest = {
     level: r.level ?? 'error',
     stack: r.stack ?? null,
@@ -177,11 +177,11 @@ async function writeError({ report: r, count, at }: { report: ErrorReport; count
       firstSeenAt: at,
     });
   }
-}
+};
 
 let flushing: Promise<void> | null = null;
 
-async function writePending(): Promise<void> {
+const writePending = async (): Promise<void> => {
   const requests = pendingRequests;
   const errors = [...pendingErrors.values()];
   pendingRequests = [];
@@ -195,19 +195,19 @@ async function writePending(): Promise<void> {
     // Not recorded as an error log: that write would most likely fail the same way.
     logger.warn({ err }, 'Telemetry: could not write logs');
   }
-}
+};
 
 /** Writes whatever is buffered. Safe to call at any time; overlapping calls share one flush. */
-export function flushTelemetry(): Promise<void> {
+export const flushTelemetry = (): Promise<void> => {
   // Cleared in .finally(), which always runs after this assignment - even when there was
   // nothing to write and writePending() finished without awaiting anything.
   flushing ??= writePending().finally(() => {
     flushing = null;
   });
   return flushing;
-}
+};
 
-async function prune() {
+const prune = async () => {
   try {
     const utcNow = sql`(now() AT TIME ZONE 'UTC')`;
     await db.delete(requestLogs).where(lt(requestLogs.at, sql`${utcNow} - make_interval(days => ${REQUEST_LOG_DAYS})`));
@@ -217,11 +217,11 @@ async function prune() {
   } catch (err) {
     logger.warn({ err }, 'Telemetry: could not prune old logs');
   }
-}
+};
 
 let started = false;
 
-export function startTelemetry(): void {
+export const startTelemetry = (): void => {
   if (started) return;
   started = true;
   setInterval(() => void flushTelemetry(), FLUSH_MS).unref();
@@ -238,4 +238,4 @@ export function startTelemetry(): void {
   };
   process.on('uncaughtException', crash('UNCAUGHT_EXCEPTION'));
   process.on('unhandledRejection', crash('UNHANDLED_REJECTION'));
-}
+};
