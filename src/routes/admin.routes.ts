@@ -13,6 +13,7 @@ import { config } from '../config.js';
 import { createRateLimiter } from '../middleware/rateLimit.js';
 import { Piped } from '../upstream/piped.js';
 import { parseBody, parseQuery } from '../validation.js';
+import { pipedApiUrl, setPipedApiUrl, getSavedPipedApiUrl } from '../services/settings.js';
 import {
   PLATFORMS,
   UploadTooLargeError,
@@ -85,6 +86,64 @@ adminRouter.post('/login', async (req, res) => {
 });
 
 adminRouter.use(requireAdmin);
+
+// ---- Settings ----
+
+const httpUrlSchema = z
+  .string({ invalid_type_error: 'URL must be a string' })
+  .trim()
+  .max(2048, 'URL is too long (at most 2048 characters)')
+  .refine((v) => {
+    try {
+      const u = new URL(v);
+      return u.protocol === 'http:' || u.protocol === 'https:';
+    } catch {
+      return false;
+    }
+  }, 'Must be a valid http or https URL')
+  .transform((v) => v.replace(/\/+$/, ''));
+
+const putSettingsSchema = z.object({
+  pipedApiUrl: z.preprocess((v) => (typeof v === 'string' && v.trim() === '' ? null : v), httpUrlSchema.nullable()),
+});
+
+const pipedTestSchema = z.object({
+  url: httpUrlSchema,
+});
+
+adminRouter.get('/settings', async (_req, res) => {
+  res.json({
+    pipedApiUrl: {
+      saved: getSavedPipedApiUrl(),
+      effective: pipedApiUrl(),
+      envDefault: config.PIPED_API_URL,
+    },
+  });
+});
+
+adminRouter.put('/settings', async (req, res) => {
+  const body = parseBody(putSettingsSchema, req);
+  await setPipedApiUrl(body.pipedApiUrl);
+  res.json({
+    pipedApiUrl: {
+      saved: getSavedPipedApiUrl(),
+      effective: pipedApiUrl(),
+      envDefault: config.PIPED_API_URL,
+    },
+  });
+});
+
+adminRouter.post('/settings/piped-test', async (req, res) => {
+  const body = parseBody(pipedTestSchema, req);
+  const start = Date.now();
+  try {
+    const ok = await Piped.healthcheck({ baseUrl: body.url, timeoutMs: 5000, retry: false });
+    res.json({ ok, ms: Date.now() - start });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    res.json({ ok: false, ms: Date.now() - start, error: message });
+  }
+});
 
 adminRouter.get('/me', async (req, res) => {
   const [admin] = await db.select().from(users).where(eq(users.id, req.admin!.id)).limit(1);
@@ -163,7 +222,7 @@ const health = async () => {
   const [piped, database] = await Promise.allSettled([Piped.healthcheck(), sql`SELECT 1`]);
   const memory = process.memoryUsage();
   return {
-    piped: { up: piped.status === 'fulfilled', url: config.PIPED_API_URL },
+    piped: { up: piped.status === 'fulfilled', url: pipedApiUrl() },
     database: database.status === 'fulfilled',
     redis: isRedisAvailable(),
     ffmpeg: hasFfmpeg(),

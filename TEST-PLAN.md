@@ -239,6 +239,24 @@ This document maps all backend test IDs to their specifications, assertions, and
 | `BE-ADM-COV-002`   | `GET /api/v1/admin/analytics/overview` | Accepts timezone query parameter.                                             |
 | `BE-ADM-BR-001`    | `requireAdmin` middleware              | Handles database errors during admin authentication.                          |
 
+### App settings (Piped API URL)
+
+| Test ID          | Method / Scope                           | Description & Assertions                                                    |
+| :--------------- | :--------------------------------------- | :-------------------------------------------------------------------------- |
+| `BE-ADM-SET-001` | `GET /api/v1/admin/settings`             | Rejects requests without admin token with 401 UNAUTHORIZED.                 |
+| `BE-ADM-SET-002` | `GET /api/v1/admin/settings`             | Returns saved=null and effective equal to config env default.               |
+| `BE-ADM-SET-003` | `PUT /api/v1/admin/settings`             | Saves pipedApiUrl in database and GET reflects the saved and effective URL. |
+| `BE-ADM-SET-004` | `pipedApiUrl()` service                  | Returns DB value when set, and config.PIPED_API_URL when reset.             |
+| `BE-ADM-SET-005` | `PUT /api/v1/admin/settings`             | Resetting with null restores effective URL to env default.                  |
+| `BE-ADM-SET-006` | `PUT /api/v1/admin/settings`             | Rejects invalid URL scheme (ftp://) with 400 BAD_REQUEST.                   |
+| `BE-ADM-SET-007` | `PUT /api/v1/admin/settings`             | Rejects non-URL string with 400 BAD_REQUEST.                                |
+| `BE-ADM-SET-008` | `POST /api/v1/admin/settings/piped-test` | Tests reachable URL against /healthcheck, returning ok=true and elapsed ms. |
+| `BE-ADM-SET-009` | `POST /api/v1/admin/settings/piped-test` | Tests closed port returning ok=false and error message with 200 status.     |
+| `BE-ADM-SET-010` | `PUT /api/v1/admin/settings`             | Empty string in pipedApiUrl clears setting to null.                         |
+| `BE-ADM-SET-011` | `PUT /api/v1/admin/settings`             | Trims URL and strips trailing slashes on save.                              |
+| `BE-ADM-SET-012` | `PUT /api/v1/admin/settings`             | Rejects URL exceeding 2048 characters with 400 BAD_REQUEST.                 |
+| `BE-ADM-SET-013` | `POST /api/v1/admin/settings/piped-test` | Handles testing URL with trailing slash properly.                           |
+
 ### App releases
 
 | Test ID      | Method / Scope                      | Description & Assertions                                                    |

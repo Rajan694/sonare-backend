@@ -269,3 +269,9 @@ export const appReleases = pgTable(
     versionUnique: unique('app_releases_platform_format_version_key').on(t.platform, t.format, t.version),
   }),
 );
+
+export const appSettings = pgTable('app_settings', {
+  key: text('key').primaryKey(),
+  value: text('value').notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
