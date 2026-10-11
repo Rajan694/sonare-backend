@@ -15,7 +15,7 @@ import {
 import { Lrclib } from '../upstream/lrclib.js';
 import { LyricsUnavailableError, describeError } from '../errors.js';
 import { z } from 'zod';
-import { parseBody, parseQuery } from '../validation.js';
+import { parseBody, parseQuery, queryInt } from '../validation.js';
 
 // Lyrics: resolve, per-user overrides and offsets, and LRCLIB search.
 export const lyricsRouter = Router();
@@ -39,6 +39,10 @@ const lyricsQuery = z.object({
   prefer: z.enum(['synced', 'plain']).optional(),
   // The user's preferred lyrics script (Settings); `original` or missing keeps what LRCLIB matched.
   script: z.enum(LYRICS_SCRIPTS).optional(),
+  // Optional metadata for offline/fallback matching. When present, skip Piped stream lookup.
+  title: z.string().trim().max(300).optional(),
+  artist: z.string().max(300).optional(),
+  durationMs: queryInt(0, 86_400_000).optional(),
 });
 const searchQuery = z.object({
   track: z.string({ required_error: 'Missing track parameter' }).trim().min(1, 'Missing track parameter').max(200),
@@ -48,7 +52,13 @@ const searchQuery = z.object({
 
 lyricsRouter.get('/tracks/:id/lyrics', async (req, res) => {
   const rawId = idHelpers.extractYtId(req.params.id);
-  const { prefer, script } = parseQuery(lyricsQuery, req);
+  const {
+    prefer,
+    script,
+    title: queryTitle,
+    artist: queryArtist,
+    durationMs: queryDurationMs,
+  } = parseQuery(lyricsQuery, req);
 
   let resolved;
   const dbOverride = await getDbLyricsOverride(rawId, req.user?.id);
@@ -59,16 +69,22 @@ lyricsRouter.get('/tracks/:id/lyrics', async (req, res) => {
     resolved = await PermanentCache.getLyrics(rawId);
     // Genius results cached before it was dropped are only a link, no lyrics: look again.
     if ((resolved?.provider as string | undefined) === 'genius') resolved = null;
-    let streams: Awaited<ReturnType<typeof CachedPiped.getStream>> | null = null;
-    const meta = async () => {
-      const s = (streams ??= await CachedPiped.getStream(rawId));
-      return {
-        title: s.title,
-        artist: s.uploader.replace(/\s*-\s*Topic$/i, '').trim(),
-        durationMs: s.duration * 1000,
+
+    // When metadata is provided, skip Piped lookup entirely
+    if (!resolved && queryTitle && queryArtist) {
+      resolved = await LyricsResolver.resolve(rawId, queryTitle, queryArtist, undefined, queryDurationMs, req.user?.id);
+      if (resolved) await PermanentCache.setLyrics(rawId, resolved);
+    } else if (!resolved) {
+      // Fall back to Piped when metadata is missing
+      let streams: Awaited<ReturnType<typeof CachedPiped.getStream>> | null = null;
+      const meta = async () => {
+        const s = (streams ??= await CachedPiped.getStream(rawId));
+        return {
+          title: s.title,
+          artist: s.uploader.replace(/\s*-\s*Topic$/i, '').trim(),
+          durationMs: s.duration * 1000,
+        };
       };
-    };
-    if (!resolved) {
       const m = await meta();
       resolved = await LyricsResolver.resolve(rawId, m.title, m.artist, undefined, m.durationMs, req.user?.id);
       if (resolved) await PermanentCache.setLyrics(rawId, resolved);
@@ -80,9 +96,23 @@ lyricsRouter.get('/tracks/:id/lyrics', async (req, res) => {
         const cached = await PermanentCache.getScriptLyrics(rawId, script);
         let inScript = cached ? cached.lyrics : null;
         if (!cached) {
-          const m = await meta();
-          inScript = await resolveLyricsInScript(m.title, m.artist, m.durationMs, script);
-          await PermanentCache.setScriptLyrics(rawId, script, inScript);
+          // Use provided metadata when available
+          if (queryTitle && queryArtist) {
+            inScript = await resolveLyricsInScript(queryTitle, queryArtist, queryDurationMs || undefined, script);
+            await PermanentCache.setScriptLyrics(rawId, script, inScript);
+          } else {
+            let streams: Awaited<ReturnType<typeof CachedPiped.getStream>> | null = null;
+            const m = await (async () => {
+              const s = (streams ??= await CachedPiped.getStream(rawId));
+              return {
+                title: s.title,
+                artist: s.uploader.replace(/\s*-\s*Topic$/i, '').trim(),
+                durationMs: s.duration * 1000,
+              };
+            })();
+            inScript = await resolveLyricsInScript(m.title, m.artist, m.durationMs, script);
+            await PermanentCache.setScriptLyrics(rawId, script, inScript);
+          }
         }
         if (inScript) resolved = { ...inScript, offsetMs: resolved?.offsetMs ?? 0 };
       } catch {

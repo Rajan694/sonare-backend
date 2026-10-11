@@ -48,6 +48,7 @@ export const favouriteTracks = pgTable(
     trackRefId: text('track_ref_id').notNull(),
     matchedServerId: text('matched_server_id'),
     addedAt: timestamp('added_at').defaultNow().notNull(),
+    meta: jsonb('meta'),
   },
   (t) => ({
     pk: primaryKey({ columns: [t.userId, t.trackRefKind, t.trackRefId] }),
@@ -62,6 +63,7 @@ export const favouriteAlbums = pgTable(
       .notNull(),
     albumId: text('album_id').notNull(),
     addedAt: timestamp('added_at').defaultNow().notNull(),
+    meta: jsonb('meta'),
   },
   (t) => ({
     pk: primaryKey({ columns: [t.userId, t.albumId] }),
@@ -76,6 +78,7 @@ export const artistFollows = pgTable(
       .notNull(),
     artistId: text('artist_id').notNull(),
     addedAt: timestamp('added_at').defaultNow().notNull(),
+    meta: jsonb('meta'),
   },
   (t) => ({
     pk: primaryKey({ columns: [t.userId, t.artistId] }),
@@ -94,6 +97,7 @@ export const playHistory = pgTable(
     matchedServerId: text('matched_server_id'),
     playedAt: timestamp('played_at').notNull(),
     msPlayed: integer('ms_played').notNull(),
+    meta: jsonb('meta'),
   },
   (t) => ({
     userPlayedAtIdx: index('play_history_user_played_at_idx').on(t.userId, t.playedAt),
@@ -124,6 +128,7 @@ export const playlistTracks = pgTable(
     trackRefKind: text('track_ref_kind').notNull(),
     trackRefId: text('track_ref_id').notNull(),
     matchedServerId: text('matched_server_id'),
+    meta: jsonb('meta'),
   },
   (t) => ({
     playlistPositionIdx: index('playlist_tracks_playlist_position_idx').on(t.playlistId, t.position),
@@ -275,3 +280,20 @@ export const appSettings = pgTable('app_settings', {
   value: text('value').notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
+
+/**
+ * Server-side metadata cache written only by the backend from Piped results.
+ * kind = 'track' | 'album' | 'artist'; id = raw YouTube id (no "yt:" prefix).
+ */
+export const catalogItems = pgTable(
+  'catalog_items',
+  {
+    kind: text('kind').notNull(),
+    id: text('id').notNull(),
+    data: jsonb('data').notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.kind, t.id] }),
+  }),
+);

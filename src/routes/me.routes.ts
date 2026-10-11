@@ -16,10 +16,21 @@ import { requireAuth } from '../middleware/auth.js';
 import { idHelpers } from '../ids.js';
 import { hydrateTracks } from '../db/hydrate.js';
 import { CachedPiped } from '../services/cache.js';
-import { normalizeChannelToArtist, normalizePlaylistToAlbum } from '../normalize/index.js';
+import { normalizeChannelToArtist, normalizePlaylistToAlbum, normalizeStreamToTrack } from '../normalize/index.js';
 import crypto from 'node:crypto';
 import { z } from 'zod';
 import { parseBody, parseQuery, queryInt } from '../validation.js';
+import {
+  parseTrackMeta,
+  parseAlbumMeta,
+  parseArtistMeta,
+  rememberCatalogItem,
+  getCatalogItems,
+  toCatalogTrackData,
+  type AlbumMeta,
+  type ArtistMeta,
+  type TrackMeta,
+} from '../services/catalogMeta.js';
 
 export const meRouter = Router();
 
@@ -30,6 +41,9 @@ const trackRef = z.union([
   z.object({ kind: z.literal('server'), id: z.string().min(1).max(200) }),
   z.object({ kind: z.literal('local'), fingerprint: z.string().min(1).max(200) }),
 ]);
+
+/** Optional metadata passed when favouriting/following a track, album, or artist. */
+const metaParam = z.unknown().optional();
 
 /** The stored id: a YouTube video id for server tracks, the file fingerprint for local ones. */
 const refId = (ref: z.infer<typeof trackRef>): string => {
@@ -66,6 +80,7 @@ const addTracksSchema = z.object({
   trackIds: z
     .array(trackId, { required_error: 'trackIds must be an array', invalid_type_error: 'trackIds must be an array' })
     .max(500, 'At most 500 tracks at a time'),
+  metas: z.record(z.unknown()).optional(),
 });
 const removeTracksSchema = z.object({
   index: z.number().int().min(0).optional(),
@@ -87,7 +102,7 @@ const syncSchema = z.object({
     .max(1000)
     .optional(),
   favourites: z
-    .array(z.object({ trackRef, at: z.number().positive().optional() }))
+    .array(z.object({ trackRef, at: z.number().positive().optional(), meta: metaParam }))
     .max(1000)
     .optional(),
   // Sent by the desktop app; not used yet.
@@ -133,6 +148,7 @@ meRouter.get('/library/tracks', async (req, res) => {
       trackRefId: f.trackRefId,
       addedAt: f.addedAt.getTime(),
       favourite: true,
+      rowMeta: f.meta,
     })),
   );
 
@@ -151,13 +167,43 @@ meRouter.get('/library/tracks', async (req, res) => {
 
 meRouter.get('/library/albums', async (req, res) => {
   const favs = await db.select().from(favouriteAlbums).where(eq(favouriteAlbums.userId, req.user!.id));
-  // The table only stores ids; the Library tab needs titles and artists to render cards.
-  // Details come through the playlist cache, and one failing album must not sink the list.
+
+  // 1. Check row meta; missing ones fetch from catalog_items in ONE batch query
+  const missingCatalogIds = favs.filter((f) => !parseAlbumMeta(f.meta)).map((f) => f.albumId);
+
+  const catalogMap =
+    missingCatalogIds.length > 0
+      ? await getCatalogItems<AlbumMeta>('album', missingCatalogIds)
+      : new Map<string, AlbumMeta>();
+
   const items = await Promise.all(
     favs.map(async (f) => {
       const base = { id: idHelpers.prefixYt(f.albumId), addedAt: f.addedAt.getTime() };
+      const parsedRow = parseAlbumMeta(f.meta);
+      const meta = parsedRow ?? catalogMap.get(f.albumId);
+
+      if (meta) {
+        return {
+          id: base.id,
+          title: meta.title,
+          artist: meta.artist,
+          artistId: meta.artistId ?? '',
+          year: meta.year ?? null,
+          trackCount: meta.trackCount ?? null,
+          genre: null,
+          source: 'server' as const,
+          downloaded: false,
+          thumbnail: meta.thumbnail || `/api/v1/albums/${base.id}/artwork`,
+          addedAt: base.addedAt,
+        };
+      }
+
+      // Fall back to Piped
       try {
-        return { ...normalizePlaylistToAlbum(await CachedPiped.playlist(f.albumId), f.albumId), ...base };
+        const playlist = await CachedPiped.playlist(f.albumId);
+        const normalized = normalizePlaylistToAlbum(playlist, f.albumId);
+        await rememberCatalogItem('album', f.albumId, normalized);
+        return { ...normalized, ...base };
       } catch {
         return {
           ...base,
@@ -167,8 +213,9 @@ meRouter.get('/library/albums', async (req, res) => {
           year: null,
           trackCount: null,
           genre: null,
-          source: 'server',
+          source: 'server' as const,
           downloaded: false,
+          thumbnail: `/api/v1/albums/${base.id}/artwork`,
         };
       }
     }),
@@ -185,45 +232,131 @@ const DERIVED_ARTIST_SCAN = 150;
 meRouter.get('/library/artists', async (req, res) => {
   const userId = req.user!.id;
   const follows = await db.select().from(artistFollows).where(eq(artistFollows.userId, userId));
+
+  // 1. Followed artists: row meta -> catalog_items (ONE batch query) -> Piped
+  const missingArtistIds = follows.filter((f) => !parseArtistMeta(f.meta)).map((f) => f.artistId);
+
+  const artistCatalogMap =
+    missingArtistIds.length > 0
+      ? await getCatalogItems<ArtistMeta>('artist', missingArtistIds)
+      : new Map<string, ArtistMeta>();
+
   const followed = await Promise.all(
     follows.map(async (f) => {
       const base = { id: idHelpers.prefixYt(f.artistId), following: true };
+      const parsedRow = parseArtistMeta(f.meta);
+      const meta = parsedRow ?? artistCatalogMap.get(f.artistId);
+
+      if (meta) {
+        return {
+          id: base.id,
+          name: meta.name,
+          albumCount: 0,
+          localTrackCount: 0,
+          following: true,
+          monthlyListeners: meta.monthlyListeners ?? null,
+          thumbnail: meta.thumbnail || `/api/v1/artists/${base.id}/artwork`,
+        };
+      }
+
       try {
-        return { ...normalizeChannelToArtist(await CachedPiped.channel(f.artistId), f.artistId), ...base };
+        const channel = await CachedPiped.channel(f.artistId);
+        const normalized = normalizeChannelToArtist(channel, f.artistId);
+        await rememberCatalogItem('artist', f.artistId, normalized);
+        return { ...normalized, ...base };
       } catch {
         return { ...base, name: 'Unavailable artist', albumCount: 0, localTrackCount: 0 };
       }
     }),
   );
 
+  // 2. Artists from liked / playlisted songs: row meta -> catalog_items -> Piped
   const [favs, listed] = await Promise.all([
     db
-      .select({ id: favouriteTracks.trackRefId })
+      .select({ id: favouriteTracks.trackRefId, meta: favouriteTracks.meta })
       .from(favouriteTracks)
       .where(and(eq(favouriteTracks.userId, userId), eq(favouriteTracks.trackRefKind, 'server')))
       .orderBy(desc(favouriteTracks.addedAt)),
     db
-      .select({ id: playlistTracks.trackRefId })
+      .select({ id: playlistTracks.trackRefId, meta: playlistTracks.meta })
       .from(playlistTracks)
       .innerJoin(playlists, eq(playlists.id, playlistTracks.playlistId))
       .where(and(eq(playlists.userId, userId), eq(playlistTracks.trackRefKind, 'server')))
       .orderBy(desc(playlists.updatedAt)),
   ]);
-  const videoIds = [...new Set([...favs, ...listed].map((r) => (r.id.startsWith('yt:') ? r.id.slice(3) : r.id)))].slice(
-    0,
-    DERIVED_ARTIST_SCAN,
-  );
+
+  const rawRows = [...favs, ...listed];
+  const uniqueTracks = new Map<string, unknown>();
+  for (const r of rawRows) {
+    const rawId = r.id.startsWith('yt:') ? r.id.slice(3) : r.id;
+    if (!uniqueTracks.has(rawId)) {
+      uniqueTracks.set(rawId, r.meta);
+    }
+    if (uniqueTracks.size >= DERIVED_ARTIST_SCAN) break;
+  }
+
+  // Check which tracks have artist info from row meta
+  const trackArtistMap = new Map<string, { artistId: string; artist: string }>();
+  const missingTrackIds: string[] = [];
+
+  for (const [trackId, rowMeta] of uniqueTracks.entries()) {
+    const parsed = parseTrackMeta(rowMeta);
+    if (parsed && parsed.artist && parsed.artistId) {
+      trackArtistMap.set(trackId, { artistId: parsed.artistId, artist: parsed.artist });
+    } else {
+      missingTrackIds.push(trackId);
+    }
+  }
+
+  // Batch-fetch missing from catalog_items
+  if (missingTrackIds.length > 0) {
+    const trackCatalogMap = await getCatalogItems<TrackMeta>('track', missingTrackIds);
+    for (const trackId of [...missingTrackIds]) {
+      const cat = trackCatalogMap.get(trackId);
+      if (cat && cat.artist && cat.artistId) {
+        trackArtistMap.set(trackId, { artistId: cat.artistId, artist: cat.artist });
+        const idx = missingTrackIds.indexOf(trackId);
+        if (idx !== -1) missingTrackIds.splice(idx, 1);
+      }
+    }
+  }
+
+  // Only call Piped for ids it knows nothing about
+  if (missingTrackIds.length > 0) {
+    const streams = await Promise.all(
+      missingTrackIds.map(async (id) => {
+        try {
+          const s = await CachedPiped.getStream(id);
+          const rawTrack = normalizeStreamToTrack(s, id);
+          await rememberCatalogItem('track', id, toCatalogTrackData(rawTrack));
+          return { id, stream: s };
+        } catch {
+          return null;
+        }
+      }),
+    );
+
+    for (const item of streams) {
+      if (!item) continue;
+      const artistId = idHelpers.artistIdFromUrl(item.stream.uploaderUrl);
+      const artist = item.stream.uploader.replace(/\s*-\s*Topic$/i, '').trim();
+      if (artistId && artist) {
+        trackArtistMap.set(item.id, { artistId, artist });
+      }
+    }
+  }
 
   const followedIds = new Set<string>(followed.map((a) => a.id));
   const derived = new Map<string, { id: string; name: string; songCount: number }>();
-  const streams = await Promise.all(videoIds.map((id) => CachedPiped.getStream(id).catch(() => null)));
-  for (const s of streams) {
-    if (!s) continue;
-    const id = idHelpers.artistIdFromUrl(s.uploaderUrl);
-    if (!id || followedIds.has(id)) continue;
-    const known = derived.get(id);
-    if (known) known.songCount += 1;
-    else derived.set(id, { id, name: s.uploader.replace(/\s*-\s*Topic$/i, '').trim(), songCount: 1 });
+
+  for (const { artistId, artist } of trackArtistMap.values()) {
+    if (!artistId || followedIds.has(artistId)) continue;
+    const known = derived.get(artistId);
+    if (known) {
+      known.songCount += 1;
+    } else {
+      derived.set(artistId, { id: artistId, name: artist, songCount: 1 });
+    }
   }
 
   const items = [
@@ -256,6 +389,7 @@ meRouter.get('/favourites/tracks', async (req, res) => {
       trackRefId: f.trackRefId,
       addedAt: f.addedAt.getTime(),
       favourite: true,
+      rowMeta: f.meta,
     })),
   );
 
@@ -271,6 +405,7 @@ meRouter.put('/favourites/tracks/:id', async (req, res) => {
   const kind = isYt ? 'server' : 'local';
   const trackRefId = isYt ? idHelpers.extractYtId(fullId) : fullId.replace(/^local:/, '');
 
+  const parsedMeta = parseTrackMeta(req.body?.meta);
   await db
     .insert(favouriteTracks)
     .values({
@@ -278,8 +413,15 @@ meRouter.put('/favourites/tracks/:id', async (req, res) => {
       trackRefKind: kind,
       trackRefId,
       addedAt: new Date(),
+      meta: parsedMeta || null,
     })
-    .onConflictDoNothing();
+    .onConflictDoUpdate({
+      target: [favouriteTracks.userId, favouriteTracks.trackRefKind, favouriteTracks.trackRefId],
+      set: {
+        addedAt: new Date(),
+        ...(parsedMeta ? { meta: parsedMeta } : {}),
+      },
+    });
 
   res.json({ ok: true });
 });
@@ -298,14 +440,23 @@ meRouter.delete('/favourites/tracks/:id', async (req, res) => {
 
 meRouter.put('/favourites/albums/:id', async (req, res) => {
   const albumId = idHelpers.extractYtId(req.params.id);
+  const parsedMeta = parseAlbumMeta(req.body?.meta);
   await db
     .insert(favouriteAlbums)
     .values({
       userId: req.user!.id,
       albumId,
       addedAt: new Date(),
+      meta: parsedMeta || null,
     })
-    .onConflictDoNothing();
+    .onConflictDoUpdate({
+      target: [favouriteAlbums.userId, favouriteAlbums.albumId],
+      set: {
+        addedAt: new Date(),
+        ...(parsedMeta ? { meta: parsedMeta } : {}),
+      },
+    });
+
   res.json({ ok: true });
 });
 
@@ -319,14 +470,23 @@ meRouter.delete('/favourites/albums/:id', async (req, res) => {
 
 meRouter.put('/following/artists/:id', async (req, res) => {
   const artistId = idHelpers.extractYtId(req.params.id);
+  const parsedMeta = parseArtistMeta(req.body?.meta);
   await db
     .insert(artistFollows)
     .values({
       userId: req.user!.id,
       artistId,
       addedAt: new Date(),
+      meta: parsedMeta || null,
     })
-    .onConflictDoNothing();
+    .onConflictDoUpdate({
+      target: [artistFollows.userId, artistFollows.artistId],
+      set: {
+        addedAt: new Date(),
+        ...(parsedMeta ? { meta: parsedMeta } : {}),
+      },
+    });
+
   res.json({ ok: true });
 });
 
@@ -354,6 +514,7 @@ meRouter.get('/recently-played', async (req, res) => {
       trackRefKind: h.trackRefKind,
       trackRefId: h.trackRefId,
       lastPlayedAt: h.playedAt.getTime(),
+      rowMeta: h.meta,
     })),
     { failIfPipedDown: true },
   );
@@ -388,6 +549,7 @@ meRouter.get('/most-played', async (req, res) => {
       trackRefKind: p.trackRefKind,
       trackRefId: p.trackRefId,
       playCount: p.count,
+      rowMeta: undefined, // No row meta for aggregated plays; falls through to catalog_items -> Piped
     })),
     { failIfPipedDown: true },
   );
@@ -512,6 +674,7 @@ meRouter.get('/playlists/:id/tracks', async (req, res) => {
     rows.map((r) => ({
       trackRefKind: r.trackRefKind,
       trackRefId: r.trackRefId,
+      rowMeta: r.meta,
     })),
   );
 
@@ -562,7 +725,7 @@ meRouter.delete('/playlists/:id', async (req, res) => {
 });
 
 meRouter.post('/playlists/:id/tracks', async (req, res) => {
-  const { trackIds } = parseBody(addTracksSchema, req);
+  const { trackIds, metas = {} } = parseBody(addTracksSchema, req);
 
   const [p] = await db
     .select()
@@ -582,12 +745,15 @@ meRouter.post('/playlists/:id/tracks', async (req, res) => {
     const isYt = String(fullId).startsWith('yt:');
     const kind = isYt ? 'server' : 'local';
     const trackRefId = isYt ? idHelpers.extractYtId(fullId) : String(fullId).replace(/^local:/, '');
+    const rawMeta = metas[fullId] ?? metas[trackRefId];
+    const parsedMeta = parseTrackMeta(rawMeta);
 
     await db.insert(playlistTracks).values({
       playlistId: p.id,
       position: pos++,
       trackRefKind: kind,
       trackRefId,
+      meta: parsedMeta || null,
     });
   }
 
@@ -710,6 +876,7 @@ meRouter.post('/sync', async (req, res) => {
 
   if (favourites) {
     for (const f of favourites) {
+      const parsedMeta = parseTrackMeta(f.meta);
       await db
         .insert(favouriteTracks)
         .values({
@@ -717,8 +884,15 @@ meRouter.post('/sync', async (req, res) => {
           trackRefKind: f.trackRef.kind,
           trackRefId: refId(f.trackRef),
           addedAt: new Date(f.at || Date.now()),
+          meta: parsedMeta || null,
         })
-        .onConflictDoNothing();
+        .onConflictDoUpdate({
+          target: [favouriteTracks.userId, favouriteTracks.trackRefKind, favouriteTracks.trackRefId],
+          set: {
+            addedAt: new Date(f.at || Date.now()),
+            ...(parsedMeta ? { meta: parsedMeta } : {}),
+          },
+        });
     }
   }
 

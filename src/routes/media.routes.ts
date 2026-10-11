@@ -13,6 +13,7 @@ import { getUserTrackFields } from '../db/userData.js';
 import { db } from '../db/index.js';
 import type { PipedStream } from '../upstream/piped.types.js';
 import { playlistTracks } from '../db/schema.js';
+import { rememberCatalogItem, toCatalogTrackData } from '../services/catalogMeta.js';
 
 // Media: track details, artwork, image proxy, stream urls, the stream relay and peaks.
 export const mediaRouter = Router();
@@ -152,6 +153,10 @@ const largestThumb = async (videoId: string): Promise<YtThumbName> => {
 mediaRouter.get('/tracks/:id', async (req, res) => {
   const rawId = idHelpers.extractYtId(req.params.id);
   const streams = await CachedPiped.getStream(rawId);
+
+  // Remember catalog item for offline/fallback use (server-fetched normalized track without user fields)
+  const rawTrack = normalizeStreamToTrack(streams, rawId);
+  await rememberCatalogItem('track', rawId, toCatalogTrackData(rawTrack));
 
   // Select best audio stream (or muxed fallback if adaptive audio is absent).
   // Codec and bitrate are null only when upstream yields no audio streams at all (neither adaptive nor muxed).
