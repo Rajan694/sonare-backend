@@ -460,7 +460,7 @@ describe('Catalog metadata (Phase B2)', () => {
     expect(parseArtistMeta({ name: '' })).toBeNull();
   });
 
-  it('BE-META-019 & BE-META-020: rememberCatalogItem and getCatalogItems support raw and yt: prefixed IDs', async () => {
+  it('BE-META-019: rememberCatalogItem and getCatalogItems support raw and yt: prefixed IDs', async () => {
     const trackId = 'lookupTrack019';
     await rememberCatalogItem('track', trackId, { title: 'Raw Stored Track' });
 
@@ -1017,5 +1017,52 @@ describe('Catalog metadata (Phase B2)', () => {
     // LRCLIB was called with the server-known title and artist, NOT the client query params
     expect(requestedTrackName).toBe('Canonical Server Title');
     expect(requestedArtistName).toBe('Canonical Server Artist');
+  });
+
+  it('BE-META-035: plays synced with metadata hydrate recently- and most-played without Piped', async () => {
+    const { user, token } = await createUser();
+    const meta = (title: string): TrackMeta => ({
+      title,
+      artist: 'In-App Artist',
+      artistId: 'yt:UCinApp035',
+      album: 'In-App Album',
+      albumId: 'yt:MPREinApp035',
+      durationMs: 201000,
+      thumbnail: 'https://i.ytimg.com/vi/inAppSong35/hqdefault.jpg',
+    });
+    const at = Date.now() - 60_000;
+
+    const sync = await request(app)
+      .post('/api/v1/me/sync')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        plays: [
+          { trackRef: { kind: 'server', id: 'inAppSong35' }, at, ms: 40000, meta: meta('Old Title') },
+          { trackRef: { kind: 'server', id: 'inAppSong35' }, at: at + 1000, ms: 40000, meta: meta('New Title') },
+          // A play without (or with unusable) metadata is still counted.
+          { trackRef: { kind: 'server', id: 'inAppSong35' }, at: at + 2000, ms: 40000, meta: { title: '' } },
+        ],
+      });
+    expect(sync.status).toBe(200);
+
+    const rows = await db.select().from(playHistory).where(eq(playHistory.userId, user.id));
+    expect(rows).toHaveLength(3);
+    expect(rows.filter((r) => r.meta === null)).toHaveLength(1);
+
+    // Piped is unreachable here (no net connect): the stored snapshots are all there is.
+    const recent = await request(app).get('/api/v1/me/recently-played').set('Authorization', `Bearer ${token}`);
+    expect(recent.status).toBe(200);
+    // Every row of the song shows its newest snapshot, the row synced without one too.
+    expect(recent.body.items.map((t: { title: string }) => t.title)).toEqual(['New Title', 'New Title', 'New Title']);
+
+    const most = await request(app).get('/api/v1/me/most-played').set('Authorization', `Bearer ${token}`);
+    expect(most.status).toBe(200);
+    expect(most.body.items).toHaveLength(1);
+    expect(most.body.items[0]).toMatchObject({
+      id: 'yt:inAppSong35',
+      title: 'New Title',
+      artist: 'In-App Artist',
+      playCount: 3,
+    });
   });
 });

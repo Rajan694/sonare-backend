@@ -373,7 +373,6 @@ This document maps all backend test IDs to their specifications, assertions, and
 | `BE-PURE-005`      | BadRequestError properties.              |
 | `BE-PURE-006`      | NoAudioStreamError properties.           |
 | `BE-PURE-007`      | UpstreamError properties.                |
-| `BE-PURE-008`      | Waveform fallback generation.            |
 | `BE-PURE-009`      | Parses LRC lyrics lines and timestamps.  |
 | `BE-PURE-010`      | Strips metadata tags from lyrics.        |
 | `BE-PURE-011`      | Rate limiter hit and window reset.       |
@@ -498,15 +497,6 @@ This document maps all backend test IDs to their specifications, assertions, and
 | `BE-ADMAUTH-001` | Admin JWT token signing and verification. |
 | `BE-ADMAUTH-002` | requireAdmin middleware export check.     |
 
-### Peaks Extraction
-
-| Test ID        | Description                                        |
-| :------------- | :------------------------------------------------- |
-| `BE-PEAKS-001` | Bounded floating point peak levels generation.     |
-| `BE-PEAKS-002` | Deterministic waveform generation.                 |
-| `BE-PEAKS-003` | Synthetic peak fallback.                           |
-| `BE-PEAKS-004` | isPlaceholderPeaks recognises a failed extraction. |
-
 ### YouTube image urls
 
 | Test ID        | Description                                                             |
@@ -567,8 +557,7 @@ with the first problem as the message, and nothing is written.
 | `BE-META-016` | `catalogMeta.parseTrackMeta`               | Accepts optional `album`, `albumId`, `thumbnail`; drops invalid thumbnails without rejecting parent.               |
 | `BE-META-017` | `catalogMeta.parseAlbumMeta`               | Validates required fields; accepts optional `year`, `trackCount`, `thumbnail`.                                     |
 | `BE-META-018` | `catalogMeta.parseArtistMeta`              | Validates required `name`; accepts optional `thumbnail`, `monthlyListeners`.                                       |
-| `BE-META-019` | `catalogMeta.rememberCatalogItem`          | Stores metadata under raw YouTube ID; also indexed by `yt:` prefixed ID.                                           |
-| `BE-META-020` | `catalogMeta.getCatalogItems`              | Returns Map with both raw and `yt:` prefixed keys for flexible lookup.                                             |
+| `BE-META-019` | `catalogMeta.rememberCatalogItem`          | Stores under the raw YouTube ID; `getCatalogItems` finds it by raw or `yt:` id.                                    |
 | `BE-META-021` | `GET /api/v1/me/recently-played`           | Uses row metadata for hydration; still works with missing Piped.                                                   |
 | `BE-META-022` | `GET /api/v1/me/most-played`               | Falls back to `catalog_items` or Piped when aggregated play data lacks row meta.                                   |
 | `BE-META-023` | `GET /api/v1/me/playlists/:id/tracks`      | Hydrates using row metadata; no Piped call needed if metadata exists.                                              |
@@ -583,6 +572,7 @@ with the first problem as the message, and nothing is written.
 | `BE-META-032` | `Artist ID prefix preservation`            | Empty `artistId` remains empty string without double-prefixing or corruption to `yt:unknown`.                      |
 | `BE-META-033` | `GET /api/v1/tracks/:id/lyrics`            | Client metadata cache isolation: wrong client title does not pollute plain request cache.                          |
 | `BE-META-034` | `GET /api/v1/tracks/:id/lyrics`            | Server catalog precedence: server-known track metadata in `catalog_items` overrides client query params.           |
+| `BE-META-035` | `POST /api/v1/me/sync` plays with `meta`   | Synced plays keep the app's metadata; recently- and most-played (newest snapshot) hydrate from it without Piped.   |
 | `BE-PEAK-001` | `placeholderPeaks` pinned literal          | Matches pinned literal array for yt:NJAv_7lHUIU with 8 bars.                                                       |
 | `BE-PEAK-002` | `placeholderPeaks` deterministic bounds    | Generates bounded values in [0.3, 1] deterministically across multiple calls.                                      |
 | `BE-PEAK-003` | `resamplePeaks` downsample max-pooling     | Max-pooling over window when shrinking peaks array.                                                                |

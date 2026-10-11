@@ -97,6 +97,8 @@ const syncSchema = z.object({
         trackRef,
         at: z.number().positive(),
         ms: z.number().min(0).transform(Math.round).optional(),
+        // What the app knew about the song (it may have found it in-app, unknown to the backend).
+        meta: metaParam,
       }),
     )
     .max(1000)
@@ -536,6 +538,8 @@ meRouter.get('/most-played', async (req, res) => {
       trackRefKind: playHistory.trackRefKind,
       trackRefId: playHistory.trackRefId,
       count: sql<number>`count(*)::int`,
+      // The newest snapshot an app sent with a play, if any.
+      meta: sql<unknown>`(array_agg(${playHistory.meta} order by ${playHistory.playedAt} desc) filter (where ${playHistory.meta} is not null))[1]`,
     })
     .from(playHistory)
     .where(and(eq(playHistory.userId, req.user!.id), gte(playHistory.playedAt, since)))
@@ -549,7 +553,7 @@ meRouter.get('/most-played', async (req, res) => {
       trackRefKind: p.trackRefKind,
       trackRefId: p.trackRefId,
       playCount: p.count,
-      rowMeta: undefined, // No row meta for aggregated plays; falls through to catalog_items -> Piped
+      rowMeta: p.meta,
     })),
     { failIfPipedDown: true },
   );
@@ -869,6 +873,7 @@ meRouter.post('/sync', async (req, res) => {
           trackRefId,
           playedAt,
           msPlayed: p.ms || 0,
+          meta: parseTrackMeta(p.meta),
         });
       }
     });

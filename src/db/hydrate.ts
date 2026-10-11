@@ -43,19 +43,16 @@ export const hydrateTracks = async (
   const catalogMap =
     serverIds.length > 0 ? await getCatalogItems<TrackMeta>('track', serverIds) : new Map<string, TrackMeta>();
 
-  // Resolve row-level metadata: row.meta -> catalog_items -> null
+  // Resolve metadata per track: row.meta -> catalog_items -> null. A track can have several
+  // rows (history); callers list them newest first, so its newest snapshot wins, and a row
+  // without one never hides another row's.
   const rowMetaMap = new Map<string, TrackMeta | null>();
   for (const input of serverInputs) {
-    if (input.rowMeta) {
-      const parsed = parseTrackMeta(input.rowMeta);
-      if (parsed) {
-        rowMetaMap.set(input.trackRefId, parsed);
-        continue;
-      }
-    }
-    // Fall back to catalog_items
-    const catalogMeta = catalogMap.get(input.trackRefId);
-    rowMetaMap.set(input.trackRefId, catalogMeta ?? null);
+    const parsed = input.rowMeta ? parseTrackMeta(input.rowMeta) : null;
+    if (parsed && !rowMetaMap.has(input.trackRefId)) rowMetaMap.set(input.trackRefId, parsed);
+  }
+  for (const input of serverInputs) {
+    if (!rowMetaMap.has(input.trackRefId)) rowMetaMap.set(input.trackRefId, catalogMap.get(input.trackRefId) ?? null);
   }
 
   const allIds = inputs.map((i) =>
