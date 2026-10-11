@@ -10,6 +10,7 @@ import { catalogRouter } from './routes/catalog.routes.js';
 import { mediaRouter } from './routes/media.routes.js';
 import { lyricsRouter } from './routes/lyrics.routes.js';
 import { releasesRouter } from './routes/releases.routes.js';
+import { appConfigRouter } from './routes/appConfig.routes.js';
 import { requestLogger } from './services/telemetry.js';
 import { optionalAuth } from './middleware/auth.js';
 import { errorHandler } from './middleware/errorHandler.js';
@@ -75,6 +76,7 @@ export const createApp = () => {
   v1.use(mediaRouter);
   v1.use(lyricsRouter);
   v1.use(releasesRouter);
+  v1.use(appConfigRouter);
 
   app.use('/api/v1', v1);
 

@@ -13,7 +13,19 @@ import { config } from '../config.js';
 import { createRateLimiter } from '../middleware/rateLimit.js';
 import { Piped } from '../upstream/piped.js';
 import { parseBody, parseQuery } from '../validation.js';
-import { pipedApiUrl, setPipedApiUrl, getSavedPipedApiUrl } from '../services/settings.js';
+import {
+  pipedApiUrl,
+  setPipedApiUrl,
+  getSavedPipedApiUrl,
+  youtubeClients,
+  setYoutubeClients,
+  getSavedYoutubeClients,
+  inAppYoutube,
+  setInAppYoutube,
+  getSavedInAppYoutube,
+  ALLOWED_YOUTUBE_CLIENTS,
+  DEFAULT_YOUTUBE_CLIENTS,
+} from '../services/settings.js';
 import {
   PLATFORMS,
   UploadTooLargeError,
@@ -103,34 +115,94 @@ const httpUrlSchema = z
   }, 'Must be a valid http or https URL')
   .transform((v) => v.replace(/\/+$/, ''));
 
-const putSettingsSchema = z.object({
-  pipedApiUrl: z.preprocess((v) => (typeof v === 'string' && v.trim() === '' ? null : v), httpUrlSchema.nullable()),
-});
+const youtubeClientsSchema = z
+  .array(z.string({ invalid_type_error: 'Client names must be strings' }))
+  .nullable()
+  .superRefine((val, ctx) => {
+    if (val === null) return;
+    if (val.length < 1 || val.length > 5) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Must provide between 1 and 5 YouTube clients',
+      });
+      return;
+    }
+    const seen = new Set<string>();
+    for (const raw of val) {
+      const item = raw.trim().toUpperCase();
+      if (!ALLOWED_YOUTUBE_CLIENTS.includes(item as (typeof ALLOWED_YOUTUBE_CLIENTS)[number])) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `Unknown YouTube client: "${raw}"`,
+        });
+        return;
+      }
+      if (seen.has(item)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `Duplicate YouTube client: "${item}"`,
+        });
+        return;
+      }
+      seen.add(item);
+    }
+  })
+  .transform((val) => {
+    if (val === null) return null;
+    return val.map((item) => item.trim().toUpperCase());
+  });
+
+const putSettingsSchema = z
+  .object({
+    pipedApiUrl: z
+      .preprocess((v) => (typeof v === 'string' && v.trim() === '' ? null : v), httpUrlSchema.nullable())
+      .optional(),
+    youtubeClients: youtubeClientsSchema.optional(),
+    inAppYoutube: z.boolean({ invalid_type_error: 'inAppYoutube must be a boolean' }).nullable().optional(),
+  })
+  .refine(
+    (data) => data.pipedApiUrl !== undefined || data.youtubeClients !== undefined || data.inAppYoutube !== undefined,
+    { message: 'Nothing to update' },
+  );
 
 const pipedTestSchema = z.object({
   url: httpUrlSchema,
 });
 
+const adminSettingsResponse = () => ({
+  pipedApiUrl: {
+    saved: getSavedPipedApiUrl(),
+    effective: pipedApiUrl(),
+    envDefault: config.PIPED_API_URL,
+  },
+  youtubeClients: {
+    saved: getSavedYoutubeClients(),
+    effective: youtubeClients(),
+    default: [...DEFAULT_YOUTUBE_CLIENTS],
+    allowed: [...ALLOWED_YOUTUBE_CLIENTS],
+  },
+  inAppYoutube: {
+    saved: getSavedInAppYoutube(),
+    effective: inAppYoutube(),
+  },
+});
+
 adminRouter.get('/settings', async (_req, res) => {
-  res.json({
-    pipedApiUrl: {
-      saved: getSavedPipedApiUrl(),
-      effective: pipedApiUrl(),
-      envDefault: config.PIPED_API_URL,
-    },
-  });
+  res.json(adminSettingsResponse());
 });
 
 adminRouter.put('/settings', async (req, res) => {
   const body = parseBody(putSettingsSchema, req);
-  await setPipedApiUrl(body.pipedApiUrl);
-  res.json({
-    pipedApiUrl: {
-      saved: getSavedPipedApiUrl(),
-      effective: pipedApiUrl(),
-      envDefault: config.PIPED_API_URL,
-    },
-  });
+  if (body.pipedApiUrl !== undefined) {
+    await setPipedApiUrl(body.pipedApiUrl);
+  }
+  if (body.youtubeClients !== undefined) {
+    await setYoutubeClients(body.youtubeClients);
+  }
+  if (body.inAppYoutube !== undefined) {
+    await setInAppYoutube(body.inAppYoutube);
+  }
+  res.json(adminSettingsResponse());
 });
 
 adminRouter.post('/settings/piped-test', async (req, res) => {

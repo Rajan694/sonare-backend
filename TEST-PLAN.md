@@ -256,6 +256,17 @@ This document maps all backend test IDs to their specifications, assertions, and
 | `BE-ADM-SET-011` | `PUT /api/v1/admin/settings`             | Trims URL and strips trailing slashes on save.                              |
 | `BE-ADM-SET-012` | `PUT /api/v1/admin/settings`             | Rejects URL exceeding 2048 characters with 400 BAD_REQUEST.                 |
 | `BE-ADM-SET-013` | `POST /api/v1/admin/settings/piped-test` | Handles testing URL with trailing slash properly.                           |
+| `BE-ADM-SET-014` | `GET /api/v1/admin/settings`             | Returns defaults for youtubeClients and inAppYoutube.                       |
+| `BE-ADM-SET-015` | `PUT /api/v1/admin/settings`             | Saves youtubeClients order and GET reflects it.                             |
+| `BE-ADM-SET-016` | `PUT /api/v1/admin/settings`             | Resetting with null restores youtubeClients and inAppYoutube to defaults.   |
+| `BE-ADM-SET-017` | `PUT /api/v1/admin/settings`             | Rejects unknown YouTube client name with 400 naming the name.               |
+| `BE-ADM-SET-018` | `PUT /api/v1/admin/settings`             | Rejects duplicate YouTube clients with 400 BAD_REQUEST.                     |
+| `BE-ADM-SET-019` | `PUT /api/v1/admin/settings`             | Rejects more than 5 YouTube clients with 400 BAD_REQUEST.                   |
+| `BE-ADM-SET-020` | `PUT /api/v1/admin/settings`             | Partial update leaves untouched keys unmodified.                            |
+| `BE-ADM-SET-021` | `PUT /api/v1/admin/settings`             | Empty body {} is rejected with 400 "Nothing to update".                     |
+| `BE-ADM-SET-022` | `PUT /api/v1/admin/settings`             | Setting clients does not modify or overwrite pipedApiUrl.                   |
+| `BE-ADM-SET-023` | `PUT /api/v1/admin/settings`             | Saves inAppYoutube boolean and GET reflects it.                             |
+| `BE-ADM-SET-024` | `PUT /api/v1/admin/settings`             | Trims and uppercases YouTube client names on save.                          |
 
 ### App releases
 
@@ -291,6 +302,10 @@ This document maps all backend test IDs to their specifications, assertions, and
 | `BE-APP-011`    | `GET /api/v1/stream/:token`               | Handles 416 range past end with proper total size header.                                  |
 | `BE-APP-012`    | `GET /api/v1/lyrics/search`               | 502 LYRICS_UNAVAILABLE when LRCLIB is down.                                                |
 | `BE-APP-013`    | `GET /api/v1/image/:token`                | Fetches a Piped-proxied image straight from the CDN.                                       |
+| `BE-CFG-001`    | `GET /api/v1/app-config`                  | Requires no auth and returns HTTP 200.                                                     |
+| `BE-CFG-002`    | `GET /api/v1/app-config`                  | Returns default configuration values and updatedAt=0 when no settings row exists.          |
+| `BE-CFG-003`    | `GET /api/v1/app-config`                  | Reflects admin changes to inAppYoutube and youtubeClients, with accurate updatedAt.        |
+| `BE-CFG-004`    | `GET /api/v1/app-config`                  | Sets Cache-Control: public, max-age=60 header.                                             |
 | `BE-ERR-001`    | `POST /api/v1/client-errors`              | Accepts crash report from web client.                                                      |
 | `BE-ERR-002`    | `POST /api/v1/client-errors`              | Accepts warning report from linux client.                                                  |
 | `BE-ERR-003`    | `POST /api/v1/client-errors`              | Rejects invalid source name with 400 BAD_REQUEST.                                          |

@@ -5,7 +5,14 @@ import { createAdminUser } from '../factories.js';
 import { db } from '../../src/db/index.js';
 import { appSettings } from '../../src/db/schema.js';
 import { config } from '../../src/config.js';
-import { pipedApiUrl, setPipedApiUrl } from '../../src/services/settings.js';
+import {
+  pipedApiUrl,
+  setPipedApiUrl,
+  ALLOWED_YOUTUBE_CLIENTS,
+  DEFAULT_YOUTUBE_CLIENTS,
+  youtubeClients,
+  inAppYoutube,
+} from '../../src/services/settings.js';
 
 describe('Admin: settings', () => {
   const app = createApp();
@@ -243,5 +250,208 @@ describe('Admin: settings - invalid URL variants', () => {
     } finally {
       server.close();
     }
+  });
+});
+
+describe('Admin: YouTube clients & in-app toggle', () => {
+  const app = createApp();
+
+  beforeAll(async () => {
+    await db.delete(appSettings);
+  });
+
+  afterAll(async () => {
+    await db.delete(appSettings);
+  });
+
+  it('BE-ADM-SET-014: GET /admin/settings returns defaults for youtubeClients and inAppYoutube', async () => {
+    const { token } = await createAdminUser();
+    const res = await request(app).get('/api/v1/admin/settings').set('Authorization', `Bearer ${token}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.youtubeClients).toEqual({
+      saved: null,
+      effective: DEFAULT_YOUTUBE_CLIENTS,
+      default: DEFAULT_YOUTUBE_CLIENTS,
+      allowed: ALLOWED_YOUTUBE_CLIENTS,
+    });
+    expect(res.body.inAppYoutube).toEqual({
+      saved: null,
+      effective: true,
+    });
+  });
+
+  it('BE-ADM-SET-015: PUT /admin/settings saves youtubeClients order and GET reflects it', async () => {
+    const { token } = await createAdminUser();
+    const clients = ['ANDROID_VR', 'VISIONOS', 'WEB'];
+
+    const putRes = await request(app)
+      .put('/api/v1/admin/settings')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ youtubeClients: clients });
+
+    expect(putRes.status).toBe(200);
+    expect(putRes.body.youtubeClients.saved).toEqual(clients);
+    expect(putRes.body.youtubeClients.effective).toEqual(clients);
+    expect(youtubeClients()).toEqual(clients);
+
+    const getRes = await request(app).get('/api/v1/admin/settings').set('Authorization', `Bearer ${token}`);
+    expect(getRes.status).toBe(200);
+    expect(getRes.body.youtubeClients.saved).toEqual(clients);
+    expect(getRes.body.youtubeClients.effective).toEqual(clients);
+  });
+
+  it('BE-ADM-SET-016: PUT /admin/settings with null resets youtubeClients and inAppYoutube', async () => {
+    const { token } = await createAdminUser();
+
+    // First save custom values
+    await request(app)
+      .put('/api/v1/admin/settings')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ youtubeClients: ['TV'], inAppYoutube: false });
+
+    expect(inAppYoutube()).toBe(false);
+    expect(youtubeClients()).toEqual(['TV']);
+
+    // Now reset both to null
+    const res = await request(app)
+      .put('/api/v1/admin/settings')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ youtubeClients: null, inAppYoutube: null });
+
+    expect(res.status).toBe(200);
+    expect(res.body.youtubeClients.saved).toBeNull();
+    expect(res.body.youtubeClients.effective).toEqual(DEFAULT_YOUTUBE_CLIENTS);
+    expect(res.body.inAppYoutube.saved).toBeNull();
+    expect(res.body.inAppYoutube.effective).toBe(true);
+    expect(inAppYoutube()).toBe(true);
+    expect(youtubeClients()).toEqual(DEFAULT_YOUTUBE_CLIENTS);
+  });
+
+  it('BE-ADM-SET-017: PUT /admin/settings rejects unknown client name with 400 naming it', async () => {
+    const { token } = await createAdminUser();
+
+    const res = await request(app)
+      .put('/api/v1/admin/settings')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ youtubeClients: ['VISIONOS', 'NON_EXISTENT_CLIENT'] });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe('BAD_REQUEST');
+    expect(res.body.error.message).toContain('NON_EXISTENT_CLIENT');
+  });
+
+  it('BE-ADM-SET-018: PUT /admin/settings rejects duplicate youtube clients with 400', async () => {
+    const { token } = await createAdminUser();
+
+    const res = await request(app)
+      .put('/api/v1/admin/settings')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ youtubeClients: ['VISIONOS', 'VISIONOS'] });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe('BAD_REQUEST');
+    expect(res.body.error.message).toContain('Duplicate');
+  });
+
+  it('BE-ADM-SET-019: PUT /admin/settings rejects >5 clients with 400', async () => {
+    const { token } = await createAdminUser();
+    const sixClients = ['VISIONOS', 'IOS', 'WEB', 'ANDROID', 'TV', 'MWEB'];
+
+    const res = await request(app)
+      .put('/api/v1/admin/settings')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ youtubeClients: sixClients });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe('BAD_REQUEST');
+  });
+
+  it('BE-ADM-SET-020: PUT /admin/settings partial update leaves other keys untouched', async () => {
+    const { token } = await createAdminUser();
+
+    // Set pipedApiUrl and youtubeClients
+    await request(app)
+      .put('/api/v1/admin/settings')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        pipedApiUrl: 'https://partial-test.example.com',
+        youtubeClients: ['IOS', 'WEB'],
+        inAppYoutube: true,
+      });
+
+    // Update only inAppYoutube
+    const res = await request(app)
+      .put('/api/v1/admin/settings')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ inAppYoutube: false });
+
+    expect(res.status).toBe(200);
+    expect(res.body.inAppYoutube.saved).toBe(false);
+    expect(res.body.inAppYoutube.effective).toBe(false);
+    // pipedApiUrl and youtubeClients remain intact
+    expect(res.body.pipedApiUrl.saved).toBe('https://partial-test.example.com');
+    expect(res.body.youtubeClients.saved).toEqual(['IOS', 'WEB']);
+  });
+
+  it('BE-ADM-SET-021: PUT /admin/settings rejects empty body {} with 400 Nothing to update', async () => {
+    const { token } = await createAdminUser();
+
+    const res = await request(app).put('/api/v1/admin/settings').set('Authorization', `Bearer ${token}`).send({});
+
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe('BAD_REQUEST');
+    expect(res.body.error.message).toBe('Nothing to update');
+  });
+
+  it('BE-ADM-SET-022: PUT /admin/settings setting clients does not touch pipedApiUrl', async () => {
+    const { token } = await createAdminUser();
+
+    await request(app)
+      .put('/api/v1/admin/settings')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ pipedApiUrl: 'https://untouched-piped.example.com' });
+
+    const res = await request(app)
+      .put('/api/v1/admin/settings')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ youtubeClients: ['TV_SIMPLY'] });
+
+    expect(res.status).toBe(200);
+    expect(res.body.youtubeClients.saved).toEqual(['TV_SIMPLY']);
+    expect(res.body.pipedApiUrl.saved).toBe('https://untouched-piped.example.com');
+    expect(pipedApiUrl()).toBe('https://untouched-piped.example.com');
+  });
+
+  it('BE-ADM-SET-023: PUT /admin/settings saves inAppYoutube boolean and GET reflects it', async () => {
+    const { token } = await createAdminUser();
+
+    const putRes = await request(app)
+      .put('/api/v1/admin/settings')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ inAppYoutube: false });
+
+    expect(putRes.status).toBe(200);
+    expect(putRes.body.inAppYoutube.saved).toBe(false);
+    expect(putRes.body.inAppYoutube.effective).toBe(false);
+    expect(inAppYoutube()).toBe(false);
+
+    const getRes = await request(app).get('/api/v1/admin/settings').set('Authorization', `Bearer ${token}`);
+    expect(getRes.status).toBe(200);
+    expect(getRes.body.inAppYoutube.saved).toBe(false);
+    expect(getRes.body.inAppYoutube.effective).toBe(false);
+  });
+
+  it('BE-ADM-SET-024: PUT /admin/settings trims and uppercases client names', async () => {
+    const { token } = await createAdminUser();
+
+    const res = await request(app)
+      .put('/api/v1/admin/settings')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ youtubeClients: ['  visionos  ', 'ios  '] });
+
+    expect(res.status).toBe(200);
+    expect(res.body.youtubeClients.saved).toEqual(['VISIONOS', 'IOS']);
+    expect(res.body.youtubeClients.effective).toEqual(['VISIONOS', 'IOS']);
   });
 });
