@@ -86,7 +86,7 @@ Development values are in `.env.example`, production ones in `.env.production.ex
 | `SMTP_SECURE`       | `false`                        | yes                    | `true` for Resend                                                   |
 | `SMTP_USER`         | unset                          | yes                    | `resend`                                                            |
 | `SMTP_PASS`         | unset                          | yes                    | Resend API key                                                      |
-| `MAIL_FROM`         | `Sonare <no-reply@sonare.dev>` | yes                    | Sender of account emails                                            |
+| `MAIL_FROM`         | `Sonare <no-reply@sonare.vip>` | yes                    | Sender of account emails                                            |
 | `APP_URL`           | `http://localhost:5183`        | yes (https)            | Base of the links in verification and reset emails                  |
 | `RELEASES_DIR`      | `data/releases`                | no                     | Where app builds uploaded on the admin page are stored              |
 | `RELEASE_MAX_MB`    | `500`                          | no                     | Largest build the admin page may upload                             |
@@ -137,7 +137,7 @@ curl http://127.0.0.1:3010/api/v1/healthz
 ```
 
 - The backend is published on `127.0.0.1:3010` only: put Caddy or nginx in front for
-  HTTPS (`api.sonare.dev`) and keep `TRUST_PROXY=1`.
+  HTTPS (`api.sonare.vip`) and keep `TRUST_PROXY=1`.
 - Postgres and Redis publish no ports; their data lives in the `postgres-data` and
   `redis-data` volumes.
 - Piped runs from its own compose file. Its ports are bound to the host's 127.0.0.1,
