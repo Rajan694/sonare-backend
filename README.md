@@ -68,30 +68,31 @@ A pre-commit hook (husky + lint-staged) runs Prettier and ESLint on staged files
 
 Development values are in `.env.example`, production ones in `.env.production.example`.
 
-| Name                | Default                        | Required in production | What it does                                                                                            |
-| ------------------- | ------------------------------ | ---------------------- | ------------------------------------------------------------------------------------------------------- |
-| `NODE_ENV`          | `development`                  | yes (`production`)     | `development`, `production` or `test`                                                                   |
-| `PORT`              | `3010`                         | no                     | Listen port                                                                                             |
-| `DATABASE_URL`      | —                              | yes                    | Postgres connection URL                                                                                 |
-| `REDIS_URL`         | `redis://127.0.0.1:6379/1`     | no                     | Redis for the cache and rate limits                                                                     |
-| `PIPED_API_URL`     | `http://localhost:8090`        | yes                    | Piped API the catalog and streams come from                                                             |
-| `PIPED_KEY`         | unset                          | with a Funnel Piped    | Sent as `X-Sonare-Key` to the Piped host only; its gate checks it (`../sonare-piped-backend/funnel.sh`) |
-| `JWT_SECRET`        | dev placeholder                | yes (≥ 32 chars)       | Signs access tokens; the server refuses the default in production                                       |
-| `CORS_ORIGINS`      | empty                          | yes                    | Comma-separated allowed origins (localhost is allowed outside prod)                                     |
-| `TRUST_PROXY`       | unset                          | behind a proxy         | Express `trust proxy` (hop count, `true`, `loopback`…)                                                  |
-| `LOG_LEVEL`         | `info`                         | no                     | pino level; logs are pretty in development, JSON otherwise                                              |
-| `LRCLIB_BASE`       | `https://lrclib.net`           | no                     | LRCLIB API                                                                                              |
-| `LRCLIB_USER_AGENT` | `Sonare/1.0`                   | no                     | User-Agent sent to LRCLIB                                                                               |
-| `RESEND_API_KEY`    | unset                          | yes                    | Mail goes out through Resend's HTTP API (Render's free plan blocks SMTP ports)                          |
-| `SMTP_HOST`         | `127.0.0.1`                    | no                     | Used when `RESEND_API_KEY` is unset: Mailpit in development (inbox http://localhost:8025)               |
-| `SMTP_PORT`         | `1025`                         | no                     | Mailpit's SMTP port                                                                                     |
-| `SMTP_SECURE`       | `false`                        | no                     | TLS for the SMTP fallback                                                                               |
-| `SMTP_USER`         | unset                          | no                     | SMTP fallback login                                                                                     |
-| `SMTP_PASS`         | unset                          | no                     | SMTP fallback password                                                                                  |
-| `MAIL_FROM`         | `Sonare <no-reply@sonare.vip>` | yes                    | Sender of account emails                                                                                |
-| `APP_URL`           | `http://localhost:5183`        | yes (https)            | Base of the links in verification and reset emails                                                      |
-| `RELEASES_REPO`     | `Rajan694/sonare`              | no                     | GitHub repo whose latest release holds the app builds                                                   |
-| `GITHUB_TOKEN`      | unset                          | no                     | Lifts GitHub's 60 API calls an hour per IP (no scopes needed)                                           |
+| Name                    | Default                        | Required in production | What it does                                                                                              |
+| ----------------------- | ------------------------------ | ---------------------- | --------------------------------------------------------------------------------------------------------- |
+| `NODE_ENV`              | `development`                  | yes (`production`)     | `development`, `production` or `test`                                                                     |
+| `PORT`                  | `3010`                         | no                     | Listen port                                                                                               |
+| `DATABASE_URL`          | —                              | yes                    | Postgres connection URL                                                                                   |
+| `REDIS_URL`             | `redis://127.0.0.1:6379/1`     | no                     | Redis for the cache and rate limits                                                                       |
+| `PIPED_API_URL`         | `http://localhost:8090`        | yes                    | Piped API the catalog and streams come from                                                               |
+| `PIPED_KEY`             | unset                          | with a Funnel Piped    | Sent as `X-Sonare-Key` to the Piped host only; its gate checks it (`../sonare-piped-backend/funnel.sh`)   |
+| `PIPED_LOCAL_PROXY_URL` | unset                          | no                     | Development with Funnel on: the relay fetches Piped's proxy urls from here (e.g. `http://localhost:8091`) |
+| `JWT_SECRET`            | dev placeholder                | yes (≥ 32 chars)       | Signs access tokens; the server refuses the default in production                                         |
+| `CORS_ORIGINS`          | empty                          | yes                    | Comma-separated allowed origins (localhost is allowed outside prod)                                       |
+| `TRUST_PROXY`           | unset                          | behind a proxy         | Express `trust proxy` (hop count, `true`, `loopback`…)                                                    |
+| `LOG_LEVEL`             | `info`                         | no                     | pino level; logs are pretty in development, JSON otherwise                                                |
+| `LRCLIB_BASE`           | `https://lrclib.net`           | no                     | LRCLIB API                                                                                                |
+| `LRCLIB_USER_AGENT`     | `Sonare/1.0`                   | no                     | User-Agent sent to LRCLIB                                                                                 |
+| `RESEND_API_KEY`        | unset                          | yes                    | Mail goes out through Resend's HTTP API (Render's free plan blocks SMTP ports)                            |
+| `SMTP_HOST`             | `127.0.0.1`                    | no                     | Used when `RESEND_API_KEY` is unset: Mailpit in development (inbox http://localhost:8025)                 |
+| `SMTP_PORT`             | `1025`                         | no                     | Mailpit's SMTP port                                                                                       |
+| `SMTP_SECURE`           | `false`                        | no                     | TLS for the SMTP fallback                                                                                 |
+| `SMTP_USER`             | unset                          | no                     | SMTP fallback login                                                                                       |
+| `SMTP_PASS`             | unset                          | no                     | SMTP fallback password                                                                                    |
+| `MAIL_FROM`             | `Sonare <no-reply@sonare.vip>` | yes                    | Sender of account emails                                                                                  |
+| `APP_URL`               | `http://localhost:5183`        | yes (https)            | Base of the links in verification and reset emails                                                        |
+| `RELEASES_REPO`         | `Rajan694/sonare`              | no                     | GitHub repo whose latest release holds the app builds                                                     |
+| `GITHUB_TOKEN`          | unset                          | no                     | Lifts GitHub's 60 API calls an hour per IP (no scopes needed)                                             |
 
 ## Folder layout
 

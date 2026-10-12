@@ -11,6 +11,9 @@ const envSchema = z.object({
   // Shared secret for a Piped reached over the internet (Tailscale Funnel): sent as
   // X-Sonare-Key to the Piped host, whose gate in sonare-piped-backend rejects requests without it.
   PIPED_KEY: z.string().optional(),
+  // Piped on this machine, published through Funnel: its stream urls name the public proxy
+  // (PROXY_PART), which this machine may not resolve. The relay fetches them here instead.
+  PIPED_LOCAL_PROXY_URL: z.string().url().optional(),
   LRCLIB_BASE: z.string().url().default('https://lrclib.net'),
   LRCLIB_USER_AGENT: z.string().default('Sonare/1.0'),
   JWT_SECRET: z.string().default(DEV_JWT_SECRET),

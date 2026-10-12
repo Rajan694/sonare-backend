@@ -18,6 +18,27 @@ export const pipedAuthHeaders = (url: string | URL, base: string = pipedApiUrl()
   }
 };
 
+/**
+ * Where the stream relay fetches a media url. With PIPED_LOCAL_PROXY_URL set (Piped runs on
+ * this machine but publishes its proxy through Funnel), Piped's proxy urls - recognisable by
+ * the `host` parameter naming the googlevideo server - go to the local proxy instead, same path
+ * and query. Anything else, googlevideo's own urls included, is fetched as given.
+ */
+export const pipedMediaUrl = (url: string): string => {
+  const local = config.PIPED_LOCAL_PROXY_URL;
+  if (!local) return url;
+  try {
+    const media = new URL(url);
+    if (!media.searchParams.has('host')) return url;
+    const base = new URL(local);
+    media.protocol = base.protocol;
+    media.host = base.host;
+    return media.toString();
+  } catch {
+    return url;
+  }
+};
+
 export class UpstreamError extends Error {
   public status: number;
   /** Piped itself could not be reached, as opposed to answering this one request with an error. */

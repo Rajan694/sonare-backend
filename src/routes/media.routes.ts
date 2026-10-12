@@ -5,7 +5,7 @@ import { LRUCache } from 'lru-cache';
 import { CachedPiped, PermanentCache } from '../services/cache.js';
 import { normalizeStreamToTrack, albumThumbFor, proxyImageUrl } from '../normalize/index.js';
 import { directImageUrl, ytThumbUrl, type YtThumbName } from '../upstream/ytImages.js';
-import { pipedAuthHeaders } from '../upstream/piped.js';
+import { pipedAuthHeaders, pipedMediaUrl } from '../upstream/piped.js';
 import { idHelpers } from '../ids.js';
 import { signStreamToken, verifyStreamToken } from '../services/token.js';
 import { placeholderPeaks, resamplePeaks, CANONICAL_BARS } from '../services/peaks.js';
@@ -398,9 +398,12 @@ mediaRouter.get('/stream/:token', async (req, res) => {
     headers['Range'] = req.headers.range;
   }
 
-  // Stream urls point at Piped's proxy, which may sit behind the Funnel gate.
-  const fetchMedia = (target: string, extra: Record<string, string> = {}) =>
-    request(target, { headers: { ...headers, ...extra, ...pipedAuthHeaders(target) } });
+  // Stream urls point at Piped's proxy, which may sit behind the Funnel gate (the key) or be
+  // reachable on this machine under another address (pipedMediaUrl).
+  const fetchMedia = (target: string, extra: Record<string, string> = {}) => {
+    const from = pipedMediaUrl(target);
+    return request(from, { headers: { ...headers, ...extra, ...pipedAuthHeaders(from) } });
+  };
 
   let url = replacedStreamUrls.get(data.url) ?? data.url;
   let upstreamRes = await fetchMedia(url);

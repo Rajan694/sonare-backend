@@ -285,11 +285,13 @@ This document maps all backend test IDs to their specifications, assertions, and
 
 ### Piped key (Tailscale Funnel)
 
-| Test ID       | Method / Scope              | Description & Assertions                                                                               |
-| :------------ | :-------------------------- | :----------------------------------------------------------------------------------------------------- |
-| `BE-PKEY-001` | `pipedAuthHeaders`          | `X-Sonare-Key` only for Piped's host (any port), never googlevideo or ytimg; none without `PIPED_KEY`. |
-| `BE-PKEY-002` | `Piped.*`                   | API calls to Piped carry the key.                                                                      |
-| `BE-PKEY-003` | `GET /api/v1/stream/:token` | The relay sends the key to the Piped proxy, not to googlevideo.                                        |
+| Test ID       | Method / Scope              | Description & Assertions                                                                                       |
+| :------------ | :-------------------------- | :------------------------------------------------------------------------------------------------------------- |
+| `BE-PKEY-001` | `pipedAuthHeaders`          | `X-Sonare-Key` only for Piped's host (any port), never googlevideo or ytimg; none without `PIPED_KEY`.         |
+| `BE-PKEY-002` | `Piped.*`                   | API calls to Piped carry the key.                                                                              |
+| `BE-PKEY-003` | `GET /api/v1/stream/:token` | The relay sends the key to the Piped proxy, not to googlevideo.                                                |
+| `BE-PKEY-004` | `pipedMediaUrl`             | With `PIPED_LOCAL_PROXY_URL`, Piped's proxy urls (with `host=`) go to the local proxy; googlevideo urls don't. |
+| `BE-PKEY-005` | `GET /api/v1/stream/:token` | With Funnel on, a local relay plays from the local proxy.                                                      |
 
 ---
 

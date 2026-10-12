@@ -3,7 +3,7 @@ import request from 'supertest';
 import { MockAgent, getGlobalDispatcher, setGlobalDispatcher, type Dispatcher } from 'undici';
 import { createApp } from '../../src/app.js';
 import { config } from '../../src/config.js';
-import { Piped, pipedAuthHeaders } from '../../src/upstream/piped.js';
+import { Piped, pipedAuthHeaders, pipedMediaUrl } from '../../src/upstream/piped.js';
 import { signStreamToken } from '../../src/services/token.js';
 
 // A Piped published with Tailscale Funnel sits behind a gate that wants X-Sonare-Key
@@ -14,9 +14,12 @@ describe('PIPED_KEY', () => {
   let agent: MockAgent;
   let original: Dispatcher;
   const saved = config.PIPED_KEY;
+  const savedLocal = config.PIPED_LOCAL_PROXY_URL;
 
   beforeEach(() => {
     config.PIPED_KEY = 'gate-key';
+    // Independent of a developer's .env.
+    config.PIPED_LOCAL_PROXY_URL = undefined;
     original = getGlobalDispatcher();
     agent = new MockAgent();
     agent.disableNetConnect();
@@ -26,6 +29,7 @@ describe('PIPED_KEY', () => {
 
   afterEach(async () => {
     config.PIPED_KEY = saved;
+    config.PIPED_LOCAL_PROXY_URL = savedLocal;
     await agent.close();
     setGlobalDispatcher(original);
   });
@@ -94,5 +98,39 @@ describe('PIPED_KEY', () => {
       .set('Range', 'bytes=0-3');
     expect(direct.status).toBe(206);
     expect(seen.google).toBeUndefined();
+  });
+
+  const funnelUrl = 'https://pc.tail1.ts.net:8443/videoplayback?id=3&host=rr1---sn-abc.googlevideo.com';
+
+  it("BE-PKEY-004: PIPED_LOCAL_PROXY_URL sends Piped's proxy urls to the local proxy, nothing else", () => {
+    expect(pipedMediaUrl(funnelUrl)).toBe(funnelUrl);
+    config.PIPED_LOCAL_PROXY_URL = 'http://localhost:8091';
+    expect(pipedMediaUrl(funnelUrl)).toBe('http://localhost:8091/videoplayback?id=3&host=rr1---sn-abc.googlevideo.com');
+    // googlevideo's own urls have no host parameter.
+    const direct = 'https://rr1---sn-abc.googlevideo.com/videoplayback?id=2';
+    expect(pipedMediaUrl(direct)).toBe(direct);
+    expect(pipedMediaUrl('not a url')).toBe('not a url');
+  });
+
+  it('BE-PKEY-005: with Funnel on, a local relay plays from the local proxy', async () => {
+    config.PIPED_LOCAL_PROXY_URL = 'http://localhost:8091';
+    let reached = false;
+    agent
+      .get('http://localhost:8091')
+      .intercept({ path: '/videoplayback?id=3&host=rr1---sn-abc.googlevideo.com', method: 'GET' })
+      .reply(
+        206,
+        () => {
+          reached = true;
+          return 'abcd';
+        },
+        { headers: { 'content-range': 'bytes 0-3/4', 'content-type': 'audio/webm' } },
+      );
+    // No interceptor for pc.tail1.ts.net: going there would fail the request.
+    const res = await request(app)
+      .get(`/api/v1/stream/${signStreamToken(funnelUrl)}`)
+      .set('Range', 'bytes=0-3');
+    expect(res.status).toBe(206);
+    expect(reached).toBe(true);
   });
 });
