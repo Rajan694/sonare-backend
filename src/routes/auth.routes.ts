@@ -132,7 +132,13 @@ authRouter.post('/login', async (req, res) => {
   }
 
   await loginLimiter.reset(limitKey);
-  res.json(await startSession(user));
+  const session = await startSession(user);
+  // An unverified address gets a fresh link at each sign-in (at most 3 an hour, shared with
+  // "Resend"), in the background: signing in doesn't wait for the mail server.
+  if (!user.emailVerifiedAt && (await resendLimiter.hit(user.id)).allowed) {
+    sendVerifyEmail(req, user).catch((err) => req.log.warn({ err }, 'verification email failed'));
+  }
+  res.json(session);
 });
 
 authRouter.post('/refresh', async (req, res) => {

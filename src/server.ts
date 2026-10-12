@@ -3,6 +3,7 @@ import { config } from './config.js';
 import { verifyDatabase } from './db/index.js';
 import { flushTelemetry, startTelemetry } from './services/telemetry.js';
 import { logger } from './logger.js';
+import { mailTransportName } from './services/mail.js';
 import { loadSettings, pipedApiUrl } from './services/settings.js';
 
 const start = async () => {
@@ -13,6 +14,7 @@ const start = async () => {
   const server = app.listen(config.PORT, () => {
     logger.info(`Sonare backend listening on port ${config.PORT}`);
     logger.info(`Piped upstream mapped to ${pipedApiUrl()}`);
+    logger.info(`Mail goes out through ${mailTransportName()}`);
   });
 
   const shutdown = () => {

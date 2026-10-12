@@ -15,7 +15,7 @@ import { requestLogger } from './services/telemetry.js';
 import { optionalAuth } from './middleware/auth.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import { config, corsOrigins, parseTrustProxy } from './config.js';
-import { logger } from './logger.js';
+import { logger, requestLogLevel } from './logger.js';
 
 const LOCALHOST_ORIGIN_REGEX = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
 
@@ -53,10 +53,13 @@ export const createApp = () => {
     }),
   );
   app.use(requestLogger());
-  // One line per request: method, URL, status and time. Headers stay out of the logs.
+  // One line per failed request (4xx, 5xx): method, URL, status and time. Successful ones
+  // aren't logged; the admin page's request stats (requestLogger above) still count them.
+  // Headers stay out of the logs.
   app.use(
     pinoHttp({
       logger,
+      customLogLevel: requestLogLevel,
       serializers: {
         req: (req: { method: string; url: string }) => ({ method: req.method, url: req.url }),
         res: (res: { statusCode: number }) => ({ statusCode: res.statusCode }),
