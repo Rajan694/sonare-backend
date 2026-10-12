@@ -22,7 +22,7 @@ yarn-error.log*
 # Test output
 coverage/
 
-# App builds uploaded from the admin page (RELEASES_DIR)
+# Local data (app builds the admin page used to keep here)
 data/
 
 # Editors

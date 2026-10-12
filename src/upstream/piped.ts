@@ -1,6 +1,22 @@
 import { request, type Dispatcher } from 'undici';
+import { config } from '../config.js';
 import { pipedApiUrl } from '../services/settings.js';
 import * as T from './piped.types.js';
+
+/**
+ * `X-Sonare-Key` for requests to Piped's host, when PIPED_KEY is set: a Piped published with
+ * Tailscale Funnel sits behind a gate that wants it (../sonare-piped-backend/funnel.sh). Its
+ * proxy is the same host on another port, so stream urls match too. Any other host gets
+ * nothing, so the key never leaves for googlevideo, ytimg or anyone else.
+ */
+export const pipedAuthHeaders = (url: string | URL, base: string = pipedApiUrl()): Record<string, string> => {
+  if (!config.PIPED_KEY) return {};
+  try {
+    return new URL(url).hostname === new URL(base).hostname ? { 'X-Sonare-Key': config.PIPED_KEY } : {};
+  } catch {
+    return {};
+  }
+};
 
 export class UpstreamError extends Error {
   public status: number;
@@ -65,6 +81,7 @@ const fetchPiped = async <TRes>(
         headers: {
           Accept: 'application/json',
           'User-Agent': 'Sonare/1.0',
+          ...pipedAuthHeaders(url),
         },
         bodyTimeout: 5000,
         headersTimeout: 5000,
@@ -152,7 +169,7 @@ export const Piped = {
         const { statusCode, body } = await withTimeout(
           request(url, {
             method: 'GET',
-            headers: { 'User-Agent': 'Sonare/1.0' },
+            headers: { 'User-Agent': 'Sonare/1.0', ...pipedAuthHeaders(url, baseUrl) },
             signal: AbortSignal.timeout(timeoutMs),
           }),
           timeoutMs,

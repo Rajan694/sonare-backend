@@ -1,111 +1,153 @@
-import crypto from 'node:crypto';
-import { createWriteStream } from 'node:fs';
-import fs from 'node:fs/promises';
-import path from 'node:path';
-import { Transform } from 'node:stream';
-import { pipeline } from 'node:stream/promises';
-import type { Request } from 'express';
+import { request } from 'undici';
 import { config } from '../config.js';
-import type { appReleases } from '../db/schema.js';
+import { UpstreamError } from '../upstream/piped.js';
+import { isRedisAvailable, redis } from './cache.js';
 
-// App builds the admin page uploads and Settings → About offers for download. Files sit in
-// RELEASES_DIR under their row id, so nothing a client sends ever becomes part of a path.
+// App builds are the assets of the latest GitHub release of RELEASES_REPO, under fixed names
+// (../sonare-frontend/buildFE.sh `prod all` makes them). The intro page links to them
+// directly; GET /releases describes them for the apps' update check.
 
 export const PLATFORMS = ['android', 'linux', 'windows'] as const;
 export type Platform = (typeof PLATFORMS)[number];
 
-/** Longest extensions first, so `.tar.gz` wins over `.gz`. */
-const FORMATS: { ext: string; format: string; platforms: Platform[] }[] = [
-  { ext: '.tar.gz', format: 'tar.gz', platforms: ['linux'] },
-  { ext: '.appimage', format: 'appimage', platforms: ['linux'] },
-  { ext: '.apk', format: 'apk', platforms: ['android'] },
-  { ext: '.deb', format: 'deb', platforms: ['linux'] },
-  { ext: '.rpm', format: 'rpm', platforms: ['linux'] },
-  { ext: '.exe', format: 'exe', platforms: ['windows'] },
-  { ext: '.msi', format: 'msi', platforms: ['windows'] },
-  { ext: '.zip', format: 'zip', platforms: ['linux', 'windows'] },
-];
-
-/** The file types each platform accepts, for error messages and the admin page. */
-export const acceptedExtensions = (platform: Platform): string[] => {
-  return FORMATS.filter((f) => f.platforms.includes(platform)).map((f) => f.ext);
+/** The files a release carries; other assets (the emulator APK, checksums) are left out. */
+export const RELEASE_ASSETS: Record<string, { platform: Platform; format: string }> = {
+  'sonare-android-arm64.apk': { platform: 'android', format: 'apk' },
+  'sonare-linux-x64.AppImage': { platform: 'linux', format: 'appimage' },
+  'sonare-linux-x64.deb': { platform: 'linux', format: 'deb' },
+  'sonare-linux-x64.tar.gz': { platform: 'linux', format: 'tar.gz' },
+  'sonare-windows-x64.exe': { platform: 'windows', format: 'exe' },
 };
 
-/** The format a file name is for on that platform, or null when the platform doesn't take it. */
-export const formatFor = (platform: Platform, fileName: string): { format: string; ext: string } | null => {
-  const lower = fileName.toLowerCase();
-  const match = FORMATS.find((f) => lower.endsWith(f.ext));
-  return match && match.platforms.includes(platform) ? { format: match.format, ext: match.ext } : null;
-};
-
-/** A download name safe for Content-Disposition: the base name, printable ASCII only. */
-export const cleanFileName = (fileName: string): string => {
-  const base = fileName.split(/[\\/]/).pop() ?? '';
-  return base
-    .replace(/[^\w.+~-]/g, '_')
-    .replace(/^\.+/, '')
-    .slice(0, 200);
-};
-
-export const maxUploadBytes = () => config.RELEASE_MAX_MB * 1024 * 1024;
-
-export const releasesDir = (): string => {
-  return path.resolve(config.RELEASES_DIR);
-};
-
-export const releasePath = (release: Pick<typeof appReleases.$inferSelect, 'id' | 'format'>): string => {
-  const ext = FORMATS.find((f) => f.format === release.format)?.ext ?? '';
-  return path.join(releasesDir(), `${release.id}${ext}`);
-};
-
-export class UploadTooLargeError extends Error {
-  constructor() {
-    super(`The file is larger than ${config.RELEASE_MAX_MB} MB`);
-  }
+/** What the apps see (shared/apiTypes.ts AppRelease). */
+export interface AppRelease {
+  /** The GitHub asset id. */
+  id: string;
+  platform: Platform;
+  format: string;
+  version: string;
+  fileName: string;
+  sizeBytes: number;
+  sha256: string | null;
+  notes: string | null;
+  uploadedAt: string;
+  url: string;
 }
 
-/**
- * Streams the request body into a temporary file in RELEASES_DIR, hashing it on the way.
- * Leaves nothing behind when it fails; the caller renames the file into place.
- */
-export const receiveUpload = async (req: Request): Promise<{ tmpPath: string; size: number; sha256: string }> => {
-  const limit = maxUploadBytes();
-  const declared = Number(req.headers['content-length']);
-  if (Number.isFinite(declared) && declared > limit) throw new UploadTooLargeError();
+interface GitHubAsset {
+  id: number;
+  name: string;
+  size: number;
+  state?: string;
+  browser_download_url: string;
+  updated_at: string;
+  digest?: string | null;
+}
 
-  await fs.mkdir(releasesDir(), { recursive: true });
-  const tmpPath = path.join(releasesDir(), `.upload-${crypto.randomUUID()}`);
-  const hash = crypto.createHash('sha256');
-  let size = 0;
-  const meter = new Transform({
-    transform(chunk: Buffer, _enc, done) {
-      size += chunk.length;
-      if (size > limit) return done(new UploadTooLargeError());
-      hash.update(chunk);
-      done(null, chunk);
-    },
+export interface GitHubRelease {
+  tag_name: string;
+  body: string | null;
+  assets: GitHubAsset[];
+}
+
+export const toAppReleases = (release: GitHubRelease): AppRelease[] => {
+  const version = release.tag_name.replace(/^v/, '');
+  return release.assets.flatMap((asset) => {
+    const kind = RELEASE_ASSETS[asset.name];
+    if (!kind || (asset.state && asset.state !== 'uploaded')) return [];
+    return [
+      {
+        id: String(asset.id),
+        ...kind,
+        version,
+        fileName: asset.name,
+        sizeBytes: asset.size,
+        sha256: asset.digest?.startsWith('sha256:') ? asset.digest.slice('sha256:'.length) : null,
+        notes: release.body?.trim() || null,
+        uploadedAt: asset.updated_at,
+        url: asset.browser_download_url,
+      },
+    ];
   });
-
-  try {
-    await pipeline(req, meter, createWriteStream(tmpPath));
-  } catch (err) {
-    await fs.rm(tmpPath, { force: true });
-    throw err;
-  }
-  return { tmpPath, size, sha256: hash.digest('hex') };
 };
 
-/** The fields the apps and the admin page see. */
-export const releaseView = (r: typeof appReleases.$inferSelect) => {
-  return {
-    id: r.id,
-    platform: r.platform,
-    format: r.format,
-    version: r.version,
-    fileName: r.fileName,
-    sizeBytes: r.sizeBytes,
-    sha256: r.sha256,
-    notes: r.notes,
-    uploadedAt: r.uploadedAt,
-  };
+const fetchLatest = async (): Promise<AppRelease[]> => {
+  const url = `https://api.github.com/repos/${config.RELEASES_REPO}/releases/latest`;
+  let res;
+  try {
+    res = await request(url, {
+      headers: {
+        Accept: 'application/vnd.github+json',
+        'User-Agent': 'Sonare',
+        'X-GitHub-Api-Version': '2022-11-28',
+        ...(config.GITHUB_TOKEN && { Authorization: `Bearer ${config.GITHUB_TOKEN}` }),
+      },
+      headersTimeout: 10_000,
+      bodyTimeout: 10_000,
+    });
+  } catch (err) {
+    throw new UpstreamError(`GitHub is unreachable (${(err as Error).message})`, 502, true);
+  }
+  // No release published yet.
+  if (res.statusCode === 404) {
+    await res.body.dump();
+    return [];
+  }
+  if (res.statusCode !== 200) {
+    await res.body.dump();
+    // 403/429 is GitHub's rate limit (60 an hour per IP without GITHUB_TOKEN).
+    throw new UpstreamError(`GitHub answered ${res.statusCode} for the latest release`, 502, true);
+  }
+  return toAppReleases((await res.body.json()) as GitHubRelease);
+};
+
+// Fresh for 10 minutes; the last good answer is kept a week, for when GitHub fails.
+const FRESH_TTL_S = 10 * 60;
+const LAST_GOOD_TTL_S = 7 * 24 * 60 * 60;
+const FRESH_KEY = 'releases:latest';
+const LAST_GOOD_KEY = 'releases:last-good';
+
+// Redis is shared and survives restarts; this copy covers a Redis outage.
+let memory: { items: AppRelease[]; at: number } | null = null;
+
+const readCache = async (key: string): Promise<AppRelease[] | null> => {
+  if (!isRedisAvailable()) return null;
+  try {
+    const raw = await redis.get(key);
+    return raw ? (JSON.parse(raw) as AppRelease[]) : null;
+  } catch {
+    return null;
+  }
+};
+
+const writeCache = async (items: AppRelease[]): Promise<void> => {
+  memory = { items, at: Date.now() };
+  if (!isRedisAvailable()) return;
+  const raw = JSON.stringify(items);
+  await Promise.all([
+    redis.set(FRESH_KEY, raw, 'EX', FRESH_TTL_S),
+    redis.set(LAST_GOOD_KEY, raw, 'EX', LAST_GOOD_TTL_S),
+  ]).catch(() => {});
+};
+
+/** The latest release's builds, from cache when fresh, else from GitHub, else the last good list. */
+export const latestReleases = async (): Promise<AppRelease[]> => {
+  const fresh =
+    (await readCache(FRESH_KEY)) ?? (memory && Date.now() - memory.at < FRESH_TTL_S * 1000 ? memory.items : null);
+  if (fresh) return fresh;
+  try {
+    const items = await fetchLatest();
+    await writeCache(items);
+    return items;
+  } catch (err) {
+    const lastGood = (await readCache(LAST_GOOD_KEY)) ?? memory?.items;
+    if (lastGood) return lastGood;
+    throw err;
+  }
+};
+
+/** Forget the cached lists (tests). */
+export const clearReleasesCache = async (): Promise<void> => {
+  memory = null;
+  if (isRedisAvailable()) await redis.del(FRESH_KEY, LAST_GOOD_KEY).catch(() => {});
 };

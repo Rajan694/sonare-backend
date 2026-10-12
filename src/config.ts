@@ -41,9 +41,6 @@ const envSchema = z.object({
     .regex(/^[\w.-]+\/[\w.-]+$/)
     .default('Rajan694/sonare'),
   GITHUB_TOKEN: z.string().optional(),
-  // App builds uploaded from the admin page (APK, Linux packages, Windows installers).
-  RELEASES_DIR: z.string().default('data/releases'),
-  RELEASE_MAX_MB: z.coerce.number().int().positive().default(500),
 });
 
 export type Config = z.infer<typeof envSchema>;

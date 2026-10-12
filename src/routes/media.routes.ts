@@ -5,6 +5,7 @@ import { LRUCache } from 'lru-cache';
 import { CachedPiped, PermanentCache } from '../services/cache.js';
 import { normalizeStreamToTrack, albumThumbFor, proxyImageUrl } from '../normalize/index.js';
 import { directImageUrl, ytThumbUrl, type YtThumbName } from '../upstream/ytImages.js';
+import { pipedAuthHeaders } from '../upstream/piped.js';
 import { idHelpers } from '../ids.js';
 import { signStreamToken, verifyStreamToken } from '../services/token.js';
 import { placeholderPeaks, resamplePeaks, CANONICAL_BARS } from '../services/peaks.js';
@@ -397,8 +398,12 @@ mediaRouter.get('/stream/:token', async (req, res) => {
     headers['Range'] = req.headers.range;
   }
 
+  // Stream urls point at Piped's proxy, which may sit behind the Funnel gate.
+  const fetchMedia = (target: string, extra: Record<string, string> = {}) =>
+    request(target, { headers: { ...headers, ...extra, ...pipedAuthHeaders(target) } });
+
   let url = replacedStreamUrls.get(data.url) ?? data.url;
-  let upstreamRes = await request(url, { headers });
+  let upstreamRes = await fetchMedia(url);
 
   // YouTube sometimes hands out URLs that serve only the first ~1MB and 403 the rest.
   // A fresh extraction usually yields a working one, so swap it in once and remember
@@ -410,7 +415,7 @@ mediaRouter.get('/stream/:token', async (req, res) => {
     if (match) {
       replacedStreamUrls.set(data.url, match.url);
       url = match.url;
-      upstreamRes = await request(url, { headers });
+      upstreamRes = await fetchMedia(url);
     }
   }
 
@@ -445,7 +450,7 @@ mediaRouter.get('/stream/:token', async (req, res) => {
     // (Piped's proxy answers `bytes=0-0` with the whole file).
     await upstreamRes.body.dump();
     const start = Number(/bytes=(\d+)-/.exec(req.headers.range)?.[1]);
-    const probe = await request(url, { headers: { ...headers, Range: 'bytes=0-1' } });
+    const probe = await fetchMedia(url, { Range: 'bytes=0-1' });
     await probe.body.dump();
     const total = Number(String(probe.headers['content-range'] ?? '').split('/')[1]);
     if (total > 0 && start >= total) {

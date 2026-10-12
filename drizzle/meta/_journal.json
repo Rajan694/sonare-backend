@@ -78,6 +78,13 @@
       "when": 1791722303919,
       "tag": "0010_catalog_meta",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1791821657127,
+      "tag": "0011_drop_app_releases",
+      "breakpoints": true
     }
   ]
 }

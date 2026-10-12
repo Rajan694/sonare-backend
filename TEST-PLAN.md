@@ -63,6 +63,9 @@ This document maps all backend test IDs to their specifications, assertions, and
 | `BE-EMAIL-010` | register / reset-password               | Passwords under 8 characters give 400.                                                   |
 | `BE-EMAIL-011` | `POST /api/v1/auth/forgot-password`     | 4th request for one email in an hour gives 429.                                          |
 | `BE-EMAIL-012` | `POST /api/v1/auth/login`               | Finds accounts stored with mixed-case emails.                                            |
+| `BE-EMAIL-013` | `POST /api/v1/auth/login`               | Signing in to an unverified account sends a fresh verify link.                           |
+| `BE-EMAIL-014` | `POST /api/v1/auth/login`               | Signing in to a verified account sends nothing.                                          |
+| `BE-EMAIL-015` | `POST /api/v1/auth/login`               | Sign-in links share Resend's 3-an-hour limit; a mail failure never blocks the sign-in.   |
 
 ---
 
@@ -270,61 +273,23 @@ This document maps all backend test IDs to their specifications, assertions, and
 
 ### App releases
 
-| Test ID      | Method / Scope                      | Description & Assertions                                                    |
-| :----------- | :---------------------------------- | :-------------------------------------------------------------------------- |
-| `BE-REL-001` | `POST /api/v1/admin/releases`       | Stores the raw-body upload with its format, size and sha256.                |
-| `BE-REL-002` | `POST /api/v1/admin/releases`       | Rejects a file type the platform does not take (400, lists accepted types). |
-| `BE-REL-003` | `POST /api/v1/admin/releases`       | Rejects a bad version and an empty file with 400.                           |
-| `BE-REL-004` | `POST /api/v1/admin/releases`       | Refuses files over RELEASE_MAX_MB with 413 and leaves no temp file.         |
-| `BE-REL-005` | `POST /api/v1/admin/releases`       | Rejects app (non-admin) tokens with 401.                                    |
-| `BE-REL-006` | `POST /api/v1/admin/releases`       | Same platform, format and version again replaces the file (200, same id).   |
-| `BE-REL-007` | `GET /api/v1/releases`              | Lists the newest build per platform and format, without download counts.    |
-| `BE-REL-008` | `GET /api/v1/releases/:id/download` | Serves the file as an attachment with its type and counts the download.     |
-| `BE-REL-009` | `GET /api/v1/releases/:id/download` | Answers 404 for unknown and malformed ids.                                  |
-| `BE-REL-010` | `DELETE /api/v1/admin/releases/:id` | Removes the row and the file; a second delete is 404.                       |
+| Test ID      | Method / Scope                      | Description & Assertions                                                                                                                    |
+| :----------- | :---------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------ |
+| `BE-REL-001` | `GET /api/v1/releases`              | Lists the latest GitHub release's fixed-name builds only (no emulator APK, no checksum files, no unfinished uploads), with GitHub's digest. |
+| `BE-REL-002` | `GET /api/v1/releases`              | Asks GitHub once per 10 minutes, with `GITHUB_TOKEN` when set.                                                                              |
+| `BE-REL-003` | `GET /api/v1/releases`              | No release yet is an empty list.                                                                                                            |
+| `BE-REL-004` | `GET /api/v1/releases`              | GitHub failing: the last good list, or 502 UPSTREAM_UNAVAILABLE without one.                                                                |
+| `BE-REL-005` | `GET /api/v1/releases/:id/download` | Redirects to the asset on GitHub; unknown, emulator and malformed ids are 404.                                                              |
+| `BE-REL-006` | `/api/v1/admin/releases`            | The admin upload endpoints are gone (404).                                                                                                  |
+| `BE-REL-007` | `toAppReleases`                     | The tag's leading `v` is dropped; an empty body means no notes.                                                                             |
 
----
+### Piped key (Tailscale Funnel)
 
-## 7. App Routes & Image Proxy
-
-| Test ID         | Method / Scope                            | Description & Assertions                                                                   |
-| :-------------- | :---------------------------------------- | :----------------------------------------------------------------------------------------- |
-| `BE-APP-001`    | `GET /api/v1/trending`                    | Returns filtered trending music tracks.                                                    |
-| `BE-APP-002`    | `GET /api/v1/tracks/:id/artwork`          | Redirects to standard track artwork thumbnail.                                             |
-| `BE-APP-003`    | `GET /api/v1/tracks/:id/artwork?size=640` | Redirects to large artwork thumbnail.                                                      |
-| `BE-APP-004`    | `GET /api/v1/albums/:id/artwork`          | Redirects to proxy album cover artwork route.                                              |
-| `BE-APP-005`    | `GET /api/v1/artists/:id/artwork`         | Redirects to artist avatar artwork image route.                                            |
-| `BE-APP-006`    | `GET /api/v1/image/:token`                | Proxies image buffer with headers from upstream.                                           |
-| `BE-APP-007`    | `GET /api/v1/image/:token`                | Returns 502 when image upstream fails.                                                     |
-| `BE-APP-008`    | `GET /api/v1/lyrics/search`               | Queries LRCLIB search endpoint.                                                            |
-| `BE-APP-009`    | `GET /api/v1/lyrics/search`               | Rejects missing track parameter with 400 BAD_REQUEST.                                      |
-| `BE-APP-010`    | Route Not Found                           | Returns 404 NOT_FOUND for unmatched endpoints.                                             |
-| `BE-APP-011`    | `GET /api/v1/stream/:token`               | Handles 416 range past end with proper total size header.                                  |
-| `BE-APP-012`    | `GET /api/v1/lyrics/search`               | 502 LYRICS_UNAVAILABLE when LRCLIB is down.                                                |
-| `BE-APP-013`    | `GET /api/v1/image/:token`                | Fetches a Piped-proxied image straight from the CDN.                                       |
-| `BE-CFG-001`    | `GET /api/v1/app-config`                  | Requires no auth and returns HTTP 200.                                                     |
-| `BE-CFG-002`    | `GET /api/v1/app-config`                  | Returns default configuration values and updatedAt=0 when no settings row exists.          |
-| `BE-CFG-003`    | `GET /api/v1/app-config`                  | Reflects admin changes to inAppYoutube and youtubeClients, with accurate updatedAt.        |
-| `BE-CFG-004`    | `GET /api/v1/app-config`                  | Sets Cache-Control: public, max-age=60 header.                                             |
-| `BE-ERR-001`    | `POST /api/v1/client-errors`              | Accepts crash report from web client.                                                      |
-| `BE-ERR-002`    | `POST /api/v1/client-errors`              | Accepts warning report from linux client.                                                  |
-| `BE-ERR-003`    | `POST /api/v1/client-errors`              | Rejects invalid source name with 400 BAD_REQUEST.                                          |
-| `BE-ERR-004`    | `POST /api/v1/client-errors`              | Rejects missing error message with 400 BAD_REQUEST.                                        |
-| `BE-ERR-005`    | `POST /api/v1/client-errors`              | Rejects excessive context keys (>20) with 400 BAD_REQUEST.                                 |
-| `BE-ERR-BR-001` | Error handling                            | Handles invalid tokens returning 403 FORBIDDEN.                                            |
-| `BE-RESIL-001`  | Stream token                              | Verifies signing with custom TTL.                                                          |
-| `BE-RESIL-002`  | Stream range                              | Tests audio slice Range request header.                                                    |
-| `BE-RESIL-003`  | Single stream                             | Tests track with single audio stream format.                                               |
-| `BE-RESIL-004`  | High quality                              | Tests quality=high stream resolution.                                                      |
-| `BE-RESIL-005`  | Normal quality                            | Tests quality=normal stream resolution.                                                    |
-| `BE-RESIL-006`  | Muxed stream                              | Tests fallback to muxed video stream.                                                      |
-| `BE-RESIL-007`  | Dynamic albums                            | Tests search fallback when channel releases tab is absent.                                 |
-| `BE-COVER-001`  | `GET /api/v1/albums/:id/artwork`          | A cover hint kept in Redis serves a small cover without asking Piped (survives a restart). |
-| `BE-COVER-002`  | `GET /api/v1/search`                      | Album covers seen in search results are written to Redis.                                  |
-
----
-
-## 8. Unit, Database, Normalization & Utility Suites
+| Test ID       | Method / Scope              | Description & Assertions                                                                               |
+| :------------ | :-------------------------- | :----------------------------------------------------------------------------------------------------- |
+| `BE-PKEY-001` | `pipedAuthHeaders`          | `X-Sonare-Key` only for Piped's host (any port), never googlevideo or ytimg; none without `PIPED_KEY`. |
+| `BE-PKEY-002` | `Piped.*`                   | API calls to Piped carry the key.                                                                      |
+| `BE-PKEY-003` | `GET /api/v1/stream/:token` | The relay sends the key to the Piped proxy, not to googlevideo.                                        |
 
 ### IDs Helpers
 
@@ -392,20 +357,24 @@ This document maps all backend test IDs to their specifications, assertions, and
 
 ### Configuration
 
-| Test ID       | Description                                                                   |
-| :------------ | :---------------------------------------------------------------------------- |
-| `BE-CONF-001` | Parses TCP PostgreSQL URL.                                                    |
-| `BE-CONF-002` | Parses Unix socket PostgreSQL URL.                                            |
-| `BE-CONF-003` | Parses URL with default port.                                                 |
-| `BE-CONF-004` | Validates environment variables schema.                                       |
-| `BE-CONF-005` | `assertProductionConfig` accepts a complete production config.                |
-| `BE-CONF-006` | `assertProductionConfig` rejects the dev or a short JWT_SECRET in production. |
-| `BE-CONF-007` | `assertProductionConfig` rejects missing SMTP_USER / SMTP_PASS in production. |
-| `BE-CONF-008` | `assertProductionConfig` rejects a non-https APP_URL in production.           |
-| `BE-CONF-009` | `assertProductionConfig` skips all checks outside production.                 |
-| `BE-CONF-010` | `parseTrustProxy` maps TRUST_PROXY to Express's `trust proxy` value.          |
-| `BE-MAIL-001` | `verifyEmailMessage` has the subject and the link in text and html.           |
-| `BE-MAIL-002` | `resetPasswordMessage` has the subject and the link in text and html.         |
+| Test ID         | Description                                                                   |
+| :-------------- | :---------------------------------------------------------------------------- |
+| `BE-CONF-001`   | Parses TCP PostgreSQL URL.                                                    |
+| `BE-CONF-002`   | Parses Unix socket PostgreSQL URL.                                            |
+| `BE-CONF-003`   | Parses URL with default port.                                                 |
+| `BE-CONF-004`   | Validates environment variables schema.                                       |
+| `BE-CONF-005`   | `assertProductionConfig` accepts a complete production config.                |
+| `BE-CONF-006`   | `assertProductionConfig` rejects the dev or a short JWT_SECRET in production. |
+| `BE-CONF-007`   | `assertProductionConfig` rejects a missing RESEND_API_KEY in production.      |
+| `BE-CONF-008`   | `assertProductionConfig` rejects a non-https APP_URL in production.           |
+| `BE-CONF-009`   | `assertProductionConfig` skips all checks outside production.                 |
+| `BE-CONF-010`   | `parseTrustProxy` maps TRUST_PROXY to Express's `trust proxy` value.          |
+| `BE-MAIL-001`   | `verifyEmailMessage` has the subject and the link in text and html.           |
+| `BE-MAIL-002`   | `resetPasswordMessage` has the subject and the link in text and html.         |
+| `BE-MAIL-003`   | With `RESEND_API_KEY`, mail is posted to Resend's API with the bearer key.    |
+| `BE-MAIL-004`   | A Resend refusal throws with its status and message, never the key.           |
+| `BE-MAIL-005`   | Without a Resend key, mail goes to SMTP (Mailpit in development).             |
+| `BE-LOGGER-001` | Only failed requests are logged: 5xx/thrown as errors, 4xx as warnings.       |
 
 ### Upstream Clients
 

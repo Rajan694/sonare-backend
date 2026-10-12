@@ -25,9 +25,6 @@ services:
     # Lets the container reach services published on the host, such as Piped.
     extra_hosts:
       - 'host.docker.internal:host-gateway'
-    # App builds uploaded from the admin page.
-    volumes:
-      - releases-data:/app/data/releases
     depends_on:
       postgres:
         condition: service_healthy
@@ -65,4 +62,3 @@ services:
 volumes:
   postgres-data:
   redis-data:
-  releases-data:
