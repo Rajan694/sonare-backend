@@ -291,6 +291,49 @@ This document maps all backend test IDs to their specifications, assertions, and
 | `BE-PKEY-002` | `Piped.*`                   | API calls to Piped carry the key.                                                                      |
 | `BE-PKEY-003` | `GET /api/v1/stream/:token` | The relay sends the key to the Piped proxy, not to googlevideo.                                        |
 
+---
+
+## 7. App Routes & Image Proxy
+
+| Test ID         | Method / Scope                            | Description & Assertions                                                                   |
+| :-------------- | :---------------------------------------- | :----------------------------------------------------------------------------------------- |
+| `BE-APP-001`    | `GET /api/v1/trending`                    | Returns filtered trending music tracks.                                                    |
+| `BE-APP-002`    | `GET /api/v1/tracks/:id/artwork`          | Redirects to standard track artwork thumbnail.                                             |
+| `BE-APP-003`    | `GET /api/v1/tracks/:id/artwork?size=640` | Redirects to large artwork thumbnail.                                                      |
+| `BE-APP-004`    | `GET /api/v1/albums/:id/artwork`          | Redirects to proxy album cover artwork route.                                              |
+| `BE-APP-005`    | `GET /api/v1/artists/:id/artwork`         | Redirects to artist avatar artwork image route.                                            |
+| `BE-APP-006`    | `GET /api/v1/image/:token`                | Proxies image buffer with headers from upstream.                                           |
+| `BE-APP-007`    | `GET /api/v1/image/:token`                | Returns 502 when image upstream fails.                                                     |
+| `BE-APP-008`    | `GET /api/v1/lyrics/search`               | Queries LRCLIB search endpoint.                                                            |
+| `BE-APP-009`    | `GET /api/v1/lyrics/search`               | Rejects missing track parameter with 400 BAD_REQUEST.                                      |
+| `BE-APP-010`    | Route Not Found                           | Returns 404 NOT_FOUND for unmatched endpoints.                                             |
+| `BE-APP-011`    | `GET /api/v1/stream/:token`               | Handles 416 range past end with proper total size header.                                  |
+| `BE-APP-012`    | `GET /api/v1/lyrics/search`               | 502 LYRICS_UNAVAILABLE when LRCLIB is down.                                                |
+| `BE-APP-013`    | `GET /api/v1/image/:token`                | Fetches a Piped-proxied image straight from the CDN.                                       |
+| `BE-CFG-001`    | `GET /api/v1/app-config`                  | Requires no auth and returns HTTP 200.                                                     |
+| `BE-CFG-002`    | `GET /api/v1/app-config`                  | Returns default configuration values and updatedAt=0 when no settings row exists.          |
+| `BE-CFG-003`    | `GET /api/v1/app-config`                  | Reflects admin changes to inAppYoutube and youtubeClients, with accurate updatedAt.        |
+| `BE-CFG-004`    | `GET /api/v1/app-config`                  | Sets Cache-Control: public, max-age=60 header.                                             |
+| `BE-ERR-001`    | `POST /api/v1/client-errors`              | Accepts crash report from web client.                                                      |
+| `BE-ERR-002`    | `POST /api/v1/client-errors`              | Accepts warning report from linux client.                                                  |
+| `BE-ERR-003`    | `POST /api/v1/client-errors`              | Rejects invalid source name with 400 BAD_REQUEST.                                          |
+| `BE-ERR-004`    | `POST /api/v1/client-errors`              | Rejects missing error message with 400 BAD_REQUEST.                                        |
+| `BE-ERR-005`    | `POST /api/v1/client-errors`              | Rejects excessive context keys (>20) with 400 BAD_REQUEST.                                 |
+| `BE-ERR-BR-001` | Error handling                            | Handles invalid tokens returning 403 FORBIDDEN.                                            |
+| `BE-RESIL-001`  | Stream token                              | Verifies signing with custom TTL.                                                          |
+| `BE-RESIL-002`  | Stream range                              | Tests audio slice Range request header.                                                    |
+| `BE-RESIL-003`  | Single stream                             | Tests track with single audio stream format.                                               |
+| `BE-RESIL-004`  | High quality                              | Tests quality=high stream resolution.                                                      |
+| `BE-RESIL-005`  | Normal quality                            | Tests quality=normal stream resolution.                                                    |
+| `BE-RESIL-006`  | Muxed stream                              | Tests fallback to muxed video stream.                                                      |
+| `BE-RESIL-007`  | Dynamic albums                            | Tests search fallback when channel releases tab is absent.                                 |
+| `BE-COVER-001`  | `GET /api/v1/albums/:id/artwork`          | A cover hint kept in Redis serves a small cover without asking Piped (survives a restart). |
+| `BE-COVER-002`  | `GET /api/v1/search`                      | Album covers seen in search results are written to Redis.                                  |
+
+---
+
+## 8. Unit, Database, Normalization & Utility Suites
+
 ### IDs Helpers
 
 | Test ID      | Description                                |
