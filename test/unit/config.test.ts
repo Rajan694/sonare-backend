@@ -37,9 +37,8 @@ describe('config.ts Configuration Parsing', () => {
       ...config,
       NODE_ENV: 'production' as const,
       JWT_SECRET: 'a'.repeat(40),
-      SMTP_USER: 'resend',
-      SMTP_PASS: 're_key',
-      APP_URL: 'https://sonare.dev',
+      RESEND_API_KEY: 're_key',
+      APP_URL: 'https://sonare.vip',
     };
 
     it('BE-CONF-005: accepts a complete production config', () => {
@@ -51,18 +50,17 @@ describe('config.ts Configuration Parsing', () => {
       expect(() => assertProductionConfig({ ...prod, JWT_SECRET: 'short' })).toThrow(/JWT_SECRET/);
     });
 
-    it('BE-CONF-007: rejects missing SMTP credentials in production', () => {
-      expect(() => assertProductionConfig({ ...prod, SMTP_USER: undefined })).toThrow(/SMTP_USER/);
-      expect(() => assertProductionConfig({ ...prod, SMTP_PASS: undefined })).toThrow(/SMTP_USER/);
+    it('BE-CONF-007: rejects a missing Resend API key in production', () => {
+      expect(() => assertProductionConfig({ ...prod, RESEND_API_KEY: undefined })).toThrow(/RESEND_API_KEY/);
     });
 
     it('BE-CONF-008: rejects a non-https APP_URL in production', () => {
-      expect(() => assertProductionConfig({ ...prod, APP_URL: 'http://sonare.dev' })).toThrow(/APP_URL/);
+      expect(() => assertProductionConfig({ ...prod, APP_URL: 'http://sonare.vip' })).toThrow(/APP_URL/);
     });
 
     it('BE-CONF-009: skips all checks outside production', () => {
       expect(() =>
-        assertProductionConfig({ ...prod, NODE_ENV: 'development', JWT_SECRET: 'x', SMTP_USER: undefined }),
+        assertProductionConfig({ ...prod, NODE_ENV: 'development', JWT_SECRET: 'x', RESEND_API_KEY: undefined }),
       ).not.toThrow();
     });
   });

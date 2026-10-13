@@ -29,11 +29,11 @@ export default defineConfig({
     },
     env: {
       NODE_ENV: 'test',
+      // Never send real mail from tests, even when .env has a Resend key (dotenv keeps this).
+      RESEND_API_KEY: '',
       REDIS_URL: 'redis://127.0.0.1:6379/15',
       JWT_SECRET: 'test_secret_for_vitest_runner_sonare',
       PORT: '3099',
-      RELEASES_DIR: 'coverage/.releases-test',
-      RELEASE_MAX_MB: '1',
     },
   },
 });

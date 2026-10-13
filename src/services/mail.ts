@@ -1,12 +1,12 @@
-import nodemailer from 'nodemailer';
+import nodemailer, { type Transporter } from 'nodemailer';
+import { request } from 'undici';
 import { config } from '../config.js';
 
-const transport = nodemailer.createTransport({
-  host: config.SMTP_HOST,
-  port: config.SMTP_PORT,
-  secure: config.SMTP_SECURE,
-  auth: config.SMTP_USER ? { user: config.SMTP_USER, pass: config.SMTP_PASS } : undefined,
-});
+// Account email. With RESEND_API_KEY set it goes out through Resend's HTTP API (production:
+// Render's free plan blocks outbound SMTP ports); otherwise through SMTP, which is Mailpit in
+// development (its inbox: http://localhost:8025).
+
+export const RESEND_API_URL = 'https://api.resend.com/emails';
 
 export interface MailMessage {
   subject: string;
@@ -14,8 +14,59 @@ export interface MailMessage {
   html: string;
 }
 
-export const sendMail = async (opts: { to: string; subject: string; text: string; html: string }): Promise<void> => {
-  await transport.sendMail({ from: config.MAIL_FROM, ...opts });
+type Mail = MailMessage & { to: string };
+
+let smtp: Transporter | undefined;
+
+/** Made on first use, so a server that sends through Resend never opens an SMTP transport. */
+const smtpTransport = (): Transporter => {
+  smtp ??= nodemailer.createTransport({
+    host: config.SMTP_HOST,
+    port: config.SMTP_PORT,
+    secure: config.SMTP_SECURE,
+    auth: config.SMTP_USER ? { user: config.SMTP_USER, pass: config.SMTP_PASS } : undefined,
+  });
+  return smtp;
+};
+
+const sendWithResend = async (apiKey: string, mail: Mail): Promise<void> => {
+  const { statusCode, body } = await request(RESEND_API_URL, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      from: config.MAIL_FROM,
+      to: [mail.to],
+      subject: mail.subject,
+      html: mail.html,
+      text: mail.text,
+    }),
+    headersTimeout: 10_000,
+    bodyTimeout: 10_000,
+  });
+  const text = await body.text();
+  if (statusCode >= 200 && statusCode < 300) return;
+  let detail = text.slice(0, 200);
+  try {
+    detail = (JSON.parse(text) as { message?: string }).message ?? detail;
+  } catch {
+    // Not JSON: keep the start of the body.
+  }
+  throw new Error(`Resend answered ${statusCode}: ${detail}`);
+};
+
+/** How mail leaves this server, for the startup log. */
+export const mailTransportName = (): string => {
+  if (config.RESEND_API_KEY) return 'Resend API';
+  const mailpit =
+    config.NODE_ENV === 'development' &&
+    ['127.0.0.1', 'localhost'].includes(config.SMTP_HOST) &&
+    config.SMTP_PORT === 1025;
+  return `SMTP ${config.SMTP_HOST}:${config.SMTP_PORT}${mailpit ? ' (Mailpit inbox: http://localhost:8025)' : ''}`;
+};
+
+export const sendMail = async (mail: Mail): Promise<void> => {
+  if (config.RESEND_API_KEY) return sendWithResend(config.RESEND_API_KEY, mail);
+  await smtpTransport().sendMail({ from: config.MAIL_FROM, ...mail });
 };
 
 export const verifyEmailMessage = (link: string): MailMessage => {

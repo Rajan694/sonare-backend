@@ -1,28 +1,29 @@
 import crypto from 'node:crypto';
-import fs from 'node:fs/promises';
 import { Router, type Request, type Response } from 'express';
 import bcrypt from 'bcrypt';
 import { and, count, desc, eq, ilike, sql as sqlExpr, sum, type SQL } from 'drizzle-orm';
 import { z } from 'zod';
 import { requireAdmin, signAdminToken } from '../middleware/adminAuth.js';
 import { isRedisAvailable } from '../services/cache.js';
-import { hasFfmpeg } from '../services/peaks.js';
 import { db, sql } from '../db/index.js';
-import { appReleases, errorLogs, users } from '../db/schema.js';
+import { errorLogs, users } from '../db/schema.js';
 import { config } from '../config.js';
 import { createRateLimiter } from '../middleware/rateLimit.js';
 import { Piped } from '../upstream/piped.js';
-import { parseBody, parseQuery } from '../validation.js';
+import { parseBody } from '../validation.js';
 import {
-  PLATFORMS,
-  UploadTooLargeError,
-  acceptedExtensions,
-  cleanFileName,
-  formatFor,
-  receiveUpload,
-  releasePath,
-  releaseView,
-} from '../services/releases.js';
+  pipedApiUrl,
+  setPipedApiUrl,
+  getSavedPipedApiUrl,
+  youtubeClients,
+  setYoutubeClients,
+  getSavedYoutubeClients,
+  inAppYoutube,
+  setInAppYoutube,
+  getSavedInAppYoutube,
+  ALLOWED_YOUTUBE_CLIENTS,
+  DEFAULT_YOUTUBE_CLIENTS,
+} from '../services/settings.js';
 
 // The admin page's API (/admin on the web build). Every route but /login needs an admin token.
 // Admins are rows in users with role 'admin'; the app's own login refuses them.
@@ -85,6 +86,124 @@ adminRouter.post('/login', async (req, res) => {
 });
 
 adminRouter.use(requireAdmin);
+
+// ---- Settings ----
+
+const httpUrlSchema = z
+  .string({ invalid_type_error: 'URL must be a string' })
+  .trim()
+  .max(2048, 'URL is too long (at most 2048 characters)')
+  .refine((v) => {
+    try {
+      const u = new URL(v);
+      return u.protocol === 'http:' || u.protocol === 'https:';
+    } catch {
+      return false;
+    }
+  }, 'Must be a valid http or https URL')
+  .transform((v) => v.replace(/\/+$/, ''));
+
+const youtubeClientsSchema = z
+  .array(z.string({ invalid_type_error: 'Client names must be strings' }))
+  .nullable()
+  .superRefine((val, ctx) => {
+    if (val === null) return;
+    if (val.length < 1 || val.length > 5) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Must provide between 1 and 5 YouTube clients',
+      });
+      return;
+    }
+    const seen = new Set<string>();
+    for (const raw of val) {
+      const item = raw.trim().toUpperCase();
+      if (!ALLOWED_YOUTUBE_CLIENTS.includes(item as (typeof ALLOWED_YOUTUBE_CLIENTS)[number])) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `Unknown YouTube client: "${raw}"`,
+        });
+        return;
+      }
+      if (seen.has(item)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `Duplicate YouTube client: "${item}"`,
+        });
+        return;
+      }
+      seen.add(item);
+    }
+  })
+  .transform((val) => {
+    if (val === null) return null;
+    return val.map((item) => item.trim().toUpperCase());
+  });
+
+const putSettingsSchema = z
+  .object({
+    pipedApiUrl: z
+      .preprocess((v) => (typeof v === 'string' && v.trim() === '' ? null : v), httpUrlSchema.nullable())
+      .optional(),
+    youtubeClients: youtubeClientsSchema.optional(),
+    inAppYoutube: z.boolean({ invalid_type_error: 'inAppYoutube must be a boolean' }).nullable().optional(),
+  })
+  .refine(
+    (data) => data.pipedApiUrl !== undefined || data.youtubeClients !== undefined || data.inAppYoutube !== undefined,
+    { message: 'Nothing to update' },
+  );
+
+const pipedTestSchema = z.object({
+  url: httpUrlSchema,
+});
+
+const adminSettingsResponse = () => ({
+  pipedApiUrl: {
+    saved: getSavedPipedApiUrl(),
+    effective: pipedApiUrl(),
+    envDefault: config.PIPED_API_URL,
+  },
+  youtubeClients: {
+    saved: getSavedYoutubeClients(),
+    effective: youtubeClients(),
+    default: [...DEFAULT_YOUTUBE_CLIENTS],
+    allowed: [...ALLOWED_YOUTUBE_CLIENTS],
+  },
+  inAppYoutube: {
+    saved: getSavedInAppYoutube(),
+    effective: inAppYoutube(),
+  },
+});
+
+adminRouter.get('/settings', async (_req, res) => {
+  res.json(adminSettingsResponse());
+});
+
+adminRouter.put('/settings', async (req, res) => {
+  const body = parseBody(putSettingsSchema, req);
+  if (body.pipedApiUrl !== undefined) {
+    await setPipedApiUrl(body.pipedApiUrl);
+  }
+  if (body.youtubeClients !== undefined) {
+    await setYoutubeClients(body.youtubeClients);
+  }
+  if (body.inAppYoutube !== undefined) {
+    await setInAppYoutube(body.inAppYoutube);
+  }
+  res.json(adminSettingsResponse());
+});
+
+adminRouter.post('/settings/piped-test', async (req, res) => {
+  const body = parseBody(pipedTestSchema, req);
+  const start = Date.now();
+  try {
+    const ok = await Piped.healthcheck({ baseUrl: body.url, timeoutMs: 5000, retry: false });
+    res.json({ ok, ms: Date.now() - start });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    res.json({ ok: false, ms: Date.now() - start, error: message });
+  }
+});
 
 adminRouter.get('/me', async (req, res) => {
   const [admin] = await db.select().from(users).where(eq(users.id, req.admin!.id)).limit(1);
@@ -163,10 +282,9 @@ const health = async () => {
   const [piped, database] = await Promise.allSettled([Piped.healthcheck(), sql`SELECT 1`]);
   const memory = process.memoryUsage();
   return {
-    piped: { up: piped.status === 'fulfilled', url: config.PIPED_API_URL },
+    piped: { up: piped.status === 'fulfilled', url: pipedApiUrl() },
     database: database.status === 'fulfilled',
     redis: isRedisAvailable(),
-    ffmpeg: hasFfmpeg(),
     uptimeSec: Math.round(process.uptime()),
     node: process.version,
     memoryMb: Math.round(memory.rss / 1e6),
@@ -417,100 +535,4 @@ adminRouter.delete('/errors/:id', async (req, res) => {
 adminRouter.delete('/errors', async (req, res) => {
   const deleted = await db.delete(errorLogs).where(errorFilter(req)).returning({ id: errorLogs.id });
   res.json({ deleted: deleted.length });
-});
-
-// ---- App releases ----
-//
-// Builds offered in Settings → About. The file is the raw request body (no multipart), so a
-// 300 MB installer streams straight to disk.
-
-adminRouter.get('/releases', async (_req, res) => {
-  const rows = await db.select().from(appReleases).orderBy(desc(appReleases.uploadedAt));
-  res.json({
-    items: rows.map((r) => ({ ...releaseView(r), downloads: r.downloads })),
-    accepts: Object.fromEntries(PLATFORMS.map((p) => [p, acceptedExtensions(p)])),
-  });
-});
-
-const uploadSchema = z.object({
-  platform: z.enum(PLATFORMS, { message: 'Pick android, linux or windows' }),
-  version: z
-    .string()
-    .trim()
-    .regex(/^[0-9A-Za-z][0-9A-Za-z.+-]{0,39}$/, 'Use a version like 1.2.0 (letters, digits, . + -)'),
-  fileName: z.string().trim().min(1, 'The file needs a name').max(255),
-  notes: z.string().trim().max(500, 'Keep the notes under 500 characters').optional(),
-});
-
-adminRouter.post('/releases', async (req, res) => {
-  const query = parseQuery(uploadSchema, req);
-  const fileName = cleanFileName(query.fileName);
-  const match = formatFor(query.platform, fileName);
-  if (!match) {
-    return fail(
-      res,
-      400,
-      'BAD_REQUEST',
-      `A ${query.platform} build must be one of: ${acceptedExtensions(query.platform).join(', ')}`,
-    );
-  }
-
-  let upload: Awaited<ReturnType<typeof receiveUpload>>;
-  try {
-    upload = await receiveUpload(req);
-  } catch (err) {
-    if (err instanceof UploadTooLargeError) return fail(res, 413, 'PAYLOAD_TOO_LARGE', err.message);
-    throw err;
-  }
-  if (upload.size === 0) {
-    await fs.rm(upload.tmpPath, { force: true });
-    return fail(res, 400, 'BAD_REQUEST', 'The file is empty');
-  }
-
-  // The same version and format again replaces the earlier file (a rebuild).
-  const values = {
-    platform: query.platform,
-    format: match.format,
-    version: query.version,
-    fileName,
-    sizeBytes: upload.size,
-    sha256: upload.sha256,
-    notes: query.notes || null,
-    uploadedBy: req.admin!.id,
-  };
-  const [existing] = await db
-    .select({ id: appReleases.id })
-    .from(appReleases)
-    .where(
-      and(
-        eq(appReleases.platform, values.platform),
-        eq(appReleases.format, values.format),
-        eq(appReleases.version, values.version),
-      ),
-    )
-    .limit(1);
-
-  try {
-    const [release] = existing
-      ? await db
-          .update(appReleases)
-          .set({ ...values, downloads: 0, uploadedAt: new Date() })
-          .where(eq(appReleases.id, existing.id))
-          .returning()
-      : await db.insert(appReleases).values(values).returning();
-    await fs.rename(upload.tmpPath, releasePath(release));
-    res.status(existing ? 200 : 201).json({ ...releaseView(release), downloads: release.downloads });
-  } catch (err) {
-    await fs.rm(upload.tmpPath, { force: true });
-    throw err;
-  }
-});
-
-adminRouter.delete('/releases/:id', async (req, res) => {
-  const parsed = z.string().uuid().safeParse(req.params.id);
-  if (!parsed.success) return fail(res, 400, 'BAD_REQUEST', 'Bad release id');
-  const [deleted] = await db.delete(appReleases).where(eq(appReleases.id, parsed.data)).returning();
-  if (!deleted) return fail(res, 404, 'NOT_FOUND', 'That build is already gone');
-  await fs.rm(releasePath(deleted), { force: true });
-  res.status(204).end();
 });

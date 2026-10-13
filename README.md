@@ -12,8 +12,6 @@ to it under `/api/v1`; the full contract is [`../docs/api-contract.md`](../docs/
 - Node 22 (`nvm use 22`)
 - Postgres 17 (16 works for development)
 - Redis 7 — optional at runtime: without it caching passes through and rate limits fail open
-- ffmpeg on the PATH — optional: without it waveforms are placeholders (warned at startup,
-  shown on `/healthz` and the admin overview). The production image installs it.
 - Piped running locally (`../sonare-piped-backend/runPiped.sh up`) — API on :8090, proxy on :8091
 - Docker, for Mailpit in development and for the production stack
 
@@ -70,28 +68,31 @@ A pre-commit hook (husky + lint-staged) runs Prettier and ESLint on staged files
 
 Development values are in `.env.example`, production ones in `.env.production.example`.
 
-| Name                | Default                        | Required in production | What it does                                                        |
-| ------------------- | ------------------------------ | ---------------------- | ------------------------------------------------------------------- |
-| `NODE_ENV`          | `development`                  | yes (`production`)     | `development`, `production` or `test`                               |
-| `PORT`              | `3010`                         | no                     | Listen port                                                         |
-| `DATABASE_URL`      | —                              | yes                    | Postgres connection URL                                             |
-| `REDIS_URL`         | `redis://127.0.0.1:6379/1`     | no                     | Redis for the cache and rate limits                                 |
-| `PIPED_API_URL`     | `http://localhost:8090`        | yes                    | Piped API the catalog and streams come from                         |
-| `JWT_SECRET`        | dev placeholder                | yes (≥ 32 chars)       | Signs access tokens; the server refuses the default in production   |
-| `CORS_ORIGINS`      | empty                          | yes                    | Comma-separated allowed origins (localhost is allowed outside prod) |
-| `TRUST_PROXY`       | unset                          | behind a proxy         | Express `trust proxy` (hop count, `true`, `loopback`…)              |
-| `LOG_LEVEL`         | `info`                         | no                     | pino level; logs are pretty in development, JSON otherwise          |
-| `LRCLIB_BASE`       | `https://lrclib.net`           | no                     | LRCLIB API                                                          |
-| `LRCLIB_USER_AGENT` | `Sonare/1.0`                   | no                     | User-Agent sent to LRCLIB                                           |
-| `SMTP_HOST`         | `127.0.0.1`                    | yes                    | Mailpit in development, `smtp.resend.com` in production             |
-| `SMTP_PORT`         | `1025`                         | yes                    | `465` for Resend                                                    |
-| `SMTP_SECURE`       | `false`                        | yes                    | `true` for Resend                                                   |
-| `SMTP_USER`         | unset                          | yes                    | `resend`                                                            |
-| `SMTP_PASS`         | unset                          | yes                    | Resend API key                                                      |
-| `MAIL_FROM`         | `Sonare <no-reply@sonare.dev>` | yes                    | Sender of account emails                                            |
-| `APP_URL`           | `http://localhost:5183`        | yes (https)            | Base of the links in verification and reset emails                  |
-| `RELEASES_DIR`      | `data/releases`                | no                     | Where app builds uploaded on the admin page are stored              |
-| `RELEASE_MAX_MB`    | `500`                          | no                     | Largest build the admin page may upload                             |
+| Name                    | Default                        | Required in production | What it does                                                                                              |
+| ----------------------- | ------------------------------ | ---------------------- | --------------------------------------------------------------------------------------------------------- |
+| `NODE_ENV`              | `development`                  | yes (`production`)     | `development`, `production` or `test`                                                                     |
+| `PORT`                  | `3010`                         | no                     | Listen port                                                                                               |
+| `DATABASE_URL`          | —                              | yes                    | Postgres connection URL                                                                                   |
+| `REDIS_URL`             | `redis://127.0.0.1:6379/1`     | no                     | Redis for the cache and rate limits                                                                       |
+| `PIPED_API_URL`         | `http://localhost:8090`        | yes                    | Piped API the catalog and streams come from                                                               |
+| `PIPED_KEY`             | unset                          | with a Funnel Piped    | Sent as `X-Sonare-Key` to the Piped host only; its gate checks it (`../sonare-piped-backend/funnel.sh`)   |
+| `PIPED_LOCAL_PROXY_URL` | unset                          | no                     | Development with Funnel on: the relay fetches Piped's proxy urls from here (e.g. `http://localhost:8091`) |
+| `JWT_SECRET`            | dev placeholder                | yes (≥ 32 chars)       | Signs access tokens; the server refuses the default in production                                         |
+| `CORS_ORIGINS`          | empty                          | yes                    | Comma-separated allowed origins (localhost is allowed outside prod)                                       |
+| `TRUST_PROXY`           | unset                          | behind a proxy         | Express `trust proxy` (hop count, `true`, `loopback`…)                                                    |
+| `LOG_LEVEL`             | `info`                         | no                     | pino level; logs are pretty in development, JSON otherwise                                                |
+| `LRCLIB_BASE`           | `https://lrclib.net`           | no                     | LRCLIB API                                                                                                |
+| `LRCLIB_USER_AGENT`     | `Sonare/1.0`                   | no                     | User-Agent sent to LRCLIB                                                                                 |
+| `RESEND_API_KEY`        | unset                          | yes                    | Mail goes out through Resend's HTTP API (Render's free plan blocks SMTP ports)                            |
+| `SMTP_HOST`             | `127.0.0.1`                    | no                     | Used when `RESEND_API_KEY` is unset: Mailpit in development (inbox http://localhost:8025)                 |
+| `SMTP_PORT`             | `1025`                         | no                     | Mailpit's SMTP port                                                                                       |
+| `SMTP_SECURE`           | `false`                        | no                     | TLS for the SMTP fallback                                                                                 |
+| `SMTP_USER`             | unset                          | no                     | SMTP fallback login                                                                                       |
+| `SMTP_PASS`             | unset                          | no                     | SMTP fallback password                                                                                    |
+| `MAIL_FROM`             | `Sonare <no-reply@sonare.vip>` | yes                    | Sender of account emails                                                                                  |
+| `APP_URL`               | `http://localhost:5183`        | yes (https)            | Base of the links in verification and reset emails                                                        |
+| `RELEASES_REPO`         | `Rajan694/sonare`              | no                     | GitHub repo whose latest release holds the app builds                                                     |
+| `GITHUB_TOKEN`          | unset                          | no                     | Lifts GitHub's 60 API calls an hour per IP (no scopes needed)                                             |
 
 ## Folder layout
 
@@ -139,12 +140,12 @@ curl http://127.0.0.1:3010/api/v1/healthz
 ```
 
 - The backend is published on `127.0.0.1:3010` only: put Caddy or nginx in front for
-  HTTPS (`api.sonare.dev`) and keep `TRUST_PROXY=1`.
+  HTTPS (`api.sonare.vip`) and keep `TRUST_PROXY=1`.
 - Postgres and Redis publish no ports; their data lives in the `postgres-data` and
   `redis-data` volumes.
 - Piped runs from its own compose file. Its ports are bound to the host's 127.0.0.1,
   which a container cannot reach — see the Piped notes in `.env.production.example`.
-- `/api/v1/healthz` answers `{ ok, version, db, redis, piped, ffmpeg }`, with 503 when the
+- `/api/v1/healthz` answers `{ ok, version, db, redis, piped }`, with 503 when the
   database is down; the image's `HEALTHCHECK` uses it.
 
 ## Admin
@@ -158,12 +159,12 @@ refuses them, and the analytics leave them out of the user counts. The migration
   request, kept 30 days). The apps tag their requests with an `X-Sonare-Client` header.
 - **Errors**: backend 5xx errors and app crash reports (`POST /api/v1/client-errors`) from
   `error_logs`. Repeats of one error share a row with a count; kept 90 days after last seen.
-- **Releases**: upload the Android APK, Linux packages (.AppImage, .deb, .rpm, .tar.gz,
-  .zip) and Windows installers (.exe, .msi, .zip). The web app's Settings → About offers the
-  newest upload of each platform and file type (`GET /api/v1/releases`); the same version
-  and type again replaces the file. Files are kept in `RELEASES_DIR` (a `releases-data`
-  volume in the Docker stack), metadata in `app_releases`. Behind nginx, raise
-  `client_max_body_size` to `RELEASE_MAX_MB`. `../build.sh` makes the builds.
+- **Releases** are not on the admin page any more: app builds are the assets of the latest
+  GitHub release of `RELEASES_REPO`, under fixed names (`sonare-android-arm64.apk`,
+  `sonare-linux-x64.AppImage` / `.deb` / `.tar.gz`, `sonare-windows-x64.exe`; `../build.sh prod
+all` prepares them). `GET /api/v1/releases` lists them for the apps' update check (cached 10
+  minutes, the last good list kept a week for when GitHub fails) and
+  `GET /api/v1/releases/:id/download` redirects to the file.
 
 Piped settings are not on the admin page: `PIPED_API_URL` is in this `.env`, and the proxy
 URL and NewPipeExtractor commit are in `../sonare-piped-backend/.env`.

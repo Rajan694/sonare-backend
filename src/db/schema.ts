@@ -9,8 +9,6 @@ import {
   jsonb,
   index,
   bigserial,
-  bigint,
-  unique,
 } from 'drizzle-orm/pg-core';
 
 export const users = pgTable('users', {
@@ -48,6 +46,7 @@ export const favouriteTracks = pgTable(
     trackRefId: text('track_ref_id').notNull(),
     matchedServerId: text('matched_server_id'),
     addedAt: timestamp('added_at').defaultNow().notNull(),
+    meta: jsonb('meta'),
   },
   (t) => ({
     pk: primaryKey({ columns: [t.userId, t.trackRefKind, t.trackRefId] }),
@@ -62,6 +61,7 @@ export const favouriteAlbums = pgTable(
       .notNull(),
     albumId: text('album_id').notNull(),
     addedAt: timestamp('added_at').defaultNow().notNull(),
+    meta: jsonb('meta'),
   },
   (t) => ({
     pk: primaryKey({ columns: [t.userId, t.albumId] }),
@@ -76,6 +76,7 @@ export const artistFollows = pgTable(
       .notNull(),
     artistId: text('artist_id').notNull(),
     addedAt: timestamp('added_at').defaultNow().notNull(),
+    meta: jsonb('meta'),
   },
   (t) => ({
     pk: primaryKey({ columns: [t.userId, t.artistId] }),
@@ -94,6 +95,7 @@ export const playHistory = pgTable(
     matchedServerId: text('matched_server_id'),
     playedAt: timestamp('played_at').notNull(),
     msPlayed: integer('ms_played').notNull(),
+    meta: jsonb('meta'),
   },
   (t) => ({
     userPlayedAtIdx: index('play_history_user_played_at_idx').on(t.userId, t.playedAt),
@@ -124,6 +126,7 @@ export const playlistTracks = pgTable(
     trackRefKind: text('track_ref_kind').notNull(),
     trackRefId: text('track_ref_id').notNull(),
     matchedServerId: text('matched_server_id'),
+    meta: jsonb('meta'),
   },
   (t) => ({
     playlistPositionIdx: index('playlist_tracks_playlist_position_idx').on(t.playlistId, t.position),
@@ -243,29 +246,25 @@ export const errorLogs = pgTable(
   }),
 );
 
+export const appSettings = pgTable('app_settings', {
+  key: text('key').primaryKey(),
+  value: text('value').notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
 /**
- * App builds uploaded from the admin page and offered in Settings → About. The file lives in
- * RELEASES_DIR as `<id><ext>`; file_name is only what the download is called.
+ * Server-side metadata cache written only by the backend from Piped results.
+ * kind = 'track' | 'album' | 'artist'; id = raw YouTube id (no "yt:" prefix).
  */
-export const appReleases = pgTable(
-  'app_releases',
+export const catalogItems = pgTable(
+  'catalog_items',
   {
-    id: uuid('id').defaultRandom().primaryKey(),
-    /** android | linux | windows */
-    platform: text('platform').notNull(),
-    /** apk | appimage | deb | rpm | tar.gz | zip | exe | msi, from the file's extension. */
-    format: text('format').notNull(),
-    version: text('version').notNull(),
-    fileName: text('file_name').notNull(),
-    sizeBytes: bigint('size_bytes', { mode: 'number' }).notNull(),
-    sha256: text('sha256').notNull(),
-    notes: text('notes'),
-    downloads: integer('downloads').default(0).notNull(),
-    uploadedBy: uuid('uploaded_by').references(() => users.id, { onDelete: 'set null' }),
-    uploadedAt: timestamp('uploaded_at').defaultNow().notNull(),
+    kind: text('kind').notNull(),
+    id: text('id').notNull(),
+    data: jsonb('data').notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
   },
   (t) => ({
-    // Uploading the same version and format again replaces the file.
-    versionUnique: unique('app_releases_platform_format_version_key').on(t.platform, t.format, t.version),
+    pk: primaryKey({ columns: [t.kind, t.id] }),
   }),
 );

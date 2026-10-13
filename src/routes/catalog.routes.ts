@@ -4,7 +4,6 @@ import { and, eq } from 'drizzle-orm';
 import { Piped } from '../upstream/piped.js';
 import type * as T from '../upstream/piped.types.js';
 import { CachedPiped, isRedisAvailable } from '../services/cache.js';
-import { hasFfmpeg } from '../services/peaks.js';
 import {
   normalizeStreamItemToTrack,
   normalizeStreamItemToArtist,
@@ -18,6 +17,7 @@ import { z } from 'zod';
 import { parseQuery, queryInt } from '../validation.js';
 import { db, sql } from '../db/index.js';
 import { artistFollows } from '../db/schema.js';
+import { rememberCatalogItem } from '../services/catalogMeta.js';
 
 // Catalog: health, search, trending, genres, albums, artists and YouTube playlists.
 export const catalogRouter = Router();
@@ -93,8 +93,6 @@ catalogRouter.get('/healthz', async (req, res) => {
     db: dbUp ? 'up' : 'down',
     redis: isRedisAvailable() ? 'up' : 'down',
     piped: pipedUp ? 'up' : 'down',
-    // Missing means placeholder waveforms, not an outage.
-    ffmpeg: hasFfmpeg() ? 'found' : 'missing',
   });
 });
 
@@ -286,7 +284,12 @@ catalogRouter.get('/genres', (req, res) => {
 catalogRouter.get('/albums/:id', async (req, res) => {
   const rawId = idHelpers.extractYtId(req.params.id);
   const playlist = await CachedPiped.playlist(rawId);
-  res.json(normalizePlaylistToAlbum(playlist, rawId));
+  const album = normalizePlaylistToAlbum(playlist, rawId);
+
+  // Remember album metadata for offline/fallback use
+  await rememberCatalogItem('album', rawId, album);
+
+  res.json(album);
 });
 
 catalogRouter.get('/albums/:id/tracks', async (req, res) => {
@@ -317,6 +320,15 @@ catalogRouter.get('/artists/:id', async (req, res) => {
   const rawId = idHelpers.extractYtId(req.params.id);
   const channel = await CachedPiped.channel(rawId);
   const artist = normalizeChannelToArtist(channel, rawId);
+
+  // Remember artist metadata for offline/fallback use
+  const meta = {
+    name: artist.name,
+    thumbnail: artist.thumbnail,
+    monthlyListeners: artist.monthlyListeners,
+  };
+  await rememberCatalogItem('artist', rawId, meta);
+
   if (req.user) {
     const [follow] = await db
       .select({ artistId: artistFollows.artistId })

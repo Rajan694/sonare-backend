@@ -201,4 +201,43 @@ describe('Email verification and password reset', () => {
       .send({ email: 'legacy@example.com', password: 'password123' });
     expect(res.status).toBe(200);
   });
+
+  const login = (email: string) => {
+    return request(app).post('/api/v1/auth/login').send({ email, password: 'password123' });
+  };
+
+  it('BE-EMAIL-013: signing in to an unverified account sends a fresh verify link', async () => {
+    await createUser({ email: 'pending@example.com' });
+    const res = await login('pending@example.com');
+    expect(res.status).toBe(200);
+    expect(res.body.user.emailVerified).toBe(false);
+    await vi.waitFor(() => expect(sendMail).toHaveBeenCalledTimes(1));
+    const mail = sendMail.mock.calls[0][0];
+    expect(mail.to).toBe('pending@example.com');
+    expect(mail.subject).toBe('Verify your Sonare email address');
+    expect(mail.text).toContain('http://localhost:5183/verify-email?token=');
+  });
+
+  it('BE-EMAIL-014: signing in to a verified account sends nothing', async () => {
+    await createUser({ email: 'done@example.com', emailVerifiedAt: new Date() });
+    const res = await login('done@example.com');
+    expect(res.status).toBe(200);
+    expect(sendMail).not.toHaveBeenCalled();
+  });
+
+  it('BE-EMAIL-015: sign-in links share the 3-an-hour limit and a mail failure never blocks signing in', async () => {
+    await createUser({ email: 'often@example.com' });
+    sendMail.mockRejectedValueOnce(new Error('Resend answered 500: down'));
+    for (let i = 0; i < 4; i++) {
+      const res = await login('often@example.com');
+      expect(res.status).toBe(200);
+      expect(res.body.accessToken).toBeTruthy();
+    }
+    await vi.waitFor(() => expect(sendMail).toHaveBeenCalledTimes(3));
+    // The limit is the one "Resend" uses, so it is used up too.
+    const token = (await login('often@example.com')).body.accessToken as string;
+    const resend = await request(app).post('/api/v1/auth/resend-verification').set('Authorization', `Bearer ${token}`);
+    expect(resend.status).toBe(429);
+    expect(sendMail).toHaveBeenCalledTimes(3);
+  });
 });

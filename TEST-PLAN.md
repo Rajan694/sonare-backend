@@ -63,6 +63,9 @@ This document maps all backend test IDs to their specifications, assertions, and
 | `BE-EMAIL-010` | register / reset-password               | Passwords under 8 characters give 400.                                                   |
 | `BE-EMAIL-011` | `POST /api/v1/auth/forgot-password`     | 4th request for one email in an hour gives 429.                                          |
 | `BE-EMAIL-012` | `POST /api/v1/auth/login`               | Finds accounts stored with mixed-case emails.                                            |
+| `BE-EMAIL-013` | `POST /api/v1/auth/login`               | Signing in to an unverified account sends a fresh verify link.                           |
+| `BE-EMAIL-014` | `POST /api/v1/auth/login`               | Signing in to a verified account sends nothing.                                          |
+| `BE-EMAIL-015` | `POST /api/v1/auth/login`               | Sign-in links share Resend's 3-an-hour limit; a mail failure never blocks the sign-in.   |
 
 ---
 
@@ -239,20 +242,56 @@ This document maps all backend test IDs to their specifications, assertions, and
 | `BE-ADM-COV-002`   | `GET /api/v1/admin/analytics/overview` | Accepts timezone query parameter.                                             |
 | `BE-ADM-BR-001`    | `requireAdmin` middleware              | Handles database errors during admin authentication.                          |
 
+### App settings (Piped API URL)
+
+| Test ID          | Method / Scope                           | Description & Assertions                                                    |
+| :--------------- | :--------------------------------------- | :-------------------------------------------------------------------------- |
+| `BE-ADM-SET-001` | `GET /api/v1/admin/settings`             | Rejects requests without admin token with 401 UNAUTHORIZED.                 |
+| `BE-ADM-SET-002` | `GET /api/v1/admin/settings`             | Returns saved=null and effective equal to config env default.               |
+| `BE-ADM-SET-003` | `PUT /api/v1/admin/settings`             | Saves pipedApiUrl in database and GET reflects the saved and effective URL. |
+| `BE-ADM-SET-004` | `pipedApiUrl()` service                  | Returns DB value when set, and config.PIPED_API_URL when reset.             |
+| `BE-ADM-SET-005` | `PUT /api/v1/admin/settings`             | Resetting with null restores effective URL to env default.                  |
+| `BE-ADM-SET-006` | `PUT /api/v1/admin/settings`             | Rejects invalid URL scheme (ftp://) with 400 BAD_REQUEST.                   |
+| `BE-ADM-SET-007` | `PUT /api/v1/admin/settings`             | Rejects non-URL string with 400 BAD_REQUEST.                                |
+| `BE-ADM-SET-008` | `POST /api/v1/admin/settings/piped-test` | Tests reachable URL against /healthcheck, returning ok=true and elapsed ms. |
+| `BE-ADM-SET-009` | `POST /api/v1/admin/settings/piped-test` | Tests closed port returning ok=false and error message with 200 status.     |
+| `BE-ADM-SET-010` | `PUT /api/v1/admin/settings`             | Empty string in pipedApiUrl clears setting to null.                         |
+| `BE-ADM-SET-011` | `PUT /api/v1/admin/settings`             | Trims URL and strips trailing slashes on save.                              |
+| `BE-ADM-SET-012` | `PUT /api/v1/admin/settings`             | Rejects URL exceeding 2048 characters with 400 BAD_REQUEST.                 |
+| `BE-ADM-SET-013` | `POST /api/v1/admin/settings/piped-test` | Handles testing URL with trailing slash properly.                           |
+| `BE-ADM-SET-014` | `GET /api/v1/admin/settings`             | Returns defaults for youtubeClients and inAppYoutube.                       |
+| `BE-ADM-SET-015` | `PUT /api/v1/admin/settings`             | Saves youtubeClients order and GET reflects it.                             |
+| `BE-ADM-SET-016` | `PUT /api/v1/admin/settings`             | Resetting with null restores youtubeClients and inAppYoutube to defaults.   |
+| `BE-ADM-SET-017` | `PUT /api/v1/admin/settings`             | Rejects unknown YouTube client name with 400 naming the name.               |
+| `BE-ADM-SET-018` | `PUT /api/v1/admin/settings`             | Rejects duplicate YouTube clients with 400 BAD_REQUEST.                     |
+| `BE-ADM-SET-019` | `PUT /api/v1/admin/settings`             | Rejects more than 5 YouTube clients with 400 BAD_REQUEST.                   |
+| `BE-ADM-SET-020` | `PUT /api/v1/admin/settings`             | Partial update leaves untouched keys unmodified.                            |
+| `BE-ADM-SET-021` | `PUT /api/v1/admin/settings`             | Empty body {} is rejected with 400 "Nothing to update".                     |
+| `BE-ADM-SET-022` | `PUT /api/v1/admin/settings`             | Setting clients does not modify or overwrite pipedApiUrl.                   |
+| `BE-ADM-SET-023` | `PUT /api/v1/admin/settings`             | Saves inAppYoutube boolean and GET reflects it.                             |
+| `BE-ADM-SET-024` | `PUT /api/v1/admin/settings`             | Trims and uppercases YouTube client names on save.                          |
+
 ### App releases
 
-| Test ID      | Method / Scope                      | Description & Assertions                                                    |
-| :----------- | :---------------------------------- | :-------------------------------------------------------------------------- |
-| `BE-REL-001` | `POST /api/v1/admin/releases`       | Stores the raw-body upload with its format, size and sha256.                |
-| `BE-REL-002` | `POST /api/v1/admin/releases`       | Rejects a file type the platform does not take (400, lists accepted types). |
-| `BE-REL-003` | `POST /api/v1/admin/releases`       | Rejects a bad version and an empty file with 400.                           |
-| `BE-REL-004` | `POST /api/v1/admin/releases`       | Refuses files over RELEASE_MAX_MB with 413 and leaves no temp file.         |
-| `BE-REL-005` | `POST /api/v1/admin/releases`       | Rejects app (non-admin) tokens with 401.                                    |
-| `BE-REL-006` | `POST /api/v1/admin/releases`       | Same platform, format and version again replaces the file (200, same id).   |
-| `BE-REL-007` | `GET /api/v1/releases`              | Lists the newest build per platform and format, without download counts.    |
-| `BE-REL-008` | `GET /api/v1/releases/:id/download` | Serves the file as an attachment with its type and counts the download.     |
-| `BE-REL-009` | `GET /api/v1/releases/:id/download` | Answers 404 for unknown and malformed ids.                                  |
-| `BE-REL-010` | `DELETE /api/v1/admin/releases/:id` | Removes the row and the file; a second delete is 404.                       |
+| Test ID      | Method / Scope                      | Description & Assertions                                                                                                                    |
+| :----------- | :---------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------ |
+| `BE-REL-001` | `GET /api/v1/releases`              | Lists the latest GitHub release's fixed-name builds only (no emulator APK, no checksum files, no unfinished uploads), with GitHub's digest. |
+| `BE-REL-002` | `GET /api/v1/releases`              | Asks GitHub once per 10 minutes, with `GITHUB_TOKEN` when set.                                                                              |
+| `BE-REL-003` | `GET /api/v1/releases`              | No release yet is an empty list.                                                                                                            |
+| `BE-REL-004` | `GET /api/v1/releases`              | GitHub failing: the last good list, or 502 UPSTREAM_UNAVAILABLE without one.                                                                |
+| `BE-REL-005` | `GET /api/v1/releases/:id/download` | Redirects to the asset on GitHub; unknown, emulator and malformed ids are 404.                                                              |
+| `BE-REL-006` | `/api/v1/admin/releases`            | The admin upload endpoints are gone (404).                                                                                                  |
+| `BE-REL-007` | `toAppReleases`                     | The tag's leading `v` is dropped; an empty body means no notes.                                                                             |
+
+### Piped key (Tailscale Funnel)
+
+| Test ID       | Method / Scope              | Description & Assertions                                                                                       |
+| :------------ | :-------------------------- | :------------------------------------------------------------------------------------------------------------- |
+| `BE-PKEY-001` | `pipedAuthHeaders`          | `X-Sonare-Key` only for Piped's host (any port), never googlevideo or ytimg; none without `PIPED_KEY`.         |
+| `BE-PKEY-002` | `Piped.*`                   | API calls to Piped carry the key.                                                                              |
+| `BE-PKEY-003` | `GET /api/v1/stream/:token` | The relay sends the key to the Piped proxy, not to googlevideo.                                                |
+| `BE-PKEY-004` | `pipedMediaUrl`             | With `PIPED_LOCAL_PROXY_URL`, Piped's proxy urls (with `host=`) go to the local proxy; googlevideo urls don't. |
+| `BE-PKEY-005` | `GET /api/v1/stream/:token` | With Funnel on, a local relay plays from the local proxy.                                                      |
 
 ---
 
@@ -273,6 +312,10 @@ This document maps all backend test IDs to their specifications, assertions, and
 | `BE-APP-011`    | `GET /api/v1/stream/:token`               | Handles 416 range past end with proper total size header.                                  |
 | `BE-APP-012`    | `GET /api/v1/lyrics/search`               | 502 LYRICS_UNAVAILABLE when LRCLIB is down.                                                |
 | `BE-APP-013`    | `GET /api/v1/image/:token`                | Fetches a Piped-proxied image straight from the CDN.                                       |
+| `BE-CFG-001`    | `GET /api/v1/app-config`                  | Requires no auth and returns HTTP 200.                                                     |
+| `BE-CFG-002`    | `GET /api/v1/app-config`                  | Returns default configuration values and updatedAt=0 when no settings row exists.          |
+| `BE-CFG-003`    | `GET /api/v1/app-config`                  | Reflects admin changes to inAppYoutube and youtubeClients, with accurate updatedAt.        |
+| `BE-CFG-004`    | `GET /api/v1/app-config`                  | Sets Cache-Control: public, max-age=60 header.                                             |
 | `BE-ERR-001`    | `POST /api/v1/client-errors`              | Accepts crash report from web client.                                                      |
 | `BE-ERR-002`    | `POST /api/v1/client-errors`              | Accepts warning report from linux client.                                                  |
 | `BE-ERR-003`    | `POST /api/v1/client-errors`              | Rejects invalid source name with 400 BAD_REQUEST.                                          |
@@ -340,7 +383,6 @@ This document maps all backend test IDs to their specifications, assertions, and
 | `BE-PURE-005`      | BadRequestError properties.              |
 | `BE-PURE-006`      | NoAudioStreamError properties.           |
 | `BE-PURE-007`      | UpstreamError properties.                |
-| `BE-PURE-008`      | Waveform fallback generation.            |
 | `BE-PURE-009`      | Parses LRC lyrics lines and timestamps.  |
 | `BE-PURE-010`      | Strips metadata tags from lyrics.        |
 | `BE-PURE-011`      | Rate limiter hit and window reset.       |
@@ -360,20 +402,24 @@ This document maps all backend test IDs to their specifications, assertions, and
 
 ### Configuration
 
-| Test ID       | Description                                                                   |
-| :------------ | :---------------------------------------------------------------------------- |
-| `BE-CONF-001` | Parses TCP PostgreSQL URL.                                                    |
-| `BE-CONF-002` | Parses Unix socket PostgreSQL URL.                                            |
-| `BE-CONF-003` | Parses URL with default port.                                                 |
-| `BE-CONF-004` | Validates environment variables schema.                                       |
-| `BE-CONF-005` | `assertProductionConfig` accepts a complete production config.                |
-| `BE-CONF-006` | `assertProductionConfig` rejects the dev or a short JWT_SECRET in production. |
-| `BE-CONF-007` | `assertProductionConfig` rejects missing SMTP_USER / SMTP_PASS in production. |
-| `BE-CONF-008` | `assertProductionConfig` rejects a non-https APP_URL in production.           |
-| `BE-CONF-009` | `assertProductionConfig` skips all checks outside production.                 |
-| `BE-CONF-010` | `parseTrustProxy` maps TRUST_PROXY to Express's `trust proxy` value.          |
-| `BE-MAIL-001` | `verifyEmailMessage` has the subject and the link in text and html.           |
-| `BE-MAIL-002` | `resetPasswordMessage` has the subject and the link in text and html.         |
+| Test ID         | Description                                                                   |
+| :-------------- | :---------------------------------------------------------------------------- |
+| `BE-CONF-001`   | Parses TCP PostgreSQL URL.                                                    |
+| `BE-CONF-002`   | Parses Unix socket PostgreSQL URL.                                            |
+| `BE-CONF-003`   | Parses URL with default port.                                                 |
+| `BE-CONF-004`   | Validates environment variables schema.                                       |
+| `BE-CONF-005`   | `assertProductionConfig` accepts a complete production config.                |
+| `BE-CONF-006`   | `assertProductionConfig` rejects the dev or a short JWT_SECRET in production. |
+| `BE-CONF-007`   | `assertProductionConfig` rejects a missing RESEND_API_KEY in production.      |
+| `BE-CONF-008`   | `assertProductionConfig` rejects a non-https APP_URL in production.           |
+| `BE-CONF-009`   | `assertProductionConfig` skips all checks outside production.                 |
+| `BE-CONF-010`   | `parseTrustProxy` maps TRUST_PROXY to Express's `trust proxy` value.          |
+| `BE-MAIL-001`   | `verifyEmailMessage` has the subject and the link in text and html.           |
+| `BE-MAIL-002`   | `resetPasswordMessage` has the subject and the link in text and html.         |
+| `BE-MAIL-003`   | With `RESEND_API_KEY`, mail is posted to Resend's API with the bearer key.    |
+| `BE-MAIL-004`   | A Resend refusal throws with its status and message, never the key.           |
+| `BE-MAIL-005`   | Without a Resend key, mail goes to SMTP (Mailpit in development).             |
+| `BE-LOGGER-001` | Only failed requests are logged: 5xx/thrown as errors, 4xx as warnings.       |
 
 ### Upstream Clients
 
@@ -465,15 +511,6 @@ This document maps all backend test IDs to their specifications, assertions, and
 | `BE-ADMAUTH-001` | Admin JWT token signing and verification. |
 | `BE-ADMAUTH-002` | requireAdmin middleware export check.     |
 
-### Peaks Extraction
-
-| Test ID        | Description                                        |
-| :------------- | :------------------------------------------------- |
-| `BE-PEAKS-001` | Bounded floating point peak levels generation.     |
-| `BE-PEAKS-002` | Deterministic waveform generation.                 |
-| `BE-PEAKS-003` | Synthetic peak fallback.                           |
-| `BE-PEAKS-004` | isPlaceholderPeaks recognises a failed extraction. |
-
 ### YouTube image urls
 
 | Test ID        | Description                                                             |
@@ -509,3 +546,55 @@ with the first problem as the message, and nothing is written.
 | `BE-VAL-018` | `GET /api/v1/trending`                        | `limit=500` → 400 "Must be at most 100".                                     |
 | `BE-VAL-019` | `GET /api/v1/trending`                        | `region=India` → 400 "region must be a two-letter country code".             |
 | `BE-VAL-020` | `POST /api/v1/auth/logout`                    | Non-string `refreshToken` → 400.                                             |
+
+---
+
+## 10. Catalog Metadata (Phase B2)
+
+| Test ID       | Method / Scope                             | Description & Assertions                                                                                           |
+| :------------ | :----------------------------------------- | :----------------------------------------------------------------------------------------------------------------- |
+| `BE-META-001` | `PUT /api/v1/me/favourites/tracks/:id`     | Accepts optional `meta` body; stores `TrackMeta` in `favourite_tracks.meta`.                                       |
+| `BE-META-002` | `PUT /api/v1/me/favourites/tracks/:id`     | Invalid `meta` is stored as null; valid meta overwrites previous.                                                  |
+| `BE-META-003` | `PUT /api/v1/me/favourites/albums/:id`     | Accepts optional `meta` body; stores `AlbumMeta` in `favourite_albums.meta`.                                       |
+| `BE-META-004` | `PUT /api/v1/me/following/artists/:id`     | Accepts optional `meta` body; stores `ArtistMeta` in `artist_follows.meta`.                                        |
+| `BE-META-005` | `POST /api/v1/me/playlists/:id/tracks`     | Accepts `metas` map keyed by track ID; stores `TrackMeta` in `playlist_tracks.meta`.                               |
+| `BE-META-006` | `POST /api/v1/me/sync`                     | Accepts optional `meta` on favourite items; stores and persists across sync.                                       |
+| `BE-META-007` | `GET /api/v1/me/library/tracks`            | Hydrates tracks using `row.meta` → `catalog_items` → Piped read order; metadata stored in row wins.                |
+| `BE-META-008` | `GET /api/v1/me/favourites/tracks`         | Falls back to `catalog_items` when row `meta` is null; still works when Piped is unreachable.                      |
+| `BE-META-009` | `GET /api/v1/tracks/:id`                   | Remembers `TrackMeta` to `catalog_items` on first fetch; future reads use cached data.                             |
+| `BE-META-010` | `GET /api/v1/albums/:id`                   | Remembers `AlbumMeta` to `catalog_items` on first fetch; future reads use cached data.                             |
+| `BE-META-011` | `GET /api/v1/artists/:id`                  | Remembers `ArtistMeta` to `catalog_items` on first fetch; future reads use cached data.                            |
+| `BE-META-012` | `GET /api/v1/tracks/:id/lyrics`            | Accepts `title`, `artist`, `durationMs` query params; skips Piped stream lookup when provided.                     |
+| `BE-META-013` | `GET /api/v1/tracks/:id/lyrics`            | When `title` and `artist` present, still searches preferred script without Piped round-trip.                       |
+| `BE-META-014` | `GET /api/v1/tracks/:id/lyrics`            | Returns 404 when lyrics not found even with provided metadata.                                                     |
+| `BE-META-015` | `catalogMeta.parseTrackMeta`               | Validates all required fields; rejects missing `title`/`artist`/`artistId`/`durationMs`.                           |
+| `BE-META-016` | `catalogMeta.parseTrackMeta`               | Accepts optional `album`, `albumId`, `thumbnail`; drops invalid thumbnails without rejecting parent.               |
+| `BE-META-017` | `catalogMeta.parseAlbumMeta`               | Validates required fields; accepts optional `year`, `trackCount`, `thumbnail`.                                     |
+| `BE-META-018` | `catalogMeta.parseArtistMeta`              | Validates required `name`; accepts optional `thumbnail`, `monthlyListeners`.                                       |
+| `BE-META-019` | `catalogMeta.rememberCatalogItem`          | Stores under the raw YouTube ID; `getCatalogItems` finds it by raw or `yt:` id.                                    |
+| `BE-META-021` | `GET /api/v1/me/recently-played`           | Uses row metadata for hydration; still works with missing Piped.                                                   |
+| `BE-META-022` | `GET /api/v1/me/most-played`               | Falls back to `catalog_items` or Piped when aggregated play data lacks row meta.                                   |
+| `BE-META-023` | `GET /api/v1/me/playlists/:id/tracks`      | Hydrates using row metadata; no Piped call needed if metadata exists.                                              |
+| `BE-META-024` | Thumbnail validation                       | Only accepts `/api/v1/...` URLs and `https://` URLs for `ytimg.com`, `googleusercontent.com`, `ggpht.com`.         |
+| `BE-META-025` | `PUT /api/v1/me/favourites/tracks/:id`     | Idempotent update: repeated calls with same ID do not create duplicates; updates `addedAt` and `meta`.             |
+| `BE-META-026` | `PUT /api/v1/me/favourites/albums/:id`     | Idempotent update: repeated calls with same album ID do not create duplicates.                                     |
+| `BE-META-027` | `PUT /api/v1/me/following/artists/:id`     | Idempotent update: repeated calls with same artist ID do not create duplicates.                                    |
+| `BE-META-028` | `SECURITY: catalog_items protection`       | Client-supplied metadata is saved to user row meta only; never written to shared `catalog_items`.                  |
+| `BE-META-029` | `ISOLATION: user metadata boundary`        | User-customized track metadata is never leaked or visible to other users; other users fetch from Piped / catalog.  |
+| `BE-META-030` | `GET /api/v1/me/library/{albums,artists}`  | Offline resilience: returns stored library items without error when Piped is offline.                              |
+| `BE-META-031` | `Hydration normalized track shape`         | Tracks hydrated from metadata have identical fields to `normalizeStreamToTrack` (`durationMs: null`, null codecs). |
+| `BE-META-032` | `Artist ID prefix preservation`            | Empty `artistId` remains empty string without double-prefixing or corruption to `yt:unknown`.                      |
+| `BE-META-033` | `GET /api/v1/tracks/:id/lyrics`            | Client metadata cache isolation: wrong client title does not pollute plain request cache.                          |
+| `BE-META-034` | `GET /api/v1/tracks/:id/lyrics`            | Server catalog precedence: server-known track metadata in `catalog_items` overrides client query params.           |
+| `BE-META-035` | `POST /api/v1/me/sync` plays with `meta`   | Synced plays keep the app's metadata; recently- and most-played (newest snapshot) hydrate from it without Piped.   |
+| `BE-PEAK-001` | `placeholderPeaks` pinned literal          | Matches pinned literal array for yt:NJAv_7lHUIU with 8 bars.                                                       |
+| `BE-PEAK-002` | `placeholderPeaks` deterministic bounds    | Generates bounded values in [0.3, 1] deterministically across multiple calls.                                      |
+| `BE-PEAK-003` | `resamplePeaks` downsample max-pooling     | Max-pooling over window when shrinking peaks array.                                                                |
+| `BE-PEAK-004` | `resamplePeaks` upsample linear interp     | Linear interpolation when expanding peaks array.                                                                   |
+| `BE-PEAK-005` | `resamplePeaks` edge cases                 | Handles empty array, zero bars, negative bars, same length, and single element arrays safely.                      |
+| `BE-PEAK-006` | `GET /api/v1/tracks/:id/peaks` uncached    | Returns placeholder:true and makes zero Piped/upstream/ffmpeg calls.                                               |
+| `BE-PEAK-007` | `PUT /api/v1/tracks/:id/peaks` upload      | Stores canonical 150 bars waveform in permanent cache; subsequent GET returns resampled 76 bars with max-pooling.  |
+| `BE-PEAK-008` | `PUT /api/v1/tracks/:id/peaks` idempotency | Second PUT returns stored:false and first uploaded waveform remains unchanged (first upload wins).                 |
+| `BE-PEAK-009` | `PUT /api/v1/tracks/:id/peaks` auth        | Requires authentication; returns 401 when unauthenticated.                                                         |
+| `BE-PEAK-010` | `PUT /api/v1/tracks/:id/peaks` validation  | Rejects invalid bodies (149/151 bars, NaN, >1, <0, missing) with 400 Bad Request.                                  |
+| `BE-PEAK-011` | `GET /api/v1/tracks/:id/peaks` pinned      | GET with ?bars=8 returns pinned placeholder literal and placeholder:true.                                          |

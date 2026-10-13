@@ -3,16 +3,18 @@ import { config } from './config.js';
 import { verifyDatabase } from './db/index.js';
 import { flushTelemetry, startTelemetry } from './services/telemetry.js';
 import { logger } from './logger.js';
-import { hasFfmpeg } from './services/peaks.js';
+import { mailTransportName } from './services/mail.js';
+import { loadSettings, pipedApiUrl } from './services/settings.js';
 
 const start = async () => {
   await verifyDatabase();
+  await loadSettings();
   startTelemetry();
   const app = createApp();
   const server = app.listen(config.PORT, () => {
     logger.info(`Sonare backend listening on port ${config.PORT}`);
-    logger.info(`Piped upstream mapped to ${config.PIPED_API_URL}`);
-    if (!hasFfmpeg()) logger.warn('ffmpeg is not on the PATH: waveforms will be placeholders, not the real audio');
+    logger.info(`Piped upstream mapped to ${pipedApiUrl()}`);
+    logger.info(`Mail goes out through ${mailTransportName()}`);
   });
 
   const shutdown = () => {

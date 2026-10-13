@@ -1,162 +1,160 @@
-import crypto from 'node:crypto';
-import fs from 'node:fs';
-import { afterAll, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import request from 'supertest';
+import { MockAgent, getGlobalDispatcher, setGlobalDispatcher, type Dispatcher } from 'undici';
 import { createApp } from '../../src/app.js';
-import { createAdminUser, createUser } from '../factories.js';
-import { releasesDir } from '../../src/services/releases.js';
+import { config } from '../../src/config.js';
+import { clearReleasesCache, toAppReleases, type GitHubRelease } from '../../src/services/releases.js';
+import { createAdminUser } from '../factories.js';
 
-describe('App releases: admin upload, public list and download', () => {
+const GITHUB = 'https://api.github.com';
+const LATEST = `/repos/${config.RELEASES_REPO}/releases/latest`;
+
+const asset = (id: number, name: string, extra: Record<string, unknown> = {}) => ({
+  id,
+  name,
+  size: 1000 + id,
+  state: 'uploaded',
+  browser_download_url: `https://github.com/${config.RELEASES_REPO}/releases/download/v1.2.0/${name}`,
+  updated_at: '2026-10-12T10:00:00Z',
+  digest: `sha256:${'ab'.repeat(32)}`,
+  ...extra,
+});
+
+const release: GitHubRelease = {
+  tag_name: 'v1.2.0',
+  body: 'Synced lyrics in more scripts.\n',
+  assets: [
+    asset(1, 'sonare-android-arm64.apk'),
+    asset(2, 'sonare-1.2.0-android-x86_64-emulator.apk'),
+    asset(3, 'sonare-linux-x64.AppImage'),
+    asset(4, 'sonare-linux-x64.deb', { digest: null }),
+    asset(5, 'sonare-linux-x64.tar.gz'),
+    asset(6, 'sonare-windows-x64.exe'),
+    asset(7, 'sonare-windows-x64.exe.sha256'),
+    asset(8, 'sonare-linux-x64.AppImage', { state: 'starter' }),
+  ] as GitHubRelease['assets'],
+};
+
+describe('App releases from GitHub', () => {
   const app = createApp();
+  let agent: MockAgent;
+  let original: Dispatcher;
 
-  afterAll(() => fs.rmSync(releasesDir(), { recursive: true, force: true }));
+  beforeEach(async () => {
+    await clearReleasesCache();
+    original = getGlobalDispatcher();
+    agent = new MockAgent();
+    agent.disableNetConnect();
+    agent.enableNetConnect(/127\.0\.0\.1|localhost/);
+    setGlobalDispatcher(agent);
+  });
 
-  const upload = (token: string, query: Record<string, string>, body: Buffer) => {
-    return request(app)
-      .post('/api/v1/admin/releases')
-      .query(query)
-      .set('Authorization', `Bearer ${token}`)
-      .set('Content-Type', 'application/octet-stream')
-      .send(body);
-  };
+  afterEach(async () => {
+    await agent.close();
+    setGlobalDispatcher(original);
+  });
 
-  it('BE-REL-001: POST /api/v1/admin/releases stores the file with its size and sha256', async () => {
-    const { token } = await createAdminUser();
-    const body = Buffer.from('fake apk bytes');
-    const res = await upload(token, { platform: 'android', version: '1.2.0', fileName: 'app-release.apk' }, body);
+  const github = () => agent.get(GITHUB);
 
-    expect(res.status).toBe(201);
-    expect(res.body).toMatchObject({
+  it('BE-REL-001: lists the fixed-name builds of the latest release, nothing else', async () => {
+    github().intercept({ path: LATEST, method: 'GET' }).reply(200, release);
+    const res = await request(app).get('/api/v1/releases');
+    expect(res.status).toBe(200);
+    expect(res.body.items.map((r: { fileName: string }) => r.fileName)).toEqual([
+      'sonare-android-arm64.apk',
+      'sonare-linux-x64.AppImage',
+      'sonare-linux-x64.deb',
+      'sonare-linux-x64.tar.gz',
+      'sonare-windows-x64.exe',
+    ]);
+    expect(res.body.items[0]).toEqual({
+      id: '1',
       platform: 'android',
       format: 'apk',
       version: '1.2.0',
-      fileName: 'app-release.apk',
-      sizeBytes: body.length,
-      sha256: crypto.createHash('sha256').update(body).digest('hex'),
+      fileName: 'sonare-android-arm64.apk',
+      sizeBytes: 1001,
+      sha256: 'ab'.repeat(32),
+      notes: 'Synced lyrics in more scripts.',
+      uploadedAt: '2026-10-12T10:00:00Z',
+      url: `https://github.com/${config.RELEASES_REPO}/releases/download/v1.2.0/sonare-android-arm64.apk`,
     });
-    expect(fs.existsSync(`${releasesDir()}/${res.body.id}.apk`)).toBe(true);
+    // An asset GitHub has no digest for can't be checked, but is still offered.
+    expect(res.body.items.find((r: { format: string }) => r.format === 'deb').sha256).toBeNull();
   });
 
-  it('BE-REL-002: POST /api/v1/admin/releases rejects a file type the platform does not take', async () => {
-    const { token } = await createAdminUser();
-    const res = await upload(
-      token,
-      { platform: 'windows', version: '1.0.0', fileName: 'sonare.deb' },
-      Buffer.from('x'),
-    );
-    expect(res.status).toBe(400);
-    expect(res.body.error.message).toContain('.exe');
+  it('BE-REL-002: asks GitHub once per 10 minutes, with the token when one is set', async () => {
+    const saved = config.GITHUB_TOKEN;
+    config.GITHUB_TOKEN = 'ghp_test';
+    let auth: unknown;
+    github()
+      .intercept({ path: LATEST, method: 'GET' })
+      .reply(200, (opts) => {
+        auth = (opts.headers as Record<string, string>).Authorization;
+        return release;
+      });
+    try {
+      expect((await request(app).get('/api/v1/releases')).body.items).toHaveLength(5);
+      // A second interceptor isn't registered: another call to GitHub would fail the request.
+      expect((await request(app).get('/api/v1/releases')).body.items).toHaveLength(5);
+      expect(auth).toBe('Bearer ghp_test');
+    } finally {
+      config.GITHUB_TOKEN = saved;
+    }
   });
 
-  it('BE-REL-003: POST /api/v1/admin/releases rejects a bad version and an empty file', async () => {
-    const { token } = await createAdminUser();
-    const badVersion = await upload(
-      token,
-      { platform: 'linux', version: '../1', fileName: 'sonare.tar.gz' },
-      Buffer.from('x'),
-    );
-    expect(badVersion.status).toBe(400);
-
-    const empty = await upload(token, { platform: 'linux', version: '1.0.0', fileName: 'sonare.deb' }, Buffer.alloc(0));
-    expect(empty.status).toBe(400);
-    expect(empty.body.error.message).toBe('The file is empty');
-  });
-
-  it('BE-REL-004: POST /api/v1/admin/releases refuses files over RELEASE_MAX_MB with 413', async () => {
-    const { token } = await createAdminUser();
-    const res = await upload(
-      token,
-      { platform: 'windows', version: '1.0.0', fileName: 'sonare.exe' },
-      Buffer.alloc(1024 * 1024 + 1),
-    );
-    expect(res.status).toBe(413);
-    expect(fs.readdirSync(releasesDir()).filter((f) => f.startsWith('.upload-'))).toEqual([]);
-  });
-
-  it('BE-REL-005: POST /api/v1/admin/releases needs an admin token', async () => {
-    const { token } = await createUser();
-    const res = await upload(token, { platform: 'android', version: '1.0.0', fileName: 'a.apk' }, Buffer.from('x'));
-    expect(res.status).toBe(401);
-  });
-
-  it('BE-REL-006: uploading the same platform, format and version again replaces the file', async () => {
-    const { token } = await createAdminUser();
-    const q = { platform: 'linux', version: '2.0.0', fileName: 'sonare.AppImage' };
-    const first = await upload(token, q, Buffer.from('one'));
-    const second = await upload(token, q, Buffer.from('second build'));
-
-    expect(second.status).toBe(200);
-    expect(second.body.id).toBe(first.body.id);
-    expect(second.body.sizeBytes).toBe(12);
-    const list = await request(app).get('/api/v1/admin/releases').set('Authorization', `Bearer ${token}`);
-    expect(list.body.items).toHaveLength(1);
-    expect(list.body.accepts.linux).toContain('.deb');
-  });
-
-  it('BE-REL-007: GET /api/v1/releases lists the newest build of each platform and format', async () => {
-    const { token } = await createAdminUser();
-    await upload(token, { platform: 'android', version: '1.0.0', fileName: 'a.apk' }, Buffer.from('old'));
-    await new Promise((r) => setTimeout(r, 10));
-    await upload(token, { platform: 'android', version: '1.1.0', fileName: 'a.apk' }, Buffer.from('new'));
-    await upload(token, { platform: 'windows', version: '1.0.0', fileName: 'Sonare Setup.exe' }, Buffer.from('w'));
-
+  it('BE-REL-003: no release yet is an empty list', async () => {
+    github().intercept({ path: LATEST, method: 'GET' }).reply(404, { message: 'Not Found' });
     const res = await request(app).get('/api/v1/releases');
     expect(res.status).toBe(200);
-    const byPlatform = Object.fromEntries(res.body.items.map((r: { platform: string }) => [r.platform, r]));
-    expect(res.body.items).toHaveLength(2);
-    expect(byPlatform.android.version).toBe('1.1.0');
-    expect(byPlatform.windows.fileName).toBe('Sonare_Setup.exe');
-    expect(byPlatform.android).not.toHaveProperty('downloads');
+    expect(res.body).toEqual({ items: [] });
   });
 
-  it('BE-REL-008: GET /api/v1/releases/:id/download serves the file and counts the download', async () => {
+  it('BE-REL-004: when GitHub fails, the last good list is served; with none, 502', async () => {
+    github().intercept({ path: LATEST, method: 'GET' }).reply(403, { message: 'API rate limit exceeded' });
+    const none = await request(app).get('/api/v1/releases');
+    expect(none.status).toBe(502);
+    expect(none.body.error.code).toBe('UPSTREAM_UNAVAILABLE');
+
+    github().intercept({ path: LATEST, method: 'GET' }).reply(200, release);
+    expect((await request(app).get('/api/v1/releases')).body.items).toHaveLength(5);
+
+    // Eleven minutes later the fresh copy is gone, and so is GitHub.
+    const { redis } = await import('../../src/services/cache.js');
+    await redis.del('releases:latest');
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(Date.now() + 11 * 60_000);
+    onTestFinished(() => {
+      vi.useRealTimers();
+    });
+    github().intercept({ path: LATEST, method: 'GET' }).reply(503, 'down');
+    const stale = await request(app).get('/api/v1/releases');
+    expect(stale.status).toBe(200);
+    expect(stale.body.items).toHaveLength(5);
+  });
+
+  it('BE-REL-005: a download redirects to the file on GitHub; unknown ids are 404', async () => {
+    github().intercept({ path: LATEST, method: 'GET' }).reply(200, release);
+    const res = await request(app).get('/api/v1/releases/6/download');
+    expect(res.status).toBe(302);
+    expect(res.headers.location).toBe(
+      `https://github.com/${config.RELEASES_REPO}/releases/download/v1.2.0/sonare-windows-x64.exe`,
+    );
+    expect((await request(app).get('/api/v1/releases/2/download')).status).toBe(404); // emulator APK
+    expect((await request(app).get('/api/v1/releases/999/download')).status).toBe(404);
+    expect((await request(app).get('/api/v1/releases/not-a-number/download')).status).toBe(404);
+  });
+
+  it('BE-REL-006: the admin upload endpoints are gone', async () => {
     const { token } = await createAdminUser();
-    const body = Buffer.from('apk contents');
-    const up = await upload(token, { platform: 'android', version: '1.0.0', fileName: 'sonare.apk' }, body);
-
-    const res = await request(app)
-      .get(`/api/v1/releases/${up.body.id}/download`)
-      .buffer(true)
-      .parse((r, cb) => {
-        const chunks: Buffer[] = [];
-        r.on('data', (c: Buffer) => chunks.push(c));
-        r.on('end', () => cb(null, Buffer.concat(chunks)));
-      });
-    expect(res.status).toBe(200);
-    expect(res.headers['content-disposition']).toContain('sonare.apk');
-    expect(res.headers['content-type']).toBe('application/vnd.android.package-archive');
-    expect(Buffer.compare(res.body, body)).toBe(0);
-
-    // A HEAD (link previews, download managers checking the size) isn't a download.
-    const head = await request(app).head(`/api/v1/releases/${up.body.id}/download`);
-    expect(head.status).toBe(200);
-
-    const list = await request(app).get('/api/v1/admin/releases').set('Authorization', `Bearer ${token}`);
-    expect(list.body.items[0].downloads).toBe(1);
-  });
-
-  it('BE-REL-009: GET /api/v1/releases/:id/download answers 404 for an unknown id', async () => {
-    const res = await request(app).get(`/api/v1/releases/${crypto.randomUUID()}/download`);
+    const res = await request(app).get('/api/v1/admin/releases').set('Authorization', `Bearer ${token}`);
     expect(res.status).toBe(404);
-    const bad = await request(app).get('/api/v1/releases/not-an-id/download');
-    expect(bad.status).toBe(404);
   });
 
-  it('BE-REL-010: DELETE /api/v1/admin/releases/:id removes the row and the file', async () => {
-    const { token } = await createAdminUser();
-    const up = await upload(token, { platform: 'linux', version: '1.0.0', fileName: 'sonare.deb' }, Buffer.from('d'));
-    const file = `${releasesDir()}/${up.body.id}.deb`;
-    expect(fs.existsSync(file)).toBe(true);
-
-    const del = await request(app)
-      .delete(`/api/v1/admin/releases/${up.body.id}`)
-      .set('Authorization', `Bearer ${token}`);
-    expect(del.status).toBe(204);
-    expect(fs.existsSync(file)).toBe(false);
-
-    const again = await request(app)
-      .delete(`/api/v1/admin/releases/${up.body.id}`)
-      .set('Authorization', `Bearer ${token}`);
-    expect(again.status).toBe(404);
+  it('BE-REL-007: toAppReleases strips the v from the tag and keeps an untagged version as is', () => {
+    expect(toAppReleases({ ...release, tag_name: '2.0.0', body: null })[0]).toMatchObject({
+      version: '2.0.0',
+      notes: null,
+    });
   });
 });

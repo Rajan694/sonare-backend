@@ -1,6 +1,43 @@
 import { request, type Dispatcher } from 'undici';
 import { config } from '../config.js';
+import { pipedApiUrl } from '../services/settings.js';
 import * as T from './piped.types.js';
+
+/**
+ * `X-Sonare-Key` for requests to Piped's host, when PIPED_KEY is set: a Piped published with
+ * Tailscale Funnel sits behind a gate that wants it (../sonare-piped-backend/funnel.sh). Its
+ * proxy is the same host on another port, so stream urls match too. Any other host gets
+ * nothing, so the key never leaves for googlevideo, ytimg or anyone else.
+ */
+export const pipedAuthHeaders = (url: string | URL, base: string = pipedApiUrl()): Record<string, string> => {
+  if (!config.PIPED_KEY) return {};
+  try {
+    return new URL(url).hostname === new URL(base).hostname ? { 'X-Sonare-Key': config.PIPED_KEY } : {};
+  } catch {
+    return {};
+  }
+};
+
+/**
+ * Where the stream relay fetches a media url. With PIPED_LOCAL_PROXY_URL set (Piped runs on
+ * this machine but publishes its proxy through Funnel), Piped's proxy urls - recognisable by
+ * the `host` parameter naming the googlevideo server - go to the local proxy instead, same path
+ * and query. Anything else, googlevideo's own urls included, is fetched as given.
+ */
+export const pipedMediaUrl = (url: string): string => {
+  const local = config.PIPED_LOCAL_PROXY_URL;
+  if (!local) return url;
+  try {
+    const media = new URL(url);
+    if (!media.searchParams.has('host')) return url;
+    const base = new URL(local);
+    media.protocol = base.protocol;
+    media.host = base.host;
+    return media.toString();
+  } catch {
+    return url;
+  }
+};
 
 export class UpstreamError extends Error {
   public status: number;
@@ -30,7 +67,7 @@ const UNREACHABLE_CODES = new Set([
 const networkError = (e: unknown): UpstreamError => {
   const code = (e as { code?: unknown } | null)?.code;
   if (typeof code === 'string' && UNREACHABLE_CODES.has(code)) {
-    return new UpstreamError(`Piped is unreachable at ${config.PIPED_API_URL} (${code})`, 502, true);
+    return new UpstreamError(`Piped is unreachable at ${pipedApiUrl()} (${code})`, 502, true);
   }
   return new UpstreamError(`Piped network error: ${e instanceof Error ? e.message : String(e)}`, 502);
 };
@@ -48,7 +85,7 @@ const fetchPiped = async <TRes>(
   path: string,
   options: { method?: Dispatcher.HttpMethod; query?: Record<string, string | number> } = {},
 ): Promise<TRes> => {
-  const url = new URL(path, config.PIPED_API_URL);
+  const url = new URL(path, pipedApiUrl());
   if (options.query) {
     for (const [key, val] of Object.entries(options.query)) {
       if (val !== undefined && val !== null && val !== '') {
@@ -65,6 +102,7 @@ const fetchPiped = async <TRes>(
         headers: {
           Accept: 'application/json',
           'User-Agent': 'Sonare/1.0',
+          ...pipedAuthHeaders(url),
         },
         bodyTimeout: 5000,
         headersTimeout: 5000,
@@ -140,10 +178,11 @@ export const Piped = {
    * health check itself time out.
    */
   async healthcheck({
+    baseUrl = pipedApiUrl(),
     timeoutMs = 5000,
     retry = true,
-  }: { timeoutMs?: number; retry?: boolean } = {}): Promise<boolean> {
-    const url = new URL('/healthcheck', config.PIPED_API_URL);
+  }: { baseUrl?: string; timeoutMs?: number; retry?: boolean } = {}): Promise<boolean> {
+    const url = new URL('/healthcheck', baseUrl);
     const attempts = retry ? 2 : 1;
     let attempt = 0;
     while (attempt < attempts) {
@@ -151,7 +190,7 @@ export const Piped = {
         const { statusCode, body } = await withTimeout(
           request(url, {
             method: 'GET',
-            headers: { 'User-Agent': 'Sonare/1.0' },
+            headers: { 'User-Agent': 'Sonare/1.0', ...pipedAuthHeaders(url, baseUrl) },
             signal: AbortSignal.timeout(timeoutMs),
           }),
           timeoutMs,
