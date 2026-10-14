@@ -24,16 +24,8 @@ const envSchema = z.object({
   // a hop count ("1"), "true", or Express's named values ("loopback").
   TRUST_PROXY: z.string().optional(),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
-  SMTP_HOST: z.string().default('127.0.0.1'),
-  SMTP_PORT: z.coerce.number().default(1025),
-  SMTP_SECURE: z
-    .string()
-    .default('false')
-    .transform((v) => v === 'true'),
-  SMTP_USER: z.string().optional(),
-  SMTP_PASS: z.string().optional(),
-  // Resend's HTTP API sends the mail when set; otherwise SMTP (Mailpit in development).
-  // Render's free plan blocks outbound SMTP ports, so production uses the API.
+  // Resend's HTTP API sends account email; without a key the server sends none.
+  // (HTTP rather than SMTP: Render's free plan blocks outbound SMTP ports.)
   RESEND_API_KEY: z.string().optional(),
   MAIL_FROM: z.string().default('Sonare <no-reply@sonare.vip>'),
   APP_URL: z.string().url().default('http://localhost:5183'),

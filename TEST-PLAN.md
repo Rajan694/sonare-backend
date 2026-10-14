@@ -66,6 +66,9 @@ This document maps all backend test IDs to their specifications, assertions, and
 | `BE-EMAIL-013` | `POST /api/v1/auth/login`               | Signing in to an unverified account sends a fresh verify link.                           |
 | `BE-EMAIL-014` | `POST /api/v1/auth/login`               | Signing in to a verified account sends nothing.                                          |
 | `BE-EMAIL-015` | `POST /api/v1/auth/login`               | Sign-in links share Resend's 3-an-hour limit; a mail failure never blocks the sign-in.   |
+| `BE-EMAIL-016` | `POST /api/v1/auth/resend-verification` | Says when the mail didn't go out (502 MAIL_FAILED / 503 MAIL_UNAVAILABLE) instead of ok. |
+| `BE-EMAIL-017` | `POST /api/v1/auth/forgot-password`     | A server that can't send mail answers 503 MAIL_UNAVAILABLE for any address.              |
+| `BE-EMAIL-018` | `POST /api/v1/auth/forgot-password`     | A failed reset mail still answers ok, so accounts cannot be probed.                      |
 
 ---
 
@@ -402,24 +405,24 @@ This document maps all backend test IDs to their specifications, assertions, and
 
 ### Configuration
 
-| Test ID         | Description                                                                   |
-| :-------------- | :---------------------------------------------------------------------------- |
-| `BE-CONF-001`   | Parses TCP PostgreSQL URL.                                                    |
-| `BE-CONF-002`   | Parses Unix socket PostgreSQL URL.                                            |
-| `BE-CONF-003`   | Parses URL with default port.                                                 |
-| `BE-CONF-004`   | Validates environment variables schema.                                       |
-| `BE-CONF-005`   | `assertProductionConfig` accepts a complete production config.                |
-| `BE-CONF-006`   | `assertProductionConfig` rejects the dev or a short JWT_SECRET in production. |
-| `BE-CONF-007`   | `assertProductionConfig` rejects a missing RESEND_API_KEY in production.      |
-| `BE-CONF-008`   | `assertProductionConfig` rejects a non-https APP_URL in production.           |
-| `BE-CONF-009`   | `assertProductionConfig` skips all checks outside production.                 |
-| `BE-CONF-010`   | `parseTrustProxy` maps TRUST_PROXY to Express's `trust proxy` value.          |
-| `BE-MAIL-001`   | `verifyEmailMessage` has the subject and the link in text and html.           |
-| `BE-MAIL-002`   | `resetPasswordMessage` has the subject and the link in text and html.         |
-| `BE-MAIL-003`   | With `RESEND_API_KEY`, mail is posted to Resend's API with the bearer key.    |
-| `BE-MAIL-004`   | A Resend refusal throws with its status and message, never the key.           |
-| `BE-MAIL-005`   | Without a Resend key, mail goes to SMTP (Mailpit in development).             |
-| `BE-LOGGER-001` | Only failed requests are logged: 5xx/thrown as errors, 4xx as warnings.       |
+| Test ID         | Description                                                                           |
+| :-------------- | :------------------------------------------------------------------------------------ |
+| `BE-CONF-001`   | Parses TCP PostgreSQL URL.                                                            |
+| `BE-CONF-002`   | Parses Unix socket PostgreSQL URL.                                                    |
+| `BE-CONF-003`   | Parses URL with default port.                                                         |
+| `BE-CONF-004`   | Validates environment variables schema.                                               |
+| `BE-CONF-005`   | `assertProductionConfig` accepts a complete production config.                        |
+| `BE-CONF-006`   | `assertProductionConfig` rejects the dev or a short JWT_SECRET in production.         |
+| `BE-CONF-007`   | `assertProductionConfig` rejects a missing RESEND_API_KEY in production.              |
+| `BE-CONF-008`   | `assertProductionConfig` rejects a non-https APP_URL in production.                   |
+| `BE-CONF-009`   | `assertProductionConfig` skips all checks outside production.                         |
+| `BE-CONF-010`   | `parseTrustProxy` maps TRUST_PROXY to Express's `trust proxy` value.                  |
+| `BE-MAIL-001`   | `verifyEmailMessage` has the subject and the link in text and html.                   |
+| `BE-MAIL-002`   | `resetPasswordMessage` has the subject and the link in text and html.                 |
+| `BE-MAIL-003`   | With `RESEND_API_KEY`, mail is posted to Resend's API with the bearer key.            |
+| `BE-MAIL-004`   | A Resend refusal throws MAIL_FAILED with Resend's answer as the cause, never the key. |
+| `BE-MAIL-005`   | Without a Resend key nothing is sent and it throws MAIL_UNAVAILABLE.                  |
+| `BE-LOGGER-001` | Only failed requests are logged: 5xx/thrown as errors, 4xx as warnings.               |
 
 ### Upstream Clients
 

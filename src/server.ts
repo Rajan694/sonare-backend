@@ -3,7 +3,7 @@ import { config } from './config.js';
 import { verifyDatabase } from './db/index.js';
 import { flushTelemetry, startTelemetry } from './services/telemetry.js';
 import { logger } from './logger.js';
-import { mailTransportName } from './services/mail.js';
+import { mailConfigured } from './services/mail.js';
 import { loadSettings, pipedApiUrl } from './services/settings.js';
 
 const start = async () => {
@@ -14,7 +14,8 @@ const start = async () => {
   const server = app.listen(config.PORT, () => {
     logger.info(`Sonare backend listening on port ${config.PORT}`);
     logger.info(`Piped upstream mapped to ${pipedApiUrl()}`);
-    logger.info(`Mail goes out through ${mailTransportName()}`);
+    if (mailConfigured()) logger.info('Mail goes out through the Resend API');
+    else logger.warn('Mail is off: set RESEND_API_KEY to send verification and password-reset emails');
   });
 
   const shutdown = () => {

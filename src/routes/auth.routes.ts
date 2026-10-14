@@ -1,4 +1,4 @@
-import { Router, Request, Response } from 'express';
+import { Router, Response } from 'express';
 import bcrypt from 'bcrypt';
 import { z } from 'zod';
 import { and, eq, isNull, sql } from 'drizzle-orm';
@@ -8,7 +8,8 @@ import { signAccessToken, generateRefreshToken, hashToken, requireAuth } from '.
 import { createRateLimiter } from '../middleware/rateLimit.js';
 import { config } from '../config.js';
 import { parseBody } from '../validation.js';
-import { sendMail, verifyEmailMessage, resetPasswordMessage } from '../services/mail.js';
+import { mailConfigured, sendMail, verifyEmailMessage, resetPasswordMessage } from '../services/mail.js';
+import { MailError } from '../errors.js';
 import {
   createEmailToken,
   consumeEmailToken,
@@ -80,21 +81,17 @@ const startSession = async (user: typeof users.$inferSelect) => {
   return { accessToken: signAccessToken({ id: user.id, email: user.email }), refreshToken, user: userView(user) };
 };
 
-/** Mail failures are logged, never surfaced: the account action itself already succeeded. */
-const sendVerifyEmail = async (req: Request, user: typeof users.$inferSelect) => {
+/** Throws MailError when the mail doesn't go out; callers decide whether that blocks the request. */
+const sendVerifyEmail = async (user: typeof users.$inferSelect) => {
   const raw = await createEmailToken(user.id, 'verify', VERIFY_TOKEN_TTL_MS);
   const link = `${config.APP_URL}/verify-email?token=${raw}`;
-  await sendMail({ to: user.email, ...verifyEmailMessage(link) }).catch((err) =>
-    req.log.warn({ err }, 'verification email failed'),
-  );
+  await sendMail({ to: user.email, ...verifyEmailMessage(link) });
 };
 
-const sendResetEmail = async (req: Request, user: typeof users.$inferSelect) => {
+const sendResetEmail = async (user: typeof users.$inferSelect) => {
   const raw = await createEmailToken(user.id, 'reset', RESET_TOKEN_TTL_MS);
   const link = `${config.APP_URL}/reset-password?token=${raw}`;
-  await sendMail({ to: user.email, ...resetPasswordMessage(link) }).catch((err) =>
-    req.log.warn({ err }, 'password reset email failed'),
-  );
+  await sendMail({ to: user.email, ...resetPasswordMessage(link) });
 };
 
 authRouter.post('/register', async (req, res) => {
@@ -113,7 +110,8 @@ authRouter.post('/register', async (req, res) => {
     .values({ email: body.email, passwordHash, displayName: body.displayName })
     .returning();
 
-  await sendVerifyEmail(req, user);
+  // The account exists either way; Settings → "Resend" says what went wrong with the mail.
+  await sendVerifyEmail(user).catch((err) => req.log.warn({ err }, 'verification email failed'));
   res.status(201).json(await startSession(user));
 });
 
@@ -136,7 +134,7 @@ authRouter.post('/login', async (req, res) => {
   // An unverified address gets a fresh link at each sign-in (at most 3 an hour, shared with
   // "Resend"), in the background: signing in doesn't wait for the mail server.
   if (!user.emailVerifiedAt && (await resendLimiter.hit(user.id)).allowed) {
-    sendVerifyEmail(req, user).catch((err) => req.log.warn({ err }, 'verification email failed'));
+    sendVerifyEmail(user).catch((err) => req.log.warn({ err }, 'verification email failed'));
   }
   res.json(session);
 });
@@ -199,20 +197,25 @@ authRouter.post('/resend-verification', requireAuth, async (req, res) => {
   const limit = await resendLimiter.hit(user.id);
   if (!limit.allowed) return rateLimited(res, limit.retryAfterSec);
 
-  await sendVerifyEmail(req, user);
+  // Throws MailError, which tells the app the mail didn't go out.
+  await sendVerifyEmail(user);
   res.json({ ok: true });
 });
 
-// Always answers ok, whether or not the address has an account, so it can't be used to probe for accounts.
+// Answers ok whether or not the address has an account, so it can't be used to probe for accounts.
+// A server that can't send mail at all says so to everyone; a failed send is only logged.
 authRouter.post('/forgot-password', async (req, res) => {
   const body = parseBody(forgotSchema, req);
+  if (!mailConfigured()) throw new MailError('MAIL_UNAVAILABLE');
   const byIp = await forgotIpLimiter.hit(req.ip ?? 'unknown');
   if (!byIp.allowed) return rateLimited(res, byIp.retryAfterSec);
   const byEmail = await forgotEmailLimiter.hit(body.email);
   if (!byEmail.allowed) return rateLimited(res, byEmail.retryAfterSec);
 
   const user = await findUserByEmail(body.email);
-  if (user?.role === 'user') await sendResetEmail(req, user);
+  if (user?.role === 'user') {
+    await sendResetEmail(user).catch((err) => req.log.warn({ err }, 'password reset email failed'));
+  }
   res.json({ ok: true });
 });
 

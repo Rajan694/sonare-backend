@@ -2,14 +2,17 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import request from 'supertest';
 import { eq } from 'drizzle-orm';
 
-// No SMTP server in tests: capture what would have been sent.
+// No Resend in tests: capture what would have been sent.
 const sendMail = vi.hoisted(() => vi.fn());
+const mailConfigured = vi.hoisted(() => vi.fn());
 vi.mock('../../src/services/mail.js', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../src/services/mail.js')>()),
   sendMail,
+  mailConfigured,
 }));
 
 import { createApp } from '../../src/app.js';
+import { MailError } from '../../src/errors.js';
 import { db } from '../../src/db/index.js';
 import { emailTokens, refreshTokens, users } from '../../src/db/schema.js';
 import { hashToken } from '../../src/middleware/auth.js';
@@ -27,6 +30,8 @@ describe('Email verification and password reset', () => {
   beforeEach(() => {
     sendMail.mockReset();
     sendMail.mockResolvedValue(undefined);
+    mailConfigured.mockReset();
+    mailConfigured.mockReturnValue(true);
   });
 
   const register = async (email = 'new@example.com', password = 'password123') => {
@@ -53,7 +58,7 @@ describe('Email verification and password reset', () => {
   });
 
   it('BE-EMAIL-002: register still succeeds when the email cannot be sent', async () => {
-    sendMail.mockRejectedValueOnce(new Error('SMTP down'));
+    sendMail.mockRejectedValueOnce(new MailError('MAIL_FAILED'));
     const res = await register();
     expect(res.status).toBe(201);
     expect(res.body.accessToken).toBeTruthy();
@@ -227,7 +232,7 @@ describe('Email verification and password reset', () => {
 
   it('BE-EMAIL-015: sign-in links share the 3-an-hour limit and a mail failure never blocks signing in', async () => {
     await createUser({ email: 'often@example.com' });
-    sendMail.mockRejectedValueOnce(new Error('Resend answered 500: down'));
+    sendMail.mockRejectedValueOnce(new MailError('MAIL_FAILED', { cause: new Error('Resend answered 500: down') }));
     for (let i = 0; i < 4; i++) {
       const res = await login('often@example.com');
       expect(res.status).toBe(200);
@@ -239,5 +244,40 @@ describe('Email verification and password reset', () => {
     const resend = await request(app).post('/api/v1/auth/resend-verification').set('Authorization', `Bearer ${token}`);
     expect(resend.status).toBe(429);
     expect(sendMail).toHaveBeenCalledTimes(3);
+  });
+
+  it("BE-EMAIL-016: resend-verification says when the mail didn't go out instead of answering ok", async () => {
+    const reg = await register();
+    const auth = { Authorization: `Bearer ${reg.body.accessToken}` };
+
+    sendMail.mockRejectedValueOnce(new MailError('MAIL_FAILED', { cause: new Error('Resend answered 403: nope') }));
+    const failed = await request(app).post('/api/v1/auth/resend-verification').set(auth);
+    expect(failed.status).toBe(502);
+    expect(failed.body.error.code).toBe('MAIL_FAILED');
+    expect(failed.body.error.message).not.toContain('Resend');
+
+    sendMail.mockRejectedValueOnce(new MailError('MAIL_UNAVAILABLE'));
+    const off = await request(app).post('/api/v1/auth/resend-verification').set(auth);
+    expect(off.status).toBe(503);
+    expect(off.body.error.code).toBe('MAIL_UNAVAILABLE');
+  });
+
+  it("BE-EMAIL-017: forgot-password on a server that can't send mail says so for any address", async () => {
+    mailConfigured.mockReturnValue(false);
+    await createUser({ email: 'known@example.com' });
+    for (const email of ['known@example.com', 'nobody@example.com']) {
+      const res = await request(app).post('/api/v1/auth/forgot-password').send({ email });
+      expect(res.status).toBe(503);
+      expect(res.body.error.code).toBe('MAIL_UNAVAILABLE');
+    }
+    expect(sendMail).not.toHaveBeenCalled();
+  });
+
+  it('BE-EMAIL-018: a failed reset mail still answers ok, so accounts cannot be probed', async () => {
+    await createUser({ email: 'known@example.com' });
+    sendMail.mockRejectedValueOnce(new MailError('MAIL_FAILED'));
+    const res = await request(app).post('/api/v1/auth/forgot-password').send({ email: 'known@example.com' });
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ ok: true });
   });
 });

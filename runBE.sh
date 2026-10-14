@@ -36,11 +36,11 @@ if [ ! -f .env ]; then
     exit 1
 fi
 
-if command -v docker >/dev/null 2>&1; then
-    docker compose -f docker-compose.dev.yml up -d mailpit
-    echo "Mailpit inbox: http://localhost:8025"
+# Account email only goes out through Resend; say so now rather than when a mail is missing.
+if grep -qE '^RESEND_API_KEY=["'"'"']?[^"'"'"' ]' .env; then
+    echo "Mail: Resend API"
 else
-    echo "Warning: docker not found - Mailpit will not start. SMTP will fail."
+    echo "Warning: RESEND_API_KEY is not set in .env - verification and password-reset emails will not be sent."
 fi
 
 # The Piped upstream is private (contract D2) but the catalog is useless without

@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { MockAgent, getGlobalDispatcher, setGlobalDispatcher, type Dispatcher } from 'undici';
 import { config } from '../../src/config.js';
-import { mailTransportName, resetPasswordMessage, sendMail, verifyEmailMessage } from '../../src/services/mail.js';
+import { mailConfigured, resetPasswordMessage, sendMail, verifyEmailMessage } from '../../src/services/mail.js';
+import { MailError } from '../../src/errors.js';
 
 const mail = { to: 'a@example.com', subject: 'Hi', text: 'Text body', html: '<p>HTML body</p>' };
 
@@ -61,24 +62,31 @@ describe('mail.ts', () => {
         html: '<p>HTML body</p>',
         text: 'Text body',
       });
-      expect(mailTransportName()).toBe('Resend API');
+      expect(mailConfigured()).toBe(true);
     });
 
-    it("BE-MAIL-004: a refusal throws with Resend's status and message, never the key", async () => {
+    it("BE-MAIL-004: a refusal throws MAIL_FAILED with Resend's status and message as the cause, never the key", async () => {
       agent
         .get('https://api.resend.com')
         .intercept({ path: '/emails', method: 'POST' })
         .reply(403, { statusCode: 403, name: 'validation_error', message: 'The sonare.vip domain is not verified' });
 
-      const err = await sendMail(mail).catch((e: Error) => e);
-      expect(err).toBeInstanceOf(Error);
-      expect((err as Error).message).toBe('Resend answered 403: The sonare.vip domain is not verified');
-      expect((err as Error).message).not.toContain('re_test_key');
+      const err = (await sendMail(mail).catch((e: unknown) => e)) as MailError;
+      expect(err).toBeInstanceOf(MailError);
+      expect(err.code).toBe('MAIL_FAILED');
+      expect(err.status).toBe(502);
+      const cause = err.cause as Error;
+      expect(cause.message).toBe('Resend answered 403: The sonare.vip domain is not verified');
+      expect(`${err.message} ${cause.message}`).not.toContain('re_test_key');
     });
   });
 
-  it('BE-MAIL-005: without a Resend key, mail goes to SMTP (Mailpit in development)', () => {
+  it('BE-MAIL-005: without a Resend key nothing is sent and it throws MAIL_UNAVAILABLE', async () => {
     expect(config.RESEND_API_KEY).toBeFalsy();
-    expect(mailTransportName()).toBe(`SMTP ${config.SMTP_HOST}:${config.SMTP_PORT}`);
+    expect(mailConfigured()).toBe(false);
+    const err = (await sendMail(mail).catch((e: unknown) => e)) as MailError;
+    expect(err).toBeInstanceOf(MailError);
+    expect(err.code).toBe('MAIL_UNAVAILABLE');
+    expect(err.status).toBe(503);
   });
 });

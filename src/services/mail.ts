@@ -1,10 +1,10 @@
-import nodemailer, { type Transporter } from 'nodemailer';
 import { request } from 'undici';
 import { config } from '../config.js';
+import { MailError } from '../errors.js';
 
-// Account email. With RESEND_API_KEY set it goes out through Resend's HTTP API (production:
-// Render's free plan blocks outbound SMTP ports); otherwise through SMTP, which is Mailpit in
-// development (its inbox: http://localhost:8025).
+// Account email goes out through Resend's HTTP API, in development too, so a mail the app
+// calls sent really reaches the inbox. Without RESEND_API_KEY nothing can be sent, and the
+// routes that send on request answer MAIL_UNAVAILABLE instead of pretending.
 
 export const RESEND_API_URL = 'https://api.resend.com/emails';
 
@@ -16,18 +16,8 @@ export interface MailMessage {
 
 type Mail = MailMessage & { to: string };
 
-let smtp: Transporter | undefined;
-
-/** Made on first use, so a server that sends through Resend never opens an SMTP transport. */
-const smtpTransport = (): Transporter => {
-  smtp ??= nodemailer.createTransport({
-    host: config.SMTP_HOST,
-    port: config.SMTP_PORT,
-    secure: config.SMTP_SECURE,
-    auth: config.SMTP_USER ? { user: config.SMTP_USER, pass: config.SMTP_PASS } : undefined,
-  });
-  return smtp;
-};
+/** Mail can only go out once RESEND_API_KEY is set. */
+export const mailConfigured = (): boolean => Boolean(config.RESEND_API_KEY);
 
 const sendWithResend = async (apiKey: string, mail: Mail): Promise<void> => {
   const { statusCode, body } = await request(RESEND_API_URL, {
@@ -54,19 +44,14 @@ const sendWithResend = async (apiKey: string, mail: Mail): Promise<void> => {
   throw new Error(`Resend answered ${statusCode}: ${detail}`);
 };
 
-/** How mail leaves this server, for the startup log. */
-export const mailTransportName = (): string => {
-  if (config.RESEND_API_KEY) return 'Resend API';
-  const mailpit =
-    config.NODE_ENV === 'development' &&
-    ['127.0.0.1', 'localhost'].includes(config.SMTP_HOST) &&
-    config.SMTP_PORT === 1025;
-  return `SMTP ${config.SMTP_HOST}:${config.SMTP_PORT}${mailpit ? ' (Mailpit inbox: http://localhost:8025)' : ''}`;
-};
-
+/** Throws MailError: MAIL_UNAVAILABLE without a key, MAIL_FAILED (Resend's answer as the cause) otherwise. */
 export const sendMail = async (mail: Mail): Promise<void> => {
-  if (config.RESEND_API_KEY) return sendWithResend(config.RESEND_API_KEY, mail);
-  await smtpTransport().sendMail({ from: config.MAIL_FROM, ...mail });
+  if (!config.RESEND_API_KEY) throw new MailError('MAIL_UNAVAILABLE');
+  try {
+    await sendWithResend(config.RESEND_API_KEY, mail);
+  } catch (err) {
+    throw new MailError('MAIL_FAILED', { cause: err });
+  }
 };
 
 export const verifyEmailMessage = (link: string): MailMessage => {
