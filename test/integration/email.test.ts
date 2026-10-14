@@ -292,68 +292,69 @@ describe('Email verification and password reset', () => {
     expect(res.status).toBe(200);
     expect(res.body).toEqual({ ok: true });
   });
-});
-const verifyCode = (accessToken: string, code: string) => {
-  return request(app)
-    .post('/api/v1/auth/verify-email-code')
-    .set('Authorization', `Bearer ${accessToken}`)
-    .send({ code });
-};
 
-it('BE-EMAIL-019: the emailed code verifies the signed-in account once, typed with or without a space', async () => {
-  const reg = await register();
-  const code = lastMailCode();
-  const res = await verifyCode(reg.body.accessToken, `${code.slice(0, 3)} ${code.slice(3)}`);
-  expect(res.status).toBe(200);
-  expect(res.body).toEqual({ ok: true });
+  const verifyCode = (accessToken: string, code: string) => {
+    return request(app)
+      .post('/api/v1/auth/verify-email-code')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send({ code });
+  };
 
-  const me = await request(app).get('/api/v1/me').set('Authorization', `Bearer ${reg.body.accessToken}`);
-  expect(me.body.emailVerified).toBe(true);
-  const again = await verifyCode(reg.body.accessToken, code);
-  expect(again.body).toEqual({ ok: true, alreadyVerified: true });
-});
+  it('BE-EMAIL-019: the emailed code verifies the signed-in account once, typed with or without a space', async () => {
+    const reg = await register();
+    const code = lastMailCode();
+    const res = await verifyCode(reg.body.accessToken, `${code.slice(0, 3)} ${code.slice(3)}`);
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ ok: true });
 
-it('BE-EMAIL-020: a wrong code is refused, and the code stops working after 5 wrong tries', async () => {
-  const reg = await register();
-  const code = lastMailCode();
-  const wrong = code === '000000' ? '111111' : '000000';
+    const me = await request(app).get('/api/v1/me').set('Authorization', `Bearer ${reg.body.accessToken}`);
+    expect(me.body.emailVerified).toBe(true);
+    const again = await verifyCode(reg.body.accessToken, code);
+    expect(again.body).toEqual({ ok: true, alreadyVerified: true });
+  });
 
-  const first = await verifyCode(reg.body.accessToken, wrong);
-  expect(first.status).toBe(400);
-  expect(first.body.error.code).toBe('INVALID_CODE');
-  for (let i = 0; i < 3; i++) await verifyCode(reg.body.accessToken, wrong);
-  const fifth = await verifyCode(reg.body.accessToken, wrong);
-  expect(fifth.body.error.code).toBe('CODE_EXPIRED');
+  it('BE-EMAIL-020: a wrong code is refused, and the code stops working after 5 wrong tries', async () => {
+    const reg = await register();
+    const code = lastMailCode();
+    const wrong = code === '000000' ? '111111' : '000000';
 
-  const right = await verifyCode(reg.body.accessToken, code);
-  expect(right.status).toBe(400);
-  expect(right.body.error.code).toBe('CODE_EXPIRED');
-  const me = await request(app).get('/api/v1/me').set('Authorization', `Bearer ${reg.body.accessToken}`);
-  expect(me.body.emailVerified).toBe(false);
-});
+    const first = await verifyCode(reg.body.accessToken, wrong);
+    expect(first.status).toBe(400);
+    expect(first.body.error.code).toBe('INVALID_CODE');
+    for (let i = 0; i < 3; i++) await verifyCode(reg.body.accessToken, wrong);
+    const fifth = await verifyCode(reg.body.accessToken, wrong);
+    expect(fifth.body.error.code).toBe('CODE_EXPIRED');
 
-it("BE-EMAIL-021: codes expire, only the newest works, and one account's code doesn't verify another", async () => {
-  const reg = await register();
-  const firstCode = lastMailCode();
-  await request(app).post('/api/v1/auth/resend-verification').set('Authorization', `Bearer ${reg.body.accessToken}`);
-  const secondCode = lastMailCode();
-  if (firstCode !== secondCode) {
-    expect((await verifyCode(reg.body.accessToken, firstCode)).body.error.code).toBe('INVALID_CODE');
-  }
+    const right = await verifyCode(reg.body.accessToken, code);
+    expect(right.status).toBe(400);
+    expect(right.body.error.code).toBe('CODE_EXPIRED');
+    const me = await request(app).get('/api/v1/me').set('Authorization', `Bearer ${reg.body.accessToken}`);
+    expect(me.body.emailVerified).toBe(false);
+  });
 
-  const other = await register('other@example.com');
-  expect((await verifyCode(other.body.accessToken, secondCode)).status).toBe(400);
+  it("BE-EMAIL-021: codes expire, only the newest works, and one account's code doesn't verify another", async () => {
+    const reg = await register();
+    const firstCode = lastMailCode();
+    await request(app).post('/api/v1/auth/resend-verification').set('Authorization', `Bearer ${reg.body.accessToken}`);
+    const secondCode = lastMailCode();
+    if (firstCode !== secondCode) {
+      expect((await verifyCode(reg.body.accessToken, firstCode)).body.error.code).toBe('INVALID_CODE');
+    }
 
-  await db.update(emailTokens).set({ expiresAt: new Date(Date.now() - 1000) });
-  const late = await verifyCode(reg.body.accessToken, secondCode);
-  expect(late.body.error.code).toBe('CODE_EXPIRED');
-});
+    const other = await register('other@example.com');
+    expect((await verifyCode(other.body.accessToken, secondCode)).status).toBe(400);
 
-it('BE-EMAIL-022: verify-email-code needs a signed-in account and a 6-digit code', async () => {
-  const anon = await request(app).post('/api/v1/auth/verify-email-code').send({ code: '123456' });
-  expect(anon.status).toBe(401);
-  const reg = await register();
-  const bad = await verifyCode(reg.body.accessToken, '12ab56');
-  expect(bad.status).toBe(400);
-  expect(bad.body.error.code).toBe('BAD_REQUEST');
+    await db.update(emailTokens).set({ expiresAt: new Date(Date.now() - 1000) });
+    const late = await verifyCode(reg.body.accessToken, secondCode);
+    expect(late.body.error.code).toBe('CODE_EXPIRED');
+  });
+
+  it('BE-EMAIL-022: verify-email-code needs a signed-in account and a 6-digit code', async () => {
+    const anon = await request(app).post('/api/v1/auth/verify-email-code').send({ code: '123456' });
+    expect(anon.status).toBe(401);
+    const reg = await register();
+    const bad = await verifyCode(reg.body.accessToken, '12ab56');
+    expect(bad.status).toBe(400);
+    expect(bad.body.error.code).toBe('BAD_REQUEST');
+  });
 });
