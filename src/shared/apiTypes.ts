@@ -1,0 +1,180 @@
+// GENERATED from sonare-frontend/shared/apiTypes.ts by scripts/sync-shared-catalog.mjs (root repo).
+// Do not edit here: change the frontend file and run the script again.
+
+// Shapes the Sonare API returns (../../docs/api-contract.md), shared by the desktop/web app
+// and the mobile app. Types only: no runtime code and no imports, so each app can pull it in
+// with `import type` / `export type *` and no bundler ever has to load this file.
+//
+// Ids are namespaced: `yt:…` for server content, `sonare:…` for the user's own playlists,
+// `local:…` for device files.
+
+export type Source = "local" | "server";
+
+export interface Page<T> {
+  items: T[];
+  meta?: {
+    nextCursor?: string;
+    total?: number;
+  };
+}
+
+export interface User {
+  id: string;
+  email: string;
+  displayName: string;
+  /** Missing on sessions saved before email verification existed. */
+  emailVerified?: boolean;
+  /** ISO timestamp (GET /me); not sent with sign-in responses. */
+  createdAt?: string;
+}
+
+export interface Track {
+  id: string;
+  title: string;
+  artistId: string;
+  artist: string;
+  albumId: string | null;
+  album: string | null;
+  durationMs: number | null;
+  source: Source;
+  localPath?: string;
+  codec?: string | null;
+  bitrateKbps?: number | null;
+  bitDepth?: number;
+  playCount: number;
+  favourite: boolean;
+  addedAt: number;
+  lastPlayedAt?: number;
+  thumbnail?: string;
+}
+
+export interface Album {
+  id: string;
+  title: string;
+  artist: string;
+  artistId: string;
+  year: number | null;
+  trackCount: number | null;
+  genre: string | null;
+  source: Source;
+  downloaded: boolean;
+  thumbnail?: string;
+}
+
+export interface Artist {
+  id: string;
+  name: string;
+  albumCount: number;
+  localTrackCount: number;
+  following: boolean;
+  monthlyListeners?: number | null;
+  thumbnail?: string;
+  /** Library only: liked or playlisted songs by an artist the user doesn't follow. */
+  songCount?: number;
+}
+
+export interface Playlist {
+  id: string;
+  name: string;
+  description?: string | null;
+  kind: "local" | "synced" | "online";
+  trackCount: number | null;
+  downloadedCount: number;
+  /** The user's own playlists only; YouTube playlists (GET /playlists/:id) have no date. */
+  updatedAt?: number;
+  thumbnail?: string;
+}
+
+/** Search results carry a `kind` discriminator. */
+export type SearchItem =
+  | ({ kind: "track" } & Track)
+  | ({ kind: "album" } & Album)
+  | ({ kind: "artist" } & Artist)
+  // Playlist has its own `kind` (local/synced/online); search replaces it with the discriminator.
+  | ({ kind: "playlist" } & Omit<Playlist, "kind">);
+
+export interface LyricsLine {
+  atMs: number;
+  text: string;
+}
+
+/** GET /tracks/:id/lyrics. */
+export interface Lyrics {
+  synced: boolean;
+  /** lrclib, genius or user (an override saved by the user). */
+  provider: string;
+  offsetMs: number;
+  lines: LyricsLine[];
+  plain?: string;
+  /** Genius results carry only a link to the lyrics. */
+  attribution?: { name: string; url: string };
+}
+
+/** GET /tracks/:id/stream. */
+export interface StreamInfo {
+  url: string;
+  mimeType: string;
+  codec: string;
+  bitrateKbps: number;
+  contentLength: number;
+  expiresAt: number;
+  muxed?: boolean;
+  itag?: number;
+}
+
+export type ReleasePlatform = "android" | "linux" | "windows";
+
+/** An app build: an asset of the latest GitHub release (GET /releases). */
+export interface AppRelease {
+  /** The GitHub asset id; GET /releases/:id/download redirects to the file. */
+  id: string;
+  platform: ReleasePlatform;
+  /** apk | appimage | deb | tar.gz | exe */
+  format: string;
+  version: string;
+  /** What the download is saved as. */
+  fileName: string;
+  sizeBytes: number;
+  /** GitHub's digest of the file; null for assets uploaded before GitHub recorded one. */
+  sha256: string | null;
+  notes: string | null;
+  uploadedAt: string;
+  /** The file on GitHub. */
+  url?: string;
+}
+
+/** GET /app-config. */
+export interface AppConfig {
+  inAppYoutube: boolean;
+  youtubeClients: string[];
+  updatedAt: number;
+}
+
+// Catalog metadata for tracks, albums, and artists stored in row metadata or catalog_items table.
+// Used for offline/fallback display when Piped is unreachable.
+
+export interface TrackMeta {
+  title: string;
+  artist: string;
+  artistId: string;
+  album?: string;
+  albumId?: string;
+  durationMs: number | null;
+  thumbnail?: string;
+}
+
+export interface AlbumMeta {
+  title: string;
+  artist: string;
+  artistId: string;
+  year?: number | null;
+  trackCount?: number | null;
+  thumbnail?: string;
+}
+
+export interface ArtistMeta {
+  name: string;
+  thumbnail?: string;
+  monthlyListeners?: number | null;
+}
+
