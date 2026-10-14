@@ -197,11 +197,13 @@ export const PermanentCache = {
   async setLyrics(key: string, data: ResolvedLyrics | null) {
     return setCached(`lyrics:${key}`, data);
   },
+  // v3: the apps upload loudness (RMS) per bar since 2026-10-14. v2 waveforms held each bar's
+  // loudest sample, which is near full scale in most music, so they drew a flat block.
   async getPeaks(key: string) {
-    return getCached<number[]>(`peaks:v2:${key}`);
+    return getCached<number[]>(`peaks:v3:${key}`);
   },
   async setPeaks(key: string, data: number[]) {
-    return setCached(`peaks:v2:${key}`, data);
+    return setCached(`peaks:v3:${key}`, data);
   },
   /** Lyrics in a preferred script; `lyrics: null` records that LRCLIB has none, so it isn't asked every play. */
   async getScriptLyrics(trackId: string, script: string) {
