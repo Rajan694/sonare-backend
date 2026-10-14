@@ -12,7 +12,8 @@ import {
   playerState,
 } from '../db/schema.js';
 import { eq, and, desc, sql, gte, inArray } from 'drizzle-orm';
-import { requireAuth } from '../middleware/auth.js';
+import { forgetAuthUser, requireAuth } from '../middleware/auth.js';
+import bcrypt from 'bcrypt';
 import { idHelpers } from '../ids.js';
 import { hydrateTracks } from '../db/hydrate.js';
 import { CachedPiped, PIPED_LOOKUP_CONCURRENCY } from '../services/cache.js';
@@ -131,19 +132,54 @@ const playerStateSchema = z.object({
 // Protect all /me routes with requireAuth
 meRouter.use(requireAuth);
 
+const userResponse = (user: typeof users.$inferSelect) => ({
+  id: user.id,
+  email: user.email,
+  displayName: user.displayName,
+  emailVerified: user.emailVerifiedAt !== null,
+  createdAt: user.createdAt,
+});
+
 meRouter.get('/', async (req, res) => {
   const [user] = await db.select().from(users).where(eq(users.id, req.user!.id)).limit(1);
   if (!user) {
     res.status(404).json({ error: { code: 'NOT_FOUND', message: 'User not found' } });
     return;
   }
-  res.json({
-    id: user.id,
-    email: user.email,
-    displayName: user.displayName,
-    emailVerified: user.emailVerifiedAt !== null,
-    createdAt: user.createdAt,
-  });
+  res.json(userResponse(user));
+});
+
+const profileSchema = z.object({
+  displayName: z
+    .string({ required_error: 'Missing displayName' })
+    .trim()
+    .min(1, 'Enter a name')
+    .max(100, 'Name must be at most 100 characters'),
+});
+const deleteAccountSchema = z.object({ password: z.string({ required_error: 'Enter your password' }).min(1).max(128) });
+
+meRouter.patch('/', async (req, res) => {
+  const { displayName } = parseBody(profileSchema, req);
+  const [user] = await db.update(users).set({ displayName }).where(eq(users.id, req.user!.id)).returning();
+  res.json(userResponse(user));
+});
+
+// Deleting the account takes its library, playlists, plays and settings with it (cascade).
+// The password is asked again so a borrowed, signed-in phone can't do it.
+meRouter.delete('/', async (req, res) => {
+  const { password } = parseBody(deleteAccountSchema, req);
+  const [user] = await db.select().from(users).where(eq(users.id, req.user!.id)).limit(1);
+  if (user.role !== 'user') {
+    res.status(403).json({ error: { code: 'FORBIDDEN', message: 'The admin account cannot be deleted here' } });
+    return;
+  }
+  if (!(await bcrypt.compare(password, user.passwordHash))) {
+    res.status(400).json({ error: { code: 'WRONG_PASSWORD', message: "That isn't your password" } });
+    return;
+  }
+  await db.delete(users).where(eq(users.id, user.id));
+  forgetAuthUser(user.id);
+  res.json({ ok: true });
 });
 
 // Library

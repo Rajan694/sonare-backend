@@ -19,6 +19,7 @@ import {
   playerState,
   playlistTracks,
   playlists,
+  users,
 } from '../../src/db/schema.js';
 import { eq } from 'drizzle-orm';
 import { MockAgent, getGlobalDispatcher, setGlobalDispatcher, type Dispatcher } from 'undici';
@@ -42,6 +43,58 @@ describe('Me: profile & personal data', () => {
       mockAgent = null;
     }
     setGlobalDispatcher(originalDispatcher);
+  });
+
+  it('BE-ME-047: PATCH /api/v1/me changes the display name; a blank one is refused', async () => {
+    const { token } = await createUser({ displayName: 'Old Name' });
+    const res = await request(app)
+      .patch('/api/v1/me')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ displayName: '  New Name ' });
+    expect(res.status).toBe(200);
+    expect(res.body.displayName).toBe('New Name');
+    expect((await request(app).get('/api/v1/me').set('Authorization', `Bearer ${token}`)).body.displayName).toBe(
+      'New Name',
+    );
+    const blank = await request(app)
+      .patch('/api/v1/me')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ displayName: ' ' });
+    expect(blank.status).toBe(400);
+  });
+
+  it('BE-ME-048: DELETE /api/v1/me needs the password, then removes the account and everything in it', async () => {
+    const { user, token } = await createUser();
+    const other = await createUser();
+    await db.insert(playlists).values({ id: 'sonare:mine', userId: user.id, name: 'Mine', kind: 'synced' });
+    await db.insert(playlists).values({ id: 'sonare:theirs', userId: other.user.id, name: 'Theirs', kind: 'synced' });
+
+    const wrong = await request(app)
+      .delete('/api/v1/me')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ password: 'nope' });
+    expect(wrong.status).toBe(400);
+    expect(wrong.body.error.code).toBe('WRONG_PASSWORD');
+    expect(await db.select().from(users).where(eq(users.id, user.id))).toHaveLength(1);
+
+    const gone = await request(app)
+      .delete('/api/v1/me')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ password: 'password123' });
+    expect(gone.status).toBe(200);
+    expect(await db.select().from(users).where(eq(users.id, user.id))).toHaveLength(0);
+    expect((await db.select().from(playlists)).map((p) => p.name)).toEqual(['Theirs']);
+    // The next request with the old token is refused at once, not after the auth cache expires.
+    expect((await request(app).get('/api/v1/me').set('Authorization', `Bearer ${token}`)).status).toBe(401);
+  });
+
+  it('BE-ME-049: the admin account cannot be deleted from the apps', async () => {
+    const { token } = await createUser({ role: 'admin' });
+    const res = await request(app)
+      .delete('/api/v1/me')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ password: 'password123' });
+    expect(res.status).toBe(403);
   });
 
   it('BE-ME-001: GET /api/v1/me returns authenticated user details', async () => {

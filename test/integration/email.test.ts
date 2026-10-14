@@ -357,4 +357,74 @@ describe('Email verification and password reset', () => {
     expect(bad.status).toBe(400);
     expect(bad.body.error.code).toBe('BAD_REQUEST');
   });
+
+  const resetCode = (email: string, code: string) =>
+    request(app).post('/api/v1/auth/verify-reset-code').send({ email, code });
+
+  it('BE-EMAIL-023: forgot password in the apps: the emailed code buys a reset token that sets the new password', async () => {
+    const { refreshToken } = await createUser({ email: 'code@example.com' });
+    await request(app).post('/api/v1/auth/forgot-password').send({ email: 'code@example.com' });
+    const code = lastMailCode();
+
+    const verified = await resetCode('CODE@example.com', code.replace(/^(\d{3})/, '$1 '));
+    expect(verified.status).toBe(200);
+    expect(typeof verified.body.resetToken).toBe('string');
+    // A code works once.
+    expect((await resetCode('code@example.com', code)).body.error.code).toBe('CODE_EXPIRED');
+
+    const reset = await request(app)
+      .post('/api/v1/auth/reset-password')
+      .send({ token: verified.body.resetToken, password: 'from-the-code' });
+    expect(reset.status).toBe(200);
+    const login = await request(app)
+      .post('/api/v1/auth/login')
+      .send({ email: 'code@example.com', password: 'from-the-code' });
+    expect(login.status).toBe(200);
+    expect((await request(app).post('/api/v1/auth/refresh').send({ refreshToken })).status).toBe(401);
+  });
+
+  it("BE-EMAIL-024: a wrong reset code is refused, five wrong ones end it, and nobody else's code or an unknown address works", async () => {
+    await createUser({ email: 'guess@example.com' });
+    await request(app).post('/api/v1/auth/forgot-password').send({ email: 'guess@example.com' });
+    const code = lastMailCode();
+    const wrong = code === '000000' ? '111111' : '000000';
+
+    expect((await resetCode('nobody@example.com', code)).body.error.code).toBe('INVALID_CODE');
+    for (let i = 0; i < 4; i++)
+      expect((await resetCode('guess@example.com', wrong)).body.error.code).toBe('INVALID_CODE');
+    expect((await resetCode('guess@example.com', wrong)).body.error.code).toBe('CODE_EXPIRED');
+    expect((await resetCode('guess@example.com', code)).body.error.code).toBe('CODE_EXPIRED');
+
+    // The code that verifies an email address is not a reset code.
+    const reg = await register('verifier@example.com');
+    expect(reg.status).toBe(201);
+    expect((await resetCode('verifier@example.com', lastMailCode())).status).toBe(400);
+  });
+
+  it('BE-EMAIL-025: signed in, the password changes with the current one; other devices are signed out', async () => {
+    const { token, refreshToken } = await createUser({ email: 'change@example.com' });
+    const change = (currentPassword: string, newPassword: string) =>
+      request(app)
+        .post('/api/v1/auth/change-password')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ currentPassword, newPassword });
+
+    const wrong = await change('not-it', 'new-password-1');
+    expect(wrong.status).toBe(400);
+    expect(wrong.body.error.code).toBe('WRONG_PASSWORD');
+    expect((await change('password123', 'short')).status).toBe(400);
+
+    const ok = await change('password123', 'new-password-1');
+    expect(ok.status).toBe(200);
+    expect(typeof ok.body.accessToken).toBe('string');
+    expect((await request(app).post('/api/v1/auth/refresh').send({ refreshToken })).status).toBe(401);
+    expect((await request(app).post('/api/v1/auth/refresh').send({ refreshToken: ok.body.refreshToken })).status).toBe(
+      200,
+    );
+    const login = await request(app)
+      .post('/api/v1/auth/login')
+      .send({ email: 'change@example.com', password: 'new-password-1' });
+    expect(login.status).toBe(200);
+    expect((await request(app).post('/api/v1/auth/change-password').send({})).status).toBe(401);
+  });
 });

@@ -17,12 +17,14 @@ describe('mail.ts', () => {
     expect(msg.html).include('042 917');
   });
 
-  it('BE-MAIL-002: resetPasswordMessage includes link in text and html', () => {
+  it('BE-MAIL-002: resetPasswordMessage includes the code and the link in text and html', () => {
     const link = 'http://localhost:5183/reset-password?token=xyz789';
-    const msg = resetPasswordMessage(link);
+    const msg = resetPasswordMessage(link, '123456');
     expect(msg.subject).toBe('Reset your Sonare password');
     expect(msg.text).include(link);
     expect(msg.html).include(link);
+    expect(msg.text).include('123 456');
+    expect(msg.html).include('123 456');
   });
 
   describe('through Resend', () => {

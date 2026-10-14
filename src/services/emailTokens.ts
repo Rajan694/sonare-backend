@@ -10,9 +10,15 @@ export const VERIFY_TOKEN_TTL_MS = 24 * 3600_000;
 export const RESET_TOKEN_TTL_MS = 3600_000;
 /** The 6-digit code in the verification email, typed into the app instead of opening the link. */
 export const VERIFY_CODE_TTL_MS = 30 * 60_000;
+/** The 6-digit code in the password-reset email ("forgot password" in the apps). */
+export const RESET_CODE_TTL_MS = 30 * 60_000;
+/** What a correct reset code buys: one password change within this time. */
+export const RESET_AFTER_CODE_TTL_MS = 15 * 60_000;
 /** Wrong guesses before a code stops working (a new email brings a new one). */
 export const VERIFY_CODE_MAX_ATTEMPTS = 5;
-const VERIFY_CODE_PURPOSE = 'verify-code';
+
+/** The emailed codes: verifying the address, and resetting the password. */
+export type EmailCodePurpose = 'verify-code' | 'reset-code';
 
 /**
  * Issues a single-use token for an emailed link and returns the raw value. Only its hash is
@@ -63,23 +69,29 @@ export const consumeEmailToken = async (
 // stops working after VERIFY_CODE_MAX_ATTEMPTS wrong guesses.
 const codeHash = (userId: string, code: string) => hashToken(`${userId}:${code}`);
 
-/** Issues a fresh verification code (any earlier one stops working) and returns it. */
-export const createVerifyCode = async (userId: string): Promise<string> => {
+/** Issues a fresh code of that purpose (any earlier one stops working) and returns it. */
+export const createEmailCode = async (
+  userId: string,
+  purpose: EmailCodePurpose = 'verify-code',
+  ttlMs: number = VERIFY_CODE_TTL_MS,
+): Promise<string> => {
   const code = String(crypto.randomInt(0, 1_000_000)).padStart(6, '0');
   await db
     .update(emailTokens)
     .set({ usedAt: new Date() })
-    .where(
-      and(eq(emailTokens.userId, userId), eq(emailTokens.purpose, VERIFY_CODE_PURPOSE), isNull(emailTokens.usedAt)),
-    );
+    .where(and(eq(emailTokens.userId, userId), eq(emailTokens.purpose, purpose), isNull(emailTokens.usedAt)));
   await db.insert(emailTokens).values({
     userId,
-    purpose: VERIFY_CODE_PURPOSE,
-    tokenHash: codeHash(userId, code),
-    expiresAt: new Date(Date.now() + VERIFY_CODE_TTL_MS),
+    purpose,
+    // The purpose is part of the hash: the same digits for verifying and resetting never clash.
+    tokenHash: purpose === 'verify-code' ? codeHash(userId, code) : codeHash(userId, `${purpose}:${code}`),
+    expiresAt: new Date(Date.now() + ttlMs),
   });
   return code;
 };
+
+/** Issues a fresh verification code (any earlier one stops working) and returns it. */
+export const createVerifyCode = (userId: string): Promise<string> => createEmailCode(userId, 'verify-code');
 
 export type VerifyCodeResult = 'ok' | 'wrong' | 'expired';
 
@@ -88,18 +100,23 @@ export type VerifyCodeResult = 'ok' | 'wrong' | 'expired';
  * 'expired' means there is no usable code (none sent, timed out, used, or this guess was the
  * last one allowed).
  */
-export const consumeVerifyCode = async (userId: string, code: string): Promise<VerifyCodeResult> => {
+export const consumeEmailCode = async (
+  userId: string,
+  code: string,
+  purpose: EmailCodePurpose = 'verify-code',
+): Promise<VerifyCodeResult> => {
   const now = new Date();
   const live = and(
     eq(emailTokens.userId, userId),
-    eq(emailTokens.purpose, VERIFY_CODE_PURPOSE),
+    eq(emailTokens.purpose, purpose),
     isNull(emailTokens.usedAt),
     gt(emailTokens.expiresAt, now),
   );
+  const hash = purpose === 'verify-code' ? codeHash(userId, code) : codeHash(userId, `${purpose}:${code}`);
   const [used] = await db
     .update(emailTokens)
     .set({ usedAt: now })
-    .where(and(live, eq(emailTokens.tokenHash, codeHash(userId, code))))
+    .where(and(live, eq(emailTokens.tokenHash, hash)))
     .returning({ id: emailTokens.id });
   if (used) return 'ok';
 
@@ -114,3 +131,6 @@ export const consumeVerifyCode = async (userId: string, code: string): Promise<V
     .returning({ attempts: emailTokens.attempts });
   return guessed && guessed.attempts < VERIFY_CODE_MAX_ATTEMPTS ? 'wrong' : 'expired';
 };
+
+export const consumeVerifyCode = (userId: string, code: string): Promise<VerifyCodeResult> =>
+  consumeEmailCode(userId, code, 'verify-code');

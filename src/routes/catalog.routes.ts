@@ -355,6 +355,42 @@ catalogRouter.get('/artists/:id/top-tracks', async (req, res) => {
   });
 });
 
+const relatedQuery = z.object({ limit: queryInt(1, 50).default(20) });
+// Songs, not hour-long mixes or 20-second clips.
+const SONG_SECONDS = { min: 60, max: 15 * 60 };
+
+/**
+ * Songs like this one, for the apps to keep playing when the queue runs out (audit I11): the
+ * video's related list from YouTube, songs only, else the artist's other songs.
+ */
+catalogRouter.get('/tracks/:id/related', async (req, res) => {
+  const rawId = idHelpers.extractYtId(req.params.id);
+  const { limit } = parseQuery(relatedQuery, req);
+
+  const stream = await CachedPiped.getStream(rawId);
+  const seen = new Set([rawId]);
+  const songs = (items: T.StreamItem[]) =>
+    items.filter((item) => {
+      if (item.type !== 'stream' || !item.url?.startsWith('/watch?v=') || item.isShort || item.livestream) return false;
+      const id = item.url.substring(9);
+      const seconds = item.duration ?? 0;
+      if (seen.has(id) || seconds < SONG_SECONDS.min || seconds > SONG_SECONDS.max) return false;
+      seen.add(id);
+      return true;
+    });
+
+  let tracks = songs(stream.relatedStreams || []);
+  if (tracks.length === 0) {
+    const artist = (stream.uploader || '').replace(/\s+-\s+Topic$/i, '').trim();
+    if (artist) tracks = songs((await CachedPiped.search(artist, 'music_songs')).items || []);
+  }
+
+  res.json({
+    items: tracks.slice(0, limit).map((t) => ({ kind: 'track', ...normalizeStreamItemToTrack(t) })),
+    meta: {},
+  });
+});
+
 catalogRouter.get('/artists/:id/albums', async (req, res) => {
   const rawId = idHelpers.extractYtId(req.params.id);
   const { cursor } = parseQuery(pageQuery, req);

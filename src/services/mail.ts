@@ -74,18 +74,21 @@ export const verifyEmailMessage = (link: string, code: string): MailMessage => {
   };
 };
 
-export const resetPasswordMessage = (link: string): MailMessage => {
+export const resetPasswordMessage = (link: string, code: string): MailMessage => {
+  const spaced = `${code.slice(0, 3)} ${code.slice(3)}`;
   return {
     subject: 'Reset your Sonare password',
-    text: `You requested a password reset for your Sonare account.\n\nClick the link below to set a new password. It expires in 1 hour.\n\n${link}\n\nIf you did not request this, ignore this email. Your password will not change.`,
+    text: `You asked to reset the password of your Sonare account.\n\nYour reset code is ${spaced}. Enter it in the app; it expires in 30 minutes.\n\nOr set a new password by opening this link (it expires in 1 hour):\n${link}\n\nIf you did not ask for this, ignore this email. Your password will not change.`,
     html: `<div style="font-family:sans-serif;max-width:480px;margin:0 auto">
   <h2 style="color:#111">Reset your password</h2>
-  <p>You requested a password reset for your Sonare account. Click the button below to set a new password. The link expires in <strong>1 hour</strong>.</p>
+  <p>You asked to reset the password of your Sonare account. Enter this code in the app to choose a new one. It expires in <strong>30 minutes</strong>.</p>
+  <p style="margin:24px 0;font-size:32px;font-weight:700;letter-spacing:6px;color:#111;font-family:monospace">${spaced}</p>
+  <p>Or click the button below. The link expires in <strong>1 hour</strong>.</p>
   <p style="margin:24px 0">
     <a href="${link}" style="background:#6366f1;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;display:inline-block">Reset password</a>
   </p>
   <p style="color:#666;font-size:13px">Or copy this link: <a href="${link}" style="color:#6366f1">${link}</a></p>
-  <p style="color:#999;font-size:12px">If you did not request a password reset, ignore this email. Your password will not change.</p>
+  <p style="color:#999;font-size:12px">If you did not ask to reset your password, ignore this email. Your password will not change.</p>
 </div>`,
   };
 };

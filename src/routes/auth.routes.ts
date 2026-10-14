@@ -13,8 +13,12 @@ import { MailError } from '../errors.js';
 import {
   createEmailToken,
   consumeEmailToken,
+  consumeEmailCode,
   consumeVerifyCode,
+  createEmailCode,
   createVerifyCode,
+  RESET_AFTER_CODE_TTL_MS,
+  RESET_CODE_TTL_MS,
   RESET_TOKEN_TTL_MS,
   VERIFY_TOKEN_TTL_MS,
 } from '../services/emailTokens.js';
@@ -29,6 +33,9 @@ const registerLimiter = createRateLimiter({ name: 'register', max: 10, windowMs:
 const resendLimiter = createRateLimiter({ name: 'verify-resend', max: 3, windowMs: 60 * 60_000 });
 const forgotIpLimiter = createRateLimiter({ name: 'forgot-ip', max: 5, windowMs: 60 * 60_000 });
 const forgotEmailLimiter = createRateLimiter({ name: 'forgot-email', max: 3, windowMs: 60 * 60_000 });
+// Each code allows 5 guesses; this caps how many codes one address can have guessed at.
+const resetCodeLimiter = createRateLimiter({ name: 'reset-code', max: 10, windowMs: 15 * 60_000 });
+const changePasswordLimiter = createRateLimiter({ name: 'change-password', max: 5, windowMs: 15 * 60_000 });
 
 const email = z.string().trim().toLowerCase().email('Enter a valid email address');
 const password = z
@@ -43,12 +50,13 @@ const forgotSchema = z.object({ email });
 const resetSchema = z.object({ token, password });
 const verifySchema = z.object({ token });
 // "123 456" and "123-456" are accepted as typed.
-const verifyCodeSchema = z.object({
-  code: z
-    .string()
-    .transform((v) => v.replace(/[\s-]/g, ''))
-    .pipe(z.string().regex(/^\d{6}$/, 'Enter the 6-digit code from the email')),
-});
+const emailCode = z
+  .string()
+  .transform((v) => v.replace(/[\s-]/g, ''))
+  .pipe(z.string().regex(/^\d{6}$/, 'Enter the 6-digit code from the email'));
+const verifyCodeSchema = z.object({ code: emailCode });
+const resetCodeSchema = z.object({ email, code: emailCode });
+const changePasswordSchema = z.object({ currentPassword: z.string().min(1).max(128), newPassword: password });
 const refreshSchema = z.object({
   refreshToken: z.string({ required_error: 'Missing refreshToken' }).min(1, 'Missing refreshToken').max(500),
 });
@@ -101,8 +109,19 @@ const sendVerifyEmail = async (user: typeof users.$inferSelect) => {
 
 const sendResetEmail = async (user: typeof users.$inferSelect) => {
   const raw = await createEmailToken(user.id, 'reset', RESET_TOKEN_TTL_MS);
+  const code = await createEmailCode(user.id, 'reset-code', RESET_CODE_TTL_MS);
   const link = `${config.APP_URL}/reset-password?token=${raw}`;
-  await sendMail({ to: user.email, ...resetPasswordMessage(link) });
+  await sendMail({ to: user.email, ...resetPasswordMessage(link, code) });
+};
+
+const wrongCode = (res: Response) => {
+  res
+    .status(400)
+    .json({ error: { code: 'INVALID_CODE', message: "That code isn't right. Check the email and try again." } });
+};
+
+const expiredCode = (res: Response) => {
+  res.status(400).json({ error: { code: 'CODE_EXPIRED', message: 'That code no longer works. Send a new one.' } });
 };
 
 authRouter.post('/register', async (req, res) => {
@@ -208,16 +227,8 @@ authRouter.post('/verify-email-code', requireAuth, async (req, res) => {
   }
 
   const result = await consumeVerifyCode(user.id, body.code);
-  if (result === 'wrong') {
-    res
-      .status(400)
-      .json({ error: { code: 'INVALID_CODE', message: "That code isn't right. Check the email and try again." } });
-    return;
-  }
-  if (result === 'expired') {
-    res.status(400).json({ error: { code: 'CODE_EXPIRED', message: 'That code no longer works. Send a new one.' } });
-    return;
-  }
+  if (result === 'wrong') return wrongCode(res);
+  if (result === 'expired') return expiredCode(res);
   await db
     .update(users)
     .set({ emailVerifiedAt: new Date() })
@@ -255,6 +266,49 @@ authRouter.post('/forgot-password', async (req, res) => {
     await sendResetEmail(user).catch((err) => req.log.warn({ err }, 'password reset email failed'));
   }
   res.json({ ok: true });
+});
+
+// The apps' "Forgot password": the code from the reset email, for that address, buys a short-lived
+// token that POST /reset-password takes like the emailed link's. An address without an account
+// gets the same answer as a wrong code.
+authRouter.post('/verify-reset-code', async (req, res) => {
+  const body = parseBody(resetCodeSchema, req);
+  const limit = await resetCodeLimiter.hit(body.email);
+  if (!limit.allowed) return rateLimited(res, limit.retryAfterSec);
+
+  const user = await findUserByEmail(body.email);
+  if (!user || user.role !== 'user') return wrongCode(res);
+  const result = await consumeEmailCode(user.id, body.code, 'reset-code');
+  if (result === 'wrong') return wrongCode(res);
+  if (result === 'expired') return expiredCode(res);
+
+  const resetToken = await createEmailToken(user.id, 'reset', RESET_AFTER_CODE_TTL_MS);
+  res.json({ resetToken });
+});
+
+// Signed in: the current password, then the new one. Every other device is signed out; this one
+// gets a fresh session.
+authRouter.post('/change-password', requireAuth, async (req, res) => {
+  const body = parseBody(changePasswordSchema, req);
+  const limit = await changePasswordLimiter.blocked(req.user!.id);
+  if (limit.blocked) return rateLimited(res, limit.retryAfterSec);
+
+  const [user] = await db.select().from(users).where(eq(users.id, req.user!.id)).limit(1);
+  if (!(await bcrypt.compare(body.currentPassword, user.passwordHash))) {
+    await changePasswordLimiter.hit(user.id);
+    res.status(400).json({ error: { code: 'WRONG_PASSWORD', message: "That isn't your current password" } });
+    return;
+  }
+  await changePasswordLimiter.reset(user.id);
+
+  const passwordHash = await bcrypt.hash(body.newPassword, BCRYPT_COST);
+  const newRefreshToken = generateRefreshToken();
+  await db.transaction(async (tx) => {
+    await tx.update(users).set({ passwordHash }).where(eq(users.id, user.id));
+    await tx.delete(refreshTokens).where(eq(refreshTokens.userId, user.id));
+    await tx.insert(refreshTokens).values({ userId: user.id, token: hashToken(newRefreshToken) });
+  });
+  res.json({ accessToken: signAccessToken({ id: user.id, email: user.email }), refreshToken: newRefreshToken });
 });
 
 authRouter.post('/reset-password', async (req, res) => {

@@ -54,30 +54,33 @@ This document maps all backend test IDs to their specifications, assertions, and
 
 ### Email verification & password reset
 
-| Test ID        | Method / Scope                          | Description & Assertions                                                                 |
-| :------------- | :-------------------------------------- | :--------------------------------------------------------------------------------------- |
-| `BE-EMAIL-001` | `POST /api/v1/auth/register`            | Sends a verify link; lowercases the email; DB stores only the sha256 of the token.       |
-| `BE-EMAIL-002` | `POST /api/v1/auth/register`            | Still returns 201 when the email cannot be sent.                                         |
-| `BE-EMAIL-003` | `POST /api/v1/auth/verify-email`        | Marks the account verified (seen in /me and login); the link works once.                 |
-| `BE-EMAIL-004` | `POST /api/v1/auth/verify-email`        | Expired or unknown token gives 400 INVALID_TOKEN.                                        |
-| `BE-EMAIL-005` | `POST /api/v1/auth/resend-verification` | New link replaces the old one; 4th request in an hour gives 429.                         |
-| `BE-EMAIL-006` | `POST /api/v1/auth/resend-verification` | Verified account gets alreadyVerified and no email.                                      |
-| `BE-EMAIL-007` | `POST /api/v1/auth/forgot-password`     | Unknown email still answers ok and sends nothing.                                        |
-| `BE-EMAIL-008` | `POST /api/v1/auth/reset-password`      | New password works, old fails, refresh tokens deleted, email verified, token single-use. |
-| `BE-EMAIL-009` | `POST /api/v1/auth/reset-password`      | Invalid token changes neither the password nor the sessions.                             |
-| `BE-EMAIL-010` | register / reset-password               | Passwords under 8 characters give 400.                                                   |
-| `BE-EMAIL-011` | `POST /api/v1/auth/forgot-password`     | 4th request for one email in an hour gives 429.                                          |
-| `BE-EMAIL-012` | `POST /api/v1/auth/login`               | Finds accounts stored with mixed-case emails.                                            |
-| `BE-EMAIL-013` | `POST /api/v1/auth/login`               | Signing in to an unverified account sends a fresh verify link.                           |
-| `BE-EMAIL-014` | `POST /api/v1/auth/login`               | Signing in to a verified account sends nothing.                                          |
-| `BE-EMAIL-015` | `POST /api/v1/auth/login`               | Sign-in links share Resend's 3-an-hour limit; a mail failure never blocks the sign-in.   |
-| `BE-EMAIL-016` | `POST /api/v1/auth/resend-verification` | Says when the mail didn't go out (502 MAIL_FAILED / 503 MAIL_UNAVAILABLE) instead of ok. |
-| `BE-EMAIL-017` | `POST /api/v1/auth/forgot-password`     | A server that can't send mail answers 503 MAIL_UNAVAILABLE for any address.              |
-| `BE-EMAIL-018` | `POST /api/v1/auth/forgot-password`     | A failed reset mail still answers ok, so accounts cannot be probed.                      |
-| `BE-EMAIL-019` | `POST /api/v1/auth/verify-email-code`   | The emailed code verifies the signed-in account once; "123 456" is accepted.             |
-| `BE-EMAIL-020` | `POST /api/v1/auth/verify-email-code`   | A wrong code gives 400 INVALID_CODE; after 5 wrong tries the code stops working.         |
-| `BE-EMAIL-021` | `POST /api/v1/auth/verify-email-code`   | Codes expire, a new email replaces the code, and a code only works for its account.      |
-| `BE-EMAIL-022` | `POST /api/v1/auth/verify-email-code`   | Needs a signed-in account (401) and six digits (400 BAD_REQUEST).                        |
+| Test ID        | Method / Scope                          | Description & Assertions                                                                                    |
+| :------------- | :-------------------------------------- | :---------------------------------------------------------------------------------------------------------- |
+| `BE-EMAIL-001` | `POST /api/v1/auth/register`            | Sends a verify link; lowercases the email; DB stores only the sha256 of the token.                          |
+| `BE-EMAIL-002` | `POST /api/v1/auth/register`            | Still returns 201 when the email cannot be sent.                                                            |
+| `BE-EMAIL-003` | `POST /api/v1/auth/verify-email`        | Marks the account verified (seen in /me and login); the link works once.                                    |
+| `BE-EMAIL-004` | `POST /api/v1/auth/verify-email`        | Expired or unknown token gives 400 INVALID_TOKEN.                                                           |
+| `BE-EMAIL-005` | `POST /api/v1/auth/resend-verification` | New link replaces the old one; 4th request in an hour gives 429.                                            |
+| `BE-EMAIL-006` | `POST /api/v1/auth/resend-verification` | Verified account gets alreadyVerified and no email.                                                         |
+| `BE-EMAIL-007` | `POST /api/v1/auth/forgot-password`     | Unknown email still answers ok and sends nothing.                                                           |
+| `BE-EMAIL-008` | `POST /api/v1/auth/reset-password`      | New password works, old fails, refresh tokens deleted, email verified, token single-use.                    |
+| `BE-EMAIL-009` | `POST /api/v1/auth/reset-password`      | Invalid token changes neither the password nor the sessions.                                                |
+| `BE-EMAIL-010` | register / reset-password               | Passwords under 8 characters give 400.                                                                      |
+| `BE-EMAIL-011` | `POST /api/v1/auth/forgot-password`     | 4th request for one email in an hour gives 429.                                                             |
+| `BE-EMAIL-012` | `POST /api/v1/auth/login`               | Finds accounts stored with mixed-case emails.                                                               |
+| `BE-EMAIL-013` | `POST /api/v1/auth/login`               | Signing in to an unverified account sends a fresh verify link.                                              |
+| `BE-EMAIL-014` | `POST /api/v1/auth/login`               | Signing in to a verified account sends nothing.                                                             |
+| `BE-EMAIL-015` | `POST /api/v1/auth/login`               | Sign-in links share Resend's 3-an-hour limit; a mail failure never blocks the sign-in.                      |
+| `BE-EMAIL-016` | `POST /api/v1/auth/resend-verification` | Says when the mail didn't go out (502 MAIL_FAILED / 503 MAIL_UNAVAILABLE) instead of ok.                    |
+| `BE-EMAIL-017` | `POST /api/v1/auth/forgot-password`     | A server that can't send mail answers 503 MAIL_UNAVAILABLE for any address.                                 |
+| `BE-EMAIL-018` | `POST /api/v1/auth/forgot-password`     | A failed reset mail still answers ok, so accounts cannot be probed.                                         |
+| `BE-EMAIL-019` | `POST /api/v1/auth/verify-email-code`   | The emailed code verifies the signed-in account once; "123 456" is accepted.                                |
+| `BE-EMAIL-020` | `POST /api/v1/auth/verify-email-code`   | A wrong code gives 400 INVALID_CODE; after 5 wrong tries the code stops working.                            |
+| `BE-EMAIL-021` | `POST /api/v1/auth/verify-email-code`   | Codes expire, a new email replaces the code, and a code only works for its account.                         |
+| `BE-EMAIL-022` | `POST /api/v1/auth/verify-email-code`   | Needs a signed-in account (401) and six digits (400 BAD_REQUEST).                                           |
+| `BE-EMAIL-023` | `POST /api/v1/auth/verify-reset-code`   | The emailed reset code buys a reset token; reset-password then sets the new password; codes are single-use. |
+| `BE-EMAIL-024` | `POST /api/v1/auth/verify-reset-code`   | Wrong codes are refused, five end the code, unknown addresses and email-verify codes don't work.            |
+| `BE-EMAIL-025` | `POST /api/v1/auth/change-password`     | Needs the current password; other devices are signed out, this one gets a fresh session.                    |
 
 ---
 
@@ -109,6 +112,7 @@ This document maps all backend test IDs to their specifications, assertions, and
 | `BE-CATALOG-021`  | `GET /api/v1/artists/:id/albums`     | Returns albums list from artist channel tab.                                                                |
 | `BE-CATALOG-022`  | `GET /api/v1/playlists/:id`          | Returns public playlist metadata.                                                                           |
 | `BE-CATALOG-023`  | `GET /api/v1/tracks/:id/peaks`       | Keeps only real waveforms for good; a failed extraction (or an old cached placeholder) retries in an hour.  |
+| `BE-CATALOG-024`  | `GET /api/v1/tracks/:id/related`     | Similar songs from the related list: songs only, no shorts or mixes, not the song itself, no repeats.       |
 | `BE-BROWSE-001`   | `GET /api/v1/genres`                 | Lists the Indian and mood categories (Popular, Punjabi, Bhojpuri, Devotional…), each `{ id, name, query }`. |
 | `BE-BROWSE-002`   | `GET /api/v1/genres`                 | "Top this year" searches for the current year.                                                              |
 | `BE-CAT-EDGE-001` | `GET /api/v1/artists/:id/albums`     | Handles cursor pagination for artist channel releases.                                                      |
@@ -214,6 +218,9 @@ This document maps all backend test IDs to their specifications, assertions, and
 | `BE-ME-044`       | `PATCH /api/v1/me/playlists/:id/tracks/order` | entryId moves that row when a device sends a stale from index.                                       |
 | `BE-ME-045`       | `GET /api/v1/me/player-state`                 | Reports updatedAt in epoch ms, 0 when there is no row.                                               |
 | `BE-ME-046`       | `DELETE /api/v1/me/playlists/:id/tracks`      | Renumbers remaining entries 0..n-1 after a removal.                                                  |
+| `BE-ME-047`       | `PATCH /api/v1/me`                            | Changes the display name (trimmed); a blank one is refused.                                          |
+| `BE-ME-048`       | `DELETE /api/v1/me`                           | Needs the password; removes the account and its data; the old token is refused at once.              |
+| `BE-ME-049`       | `DELETE /api/v1/me`                           | The admin account cannot be deleted from the apps.                                                   |
 | `BE-ME-EXTRA-001` | `GET /api/v1/me/playlists/:id`                | Returns 404 for missing playlist.                                                                    |
 | `BE-ME-EXTRA-002` | `PATCH /api/v1/me/playlists/:id`              | Returns 404 when attempting to edit another user's playlist.                                         |
 | `BE-ME-EXTRA-003` | `DELETE /api/v1/me/playlists/:id`             | Returns 200 idempotently when playlist is not found.                                                 |
@@ -451,7 +458,7 @@ This document maps all backend test IDs to their specifications, assertions, and
 | `BE-CONF-009`   | `assertProductionConfig` skips all checks outside production.                         |
 | `BE-CONF-010`   | `parseTrustProxy` maps TRUST_PROXY to Express's `trust proxy` value.                  |
 | `BE-MAIL-001`   | `verifyEmailMessage` has the subject, the code and the link in text and html.         |
-| `BE-MAIL-002`   | `resetPasswordMessage` has the subject and the link in text and html.                 |
+| `BE-MAIL-002`   | `resetPasswordMessage` has the subject, the code and the link in text and html.       |
 | `BE-MAIL-003`   | With `RESEND_API_KEY`, mail is posted to Resend's API with the bearer key.            |
 | `BE-MAIL-004`   | A Resend refusal throws MAIL_FAILED with Resend's answer as the cause, never the key. |
 | `BE-MAIL-005`   | Without a Resend key nothing is sent and it throws MAIL_UNAVAILABLE.                  |
