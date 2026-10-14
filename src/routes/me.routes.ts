@@ -15,7 +15,8 @@ import { eq, and, desc, sql, gte } from 'drizzle-orm';
 import { requireAuth } from '../middleware/auth.js';
 import { idHelpers } from '../ids.js';
 import { hydrateTracks } from '../db/hydrate.js';
-import { CachedPiped } from '../services/cache.js';
+import { CachedPiped, PIPED_LOOKUP_CONCURRENCY } from '../services/cache.js';
+import { mapLimit } from '../mapLimit.js';
 import { normalizeChannelToArtist, normalizePlaylistToAlbum, normalizeStreamToTrack } from '../normalize/index.js';
 import crypto from 'node:crypto';
 import { z } from 'zod';
@@ -178,50 +179,48 @@ meRouter.get('/library/albums', async (req, res) => {
       ? await getCatalogItems<AlbumMeta>('album', missingCatalogIds)
       : new Map<string, AlbumMeta>();
 
-  const items = await Promise.all(
-    favs.map(async (f) => {
-      const base = { id: idHelpers.prefixYt(f.albumId), addedAt: f.addedAt.getTime() };
-      const parsedRow = parseAlbumMeta(f.meta);
-      const meta = parsedRow ?? catalogMap.get(f.albumId);
+  const items = await mapLimit(favs, PIPED_LOOKUP_CONCURRENCY, async (f) => {
+    const base = { id: idHelpers.prefixYt(f.albumId), addedAt: f.addedAt.getTime() };
+    const parsedRow = parseAlbumMeta(f.meta);
+    const meta = parsedRow ?? catalogMap.get(f.albumId);
 
-      if (meta) {
-        return {
-          id: base.id,
-          title: meta.title,
-          artist: meta.artist,
-          artistId: meta.artistId ?? '',
-          year: meta.year ?? null,
-          trackCount: meta.trackCount ?? null,
-          genre: null,
-          source: 'server' as const,
-          downloaded: false,
-          thumbnail: meta.thumbnail || `/api/v1/albums/${base.id}/artwork`,
-          addedAt: base.addedAt,
-        };
-      }
+    if (meta) {
+      return {
+        id: base.id,
+        title: meta.title,
+        artist: meta.artist,
+        artistId: meta.artistId ?? '',
+        year: meta.year ?? null,
+        trackCount: meta.trackCount ?? null,
+        genre: null,
+        source: 'server' as const,
+        downloaded: false,
+        thumbnail: meta.thumbnail || `/api/v1/albums/${base.id}/artwork`,
+        addedAt: base.addedAt,
+      };
+    }
 
-      // Fall back to Piped
-      try {
-        const playlist = await CachedPiped.playlist(f.albumId);
-        const normalized = normalizePlaylistToAlbum(playlist, f.albumId);
-        await rememberCatalogItem('album', f.albumId, normalized);
-        return { ...normalized, ...base };
-      } catch {
-        return {
-          ...base,
-          title: 'Unavailable album',
-          artist: '',
-          artistId: '',
-          year: null,
-          trackCount: null,
-          genre: null,
-          source: 'server' as const,
-          downloaded: false,
-          thumbnail: `/api/v1/albums/${base.id}/artwork`,
-        };
-      }
-    }),
-  );
+    // Fall back to Piped
+    try {
+      const playlist = await CachedPiped.playlist(f.albumId);
+      const normalized = normalizePlaylistToAlbum(playlist, f.albumId);
+      await rememberCatalogItem('album', f.albumId, normalized);
+      return { ...normalized, ...base };
+    } catch {
+      return {
+        ...base,
+        title: 'Unavailable album',
+        artist: '',
+        artistId: '',
+        year: null,
+        trackCount: null,
+        genre: null,
+        source: 'server' as const,
+        downloaded: false,
+        thumbnail: `/api/v1/albums/${base.id}/artwork`,
+      };
+    }
+  });
   res.json({ items, meta: { total: favs.length } });
 });
 
@@ -243,34 +242,32 @@ meRouter.get('/library/artists', async (req, res) => {
       ? await getCatalogItems<ArtistMeta>('artist', missingArtistIds)
       : new Map<string, ArtistMeta>();
 
-  const followed = await Promise.all(
-    follows.map(async (f) => {
-      const base = { id: idHelpers.prefixYt(f.artistId), following: true };
-      const parsedRow = parseArtistMeta(f.meta);
-      const meta = parsedRow ?? artistCatalogMap.get(f.artistId);
+  const followed = await mapLimit(follows, PIPED_LOOKUP_CONCURRENCY, async (f) => {
+    const base = { id: idHelpers.prefixYt(f.artistId), following: true };
+    const parsedRow = parseArtistMeta(f.meta);
+    const meta = parsedRow ?? artistCatalogMap.get(f.artistId);
 
-      if (meta) {
-        return {
-          id: base.id,
-          name: meta.name,
-          albumCount: 0,
-          localTrackCount: 0,
-          following: true,
-          monthlyListeners: meta.monthlyListeners ?? null,
-          thumbnail: meta.thumbnail || `/api/v1/artists/${base.id}/artwork`,
-        };
-      }
+    if (meta) {
+      return {
+        id: base.id,
+        name: meta.name,
+        albumCount: 0,
+        localTrackCount: 0,
+        following: true,
+        monthlyListeners: meta.monthlyListeners ?? null,
+        thumbnail: meta.thumbnail || `/api/v1/artists/${base.id}/artwork`,
+      };
+    }
 
-      try {
-        const channel = await CachedPiped.channel(f.artistId);
-        const normalized = normalizeChannelToArtist(channel, f.artistId);
-        await rememberCatalogItem('artist', f.artistId, normalized);
-        return { ...normalized, ...base };
-      } catch {
-        return { ...base, name: 'Unavailable artist', albumCount: 0, localTrackCount: 0 };
-      }
-    }),
-  );
+    try {
+      const channel = await CachedPiped.channel(f.artistId);
+      const normalized = normalizeChannelToArtist(channel, f.artistId);
+      await rememberCatalogItem('artist', f.artistId, normalized);
+      return { ...normalized, ...base };
+    } catch {
+      return { ...base, name: 'Unavailable artist', albumCount: 0, localTrackCount: 0 };
+    }
+  });
 
   // 2. Artists from liked / playlisted songs: row meta -> catalog_items -> Piped
   const [favs, listed] = await Promise.all([
@@ -325,18 +322,16 @@ meRouter.get('/library/artists', async (req, res) => {
 
   // Only call Piped for ids it knows nothing about
   if (missingTrackIds.length > 0) {
-    const streams = await Promise.all(
-      missingTrackIds.map(async (id) => {
-        try {
-          const s = await CachedPiped.getStream(id);
-          const rawTrack = normalizeStreamToTrack(s, id);
-          await rememberCatalogItem('track', id, toCatalogTrackData(rawTrack));
-          return { id, stream: s };
-        } catch {
-          return null;
-        }
-      }),
-    );
+    const streams = await mapLimit(missingTrackIds, PIPED_LOOKUP_CONCURRENCY, async (id) => {
+      try {
+        const s = await CachedPiped.getStream(id);
+        const rawTrack = normalizeStreamToTrack(s, id);
+        await rememberCatalogItem('track', id, toCatalogTrackData(rawTrack));
+        return { id, stream: s };
+      } catch {
+        return null;
+      }
+    });
 
     for (const item of streams) {
       if (!item) continue;
@@ -398,6 +393,21 @@ meRouter.get('/favourites/tracks', async (req, res) => {
   res.json({
     items,
     meta: { total: items.length },
+  });
+});
+
+// Ids only, for the apps' heart state: no metadata lookups, no Piped.
+meRouter.get('/favourites/ids', async (req, res) => {
+  const rows = await db
+    .select({ trackRefKind: favouriteTracks.trackRefKind, trackRefId: favouriteTracks.trackRefId })
+    .from(favouriteTracks)
+    .where(eq(favouriteTracks.userId, req.user!.id))
+    .orderBy(desc(favouriteTracks.addedAt));
+
+  res.json({
+    ids: rows.map((r) =>
+      r.trackRefKind === 'server' ? idHelpers.prefixYt(r.trackRefId) : idHelpers.prefixLocal(r.trackRefId),
+    ),
   });
 });
 

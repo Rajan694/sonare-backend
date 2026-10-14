@@ -38,6 +38,8 @@ This document maps all backend test IDs to their specifications, assertions, and
 | `BE-AUTH-SEC-001`   | `POST /api/v1/auth/register` | Stored refresh token is the sha256 of the one returned to the client.             |
 | `BE-AUTH-SEC-002`   | `POST /api/v1/auth/login`    | Sixth wrong password for the same email in 15 minutes gives 429 with Retry-After. |
 | `BE-AUTH-SEC-003`   | `POST /api/v1/auth/login`    | A successful login resets the failed-attempt counter.                             |
+| `BE-AUTH-SEC-004`   | `requireAuth` middleware     | A known user is served from the 60 s id cache until forgotten.                    |
+| `BE-AUTH-SEC-005`   | `requireAuth` middleware     | forgetAuthUser makes a deleted user's next request fail with 401.                 |
 | `BE-SEC-001`        | CORS                         | Allows `http://localhost:<port>` origins outside production.                      |
 | `BE-SEC-002`        | CORS                         | `http://localhost.evil.com` gets no CORS header and no 500.                       |
 | `BE-SEC-003`        | CORS                         | Requests without an Origin header (mobile, curl) work.                            |
@@ -193,6 +195,13 @@ This document maps all backend test IDs to their specifications, assertions, and
 | `BE-ME-027`       | `PUT /api/v1/me/settings`                     | Updates user equalizer and streaming preferences.                                                    |
 | `BE-ME-028`       | `GET /api/v1/me/player-state`                 | Restores persisted playback queue and position.                                                      |
 | `BE-ME-029`       | `PUT /api/v1/me/player-state`                 | Saves current player state and queue.                                                                |
+| `BE-ME-030`       | `POST /api/v1/me/sync`                        | Accepts a ~500 KB body of 1000 plays and stores 1000 history rows.                                   |
+| `BE-ME-031`       | `PUT /api/v1/me/player-state`                 | Accepts a ~600 KB queue body.                                                                        |
+| `BE-ME-032`       | `PUT /api/v1/me/settings`                     | Still rejects a ~200 KB body with 413 PAYLOAD_TOO_LARGE.                                             |
+| `BE-ME-033`       | `GET /api/v1/me/favourites/ids`               | Returns prefixed liked ids, newest first.                                                            |
+| `BE-ME-034`       | `GET /api/v1/me/favourites/ids`               | Excludes other users' favourites.                                                                    |
+| `BE-ME-035`       | `GET /api/v1/me/favourites/ids`               | Rejects a request without a token with 401.                                                          |
+| `BE-ME-036`       | `GET /api/v1/me/favourites/tracks`            | Stubs the row when Piped is down while `/me/recently-played` still returns 502.                      |
 | `BE-ME-EXTRA-001` | `GET /api/v1/me/playlists/:id`                | Returns 404 for missing playlist.                                                                    |
 | `BE-ME-EXTRA-002` | `PATCH /api/v1/me/playlists/:id`              | Returns 404 when attempting to edit another user's playlist.                                         |
 | `BE-ME-EXTRA-003` | `DELETE /api/v1/me/playlists/:id`             | Returns 200 idempotently when playlist is not found.                                                 |
@@ -406,6 +415,14 @@ This document maps all backend test IDs to their specifications, assertions, and
 | `BE-RATE-002`      | Rate limiter blocks hits over limit.     |
 | `BE-RATE-003`      | Rate limiter reset method.               |
 | `BE-RATE-004`      | Rate limiter IP isolation.               |
+
+### Concurrency helper
+
+| Test ID           | Description                                 |
+| :---------------- | :------------------------------------------ |
+| `BE-MAPLIMIT-001` | Keeps the result order of the input array.  |
+| `BE-MAPLIMIT-002` | Never runs more than `limit` calls at once. |
+| `BE-MAPLIMIT-003` | Rejects when one of the calls rejects.      |
 
 ### Configuration
 

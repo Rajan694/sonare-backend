@@ -66,6 +66,12 @@ export const createApp = () => {
       },
     }),
   );
+  // Sync pushes and player-state saves carry a song snapshot per queue entry, so they outgrow
+  // the 100 KB default (a few hundred queued plays). Mounted before the general parser, which
+  // skips a body that's already parsed, so every other route keeps the default limit.
+  const syncJson = express.json({ limit: '1mb' });
+  app.use('/api/v1/me/sync', syncJson);
+  app.use('/api/v1/me/player-state', syncJson);
   app.use(express.json());
   app.use(optionalAuth);
 

@@ -14,6 +14,10 @@ export const TTL = {
   streamsMeta: 60 * 60,
 };
 
+// Most Piped lookups a single request may have in flight. A cold Library page would otherwise
+// fire dozens of extractions at once, and YouTube flags bursting IPs.
+export const PIPED_LOOKUP_CONCURRENCY = 4;
+
 let redisAvailable = false;
 let loggedRedisError = false;
 

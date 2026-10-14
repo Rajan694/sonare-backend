@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import net from 'node:net';
 import request from 'supertest';
 import { createApp } from '../../src/app.js';
+import { config } from '../../src/config.js';
 import {
   createUser,
   samplePipedChannel,
@@ -541,6 +543,126 @@ describe('Me: profile & personal data', () => {
 
     expect(res.status).toBe(200);
     expect(res.body.ok).toBe(true);
+  });
+
+  it('BE-ME-030: POST /api/v1/me/sync accepts a body past the old 100 KB default', async () => {
+    const { user, token } = await createUser();
+    // Roughly what the desktop sends per play (~450 bytes of song snapshot).
+    const meta = {
+      title: 'T'.repeat(260),
+      artist: 'A'.repeat(90),
+      artistId: 'yt:UCbigsync',
+      album: 'B'.repeat(40),
+      durationMs: 240000,
+    };
+    const plays = Array.from({ length: 1000 }, (_, i) => ({
+      trackRef: { kind: 'server' as const, id: `bigSync${i}` },
+      at: Date.now() - i * 1000,
+      ms: 40000,
+      meta,
+    }));
+    expect(JSON.stringify({ plays }).length).toBeGreaterThan(400_000);
+
+    const res = await request(app).post('/api/v1/me/sync').set('Authorization', `Bearer ${token}`).send({ plays });
+
+    expect(res.status).toBe(200);
+    const rows = await db.select().from(playHistory).where(eq(playHistory.userId, user.id));
+    expect(rows).toHaveLength(1000);
+  });
+
+  it('BE-ME-031: PUT /api/v1/me/player-state accepts a queue past the old 100 KB default', async () => {
+    const { token } = await createUser();
+    const queue = Array.from({ length: 3000 }, (_, i) => ({
+      id: `yt:bigQueue${i}`,
+      title: 'Q'.repeat(150),
+      durationMs: 200000,
+    }));
+    expect(JSON.stringify({ queue }).length).toBeGreaterThan(500_000);
+
+    const res = await request(app)
+      .put('/api/v1/me/player-state')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ queue, index: 0, positionMs: 5000 });
+
+    expect(res.status).toBe(200);
+    expect(res.body.ok).toBe(true);
+  });
+
+  it('BE-ME-032: other JSON routes keep the 100 KB body limit', async () => {
+    const { token } = await createUser();
+    const res = await request(app)
+      .put('/api/v1/me/settings')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ eqPreset: 'x'.repeat(200_000) });
+
+    expect(res.status).toBe(413);
+    expect(res.body.error.code).toBe('PAYLOAD_TOO_LARGE');
+  });
+
+  it('BE-ME-033: GET /api/v1/me/favourites/ids returns prefixed ids newest first', async () => {
+    const { user, token } = await createUser();
+    await db.insert(favouriteTracks).values([
+      { userId: user.id, trackRefKind: 'server', trackRefId: 'olderYt', addedAt: new Date(Date.now() - 60_000) },
+      { userId: user.id, trackRefKind: 'local', trackRefId: 'fingerprint1', addedAt: new Date() },
+    ]);
+
+    const res = await request(app).get('/api/v1/me/favourites/ids').set('Authorization', `Bearer ${token}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ ids: ['local:fingerprint1', 'yt:olderYt'] });
+  });
+
+  it('BE-ME-034: GET /api/v1/me/favourites/ids leaves out other users', async () => {
+    const { user, token } = await createUser();
+    const other = await createUser();
+    await db.insert(favouriteTracks).values([
+      { userId: other.user.id, trackRefKind: 'server', trackRefId: 'otherFav' },
+      { userId: user.id, trackRefKind: 'server', trackRefId: 'myFav' },
+    ]);
+
+    const res = await request(app).get('/api/v1/me/favourites/ids').set('Authorization', `Bearer ${token}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.ids).toEqual(['yt:myFav']);
+  });
+
+  it('BE-ME-035: GET /api/v1/me/favourites/ids requires a token', async () => {
+    const res = await request(app).get('/api/v1/me/favourites/ids');
+
+    expect(res.status).toBe(401);
+    expect(res.body.error.code).toBe('UNAUTHORIZED');
+  });
+
+  it('BE-ME-036: favourites fall back to a placeholder row when Piped is down, history still 502s', async () => {
+    const { user, token } = await createUser();
+    await db.insert(favouriteTracks).values({ userId: user.id, trackRefKind: 'server', trackRefId: 'noMetaFav' });
+    await db.insert(playHistory).values({
+      userId: user.id,
+      trackRefKind: 'server',
+      trackRefId: 'noMetaPlay',
+      playedAt: new Date(),
+      msPlayed: 40000,
+    });
+
+    // A port nothing listens on: Piped answers with ECONNREFUSED, flagged unreachable.
+    const probe = net.createServer();
+    await new Promise<void>((resolve) => probe.listen(0, '127.0.0.1', resolve));
+    const { port } = probe.address() as net.AddressInfo;
+    await new Promise((resolve) => probe.close(resolve));
+    const original = config.PIPED_API_URL;
+    config.PIPED_API_URL = `http://127.0.0.1:${port}`;
+    try {
+      const favs = await request(app).get('/api/v1/me/favourites/tracks').set('Authorization', `Bearer ${token}`);
+      expect(favs.status).toBe(200);
+      expect(favs.body.items).toHaveLength(1);
+      expect(favs.body.items[0]).toMatchObject({ id: 'yt:noMetaFav', title: 'Unknown Title' });
+
+      const recent = await request(app).get('/api/v1/me/recently-played').set('Authorization', `Bearer ${token}`);
+      expect(recent.status).toBe(502);
+      expect(recent.body.error.code).toBe('UPSTREAM_UNAVAILABLE');
+    } finally {
+      config.PIPED_API_URL = original;
+    }
   });
 });
 

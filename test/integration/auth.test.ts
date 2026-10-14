@@ -5,7 +5,7 @@ import { db } from '../../src/db/index.js';
 import { users, refreshTokens } from '../../src/db/schema.js';
 import { eq } from 'drizzle-orm';
 import { createUser } from '../factories.js';
-import { generateRefreshToken, signAccessToken, hashToken } from '../../src/middleware/auth.js';
+import { generateRefreshToken, signAccessToken, hashToken, forgetAuthUser } from '../../src/middleware/auth.js';
 import jwt from 'jsonwebtoken';
 import { config } from '../../src/config.js';
 
@@ -364,5 +364,35 @@ describe('Auth: refresh token hashing and rate limiting', () => {
       password: 'wrong_password',
     });
     expect(afterRes.status).toBe(401);
+  });
+
+  it('BE-AUTH-SEC-004: requireAuth serves a known user from its short-lived cache', async () => {
+    const { user, token } = await createUser();
+
+    const first = await request(app).get('/api/v1/me/favourites/ids').set('Authorization', `Bearer ${token}`);
+    expect(first.status).toBe(200);
+
+    // Same token again: the row is gone but the first request cached that the user exists.
+    await db.delete(users).where(eq(users.id, user.id));
+    const second = await request(app).get('/api/v1/me/favourites/ids').set('Authorization', `Bearer ${token}`);
+    expect(second.status).toBe(200);
+
+    // Forget the user, as a deletion route would, and the next request reads the database again.
+    forgetAuthUser(user.id);
+    const third = await request(app).get('/api/v1/me/favourites/ids').set('Authorization', `Bearer ${token}`);
+    expect(third.status).toBe(401);
+    expect(third.body.error.code).toBe('UNAUTHORIZED');
+  });
+
+  it('BE-AUTH-SEC-005: forgetAuthUser makes a deleted user fail immediately', async () => {
+    const { user, token } = await createUser();
+    await request(app).get('/api/v1/me/favourites/ids').set('Authorization', `Bearer ${token}`);
+
+    await db.delete(users).where(eq(users.id, user.id));
+    forgetAuthUser(user.id);
+
+    const res = await request(app).get('/api/v1/me/favourites/ids').set('Authorization', `Bearer ${token}`);
+    expect(res.status).toBe(401);
+    expect(res.body.error.message).toBe('User no longer exists');
   });
 });
