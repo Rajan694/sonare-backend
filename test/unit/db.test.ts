@@ -161,11 +161,12 @@ describe('db: models & helpers', () => {
     await db.insert(lyricsOverrides).values({
       userId: user.id,
       trackId: 'lyrOver1',
-      plain: 'Custom DB lyrics',
+      offsetMs: 0,
     });
 
     const [override] = await db.select().from(lyricsOverrides).where(eq(lyricsOverrides.userId, user.id));
     expect(override.trackId).toBe('lyrOver1');
+    expect(override.offsetMs).toBe(0);
   });
 
   it('BE-DB-011: stores the admin in users with its role and token version', async () => {
@@ -393,11 +394,9 @@ describe('db: schema tables & columns', () => {
     expect(playerState.repeat).toBeDefined();
   });
 
-  it('BE-SCH-011: lyricsOverrides schema table has lrc and plain columns', () => {
+  it('BE-SCH-011: lyricsOverrides schema table has offset column', () => {
     expect(lyricsOverrides.userId).toBeDefined();
     expect(lyricsOverrides.trackId).toBeDefined();
-    expect(lyricsOverrides.lrc).toBeDefined();
-    expect(lyricsOverrides.plain).toBeDefined();
     expect(lyricsOverrides.offsetMs).toBeDefined();
   });
 

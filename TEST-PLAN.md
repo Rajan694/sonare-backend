@@ -18,11 +18,11 @@ This document maps all backend test IDs to their specifications, assertions, and
 | `BE-AUTH-008`       | `POST /api/v1/auth/login`    | Rejects invalid password with 401 UNAUTHORIZED.                                   |
 | `BE-AUTH-009`       | `POST /api/v1/auth/login`    | Rejects login missing email with 400 BAD_REQUEST.                                 |
 | `BE-AUTH-010`       | `POST /api/v1/auth/login`    | Rejects login missing password with 400 BAD_REQUEST.                              |
-| `BE-AUTH-011`       | `POST /api/v1/auth/refresh`  | Rotates refreshToken, issues new accessToken, revokes previous refreshToken.      |
+| `BE-AUTH-011`       | `POST /api/v1/auth/refresh`  | Rotates refreshToken, issues new accessToken, deletes the spent row.              |
 | `BE-AUTH-012`       | `POST /api/v1/auth/refresh`  | Rejects refresh request missing refreshToken with 400 BAD_REQUEST.                |
 | `BE-AUTH-013`       | `POST /api/v1/auth/refresh`  | Rejects invalid or expired refresh token with 401 UNAUTHORIZED.                   |
 | `BE-AUTH-014`       | `POST /api/v1/auth/refresh`  | Rejects refresh attempt for deleted user with 401 UNAUTHORIZED.                   |
-| `BE-AUTH-015`       | `POST /api/v1/auth/logout`   | Revokes refresh token in database and returns ok: true.                           |
+| `BE-AUTH-015`       | `POST /api/v1/auth/logout`   | Deletes the refresh token row and returns ok: true.                               |
 | `BE-AUTH-016`       | `POST /api/v1/auth/logout`   | Gracefully handles empty logout request without error.                            |
 | `BE-AUTH-017`       | `requireAuth` middleware     | Rejects requests with missing Authorization header (401 UNAUTHORIZED).            |
 | `BE-AUTH-018`       | `requireAuth` middleware     | Rejects requests with non-Bearer Authorization scheme (401 UNAUTHORIZED).         |
@@ -40,6 +40,9 @@ This document maps all backend test IDs to their specifications, assertions, and
 | `BE-AUTH-SEC-003`   | `POST /api/v1/auth/login`    | A successful login resets the failed-attempt counter.                             |
 | `BE-AUTH-SEC-004`   | `requireAuth` middleware     | A known user is served from the 60 s id cache until forgotten.                    |
 | `BE-AUTH-SEC-005`   | `requireAuth` middleware     | forgetAuthUser makes a deleted user's next request fail with 401.                 |
+| `BE-AUTH-SEC-006`   | `POST /api/v1/auth/refresh`  | A refresh token older than 90 days is refused with 401.                           |
+| `BE-AUTH-SEC-007`   | `POST /api/v1/auth/refresh`  | Rotation deletes the spent row and leaves exactly one per session.                |
+| `BE-AUTH-SEC-008`   | refresh-token cleanup        | Removes revoked and 90-day-old rows, keeps live ones.                             |
 | `BE-SEC-001`        | CORS                         | Allows `http://localhost:<port>` origins outside production.                      |
 | `BE-SEC-002`        | CORS                         | `http://localhost.evil.com` gets no CORS header and no 500.                       |
 | `BE-SEC-003`        | CORS                         | Requests without an Origin header (mobile, curl) work.                            |
@@ -60,7 +63,7 @@ This document maps all backend test IDs to their specifications, assertions, and
 | `BE-EMAIL-005` | `POST /api/v1/auth/resend-verification` | New link replaces the old one; 4th request in an hour gives 429.                         |
 | `BE-EMAIL-006` | `POST /api/v1/auth/resend-verification` | Verified account gets alreadyVerified and no email.                                      |
 | `BE-EMAIL-007` | `POST /api/v1/auth/forgot-password`     | Unknown email still answers ok and sends nothing.                                        |
-| `BE-EMAIL-008` | `POST /api/v1/auth/reset-password`      | New password works, old fails, refresh tokens revoked, email verified, token single-use. |
+| `BE-EMAIL-008` | `POST /api/v1/auth/reset-password`      | New password works, old fails, refresh tokens deleted, email verified, token single-use. |
 | `BE-EMAIL-009` | `POST /api/v1/auth/reset-password`      | Invalid token changes neither the password nor the sessions.                             |
 | `BE-EMAIL-010` | register / reset-password               | Passwords under 8 characters give 400.                                                   |
 | `BE-EMAIL-011` | `POST /api/v1/auth/forgot-password`     | 4th request for one email in an hour gives 429.                                          |
@@ -137,9 +140,7 @@ This document maps all backend test IDs to their specifications, assertions, and
 | `BE-LYRICS-001`     | `GET /api/v1/tracks/:id/lyrics`          | Fetches synchronized lyrics from LRCLIB provider.                                                      |
 | `BE-LYRICS-002`     | `GET /api/v1/tracks/:id/lyrics`          | Returns plain unsynced lyrics when synced timestamps are absent.                                       |
 | `BE-LYRICS-003`     | `GET /api/v1/tracks/:id/lyrics`          | Returns 404 NOT_FOUND when no lyrics exist.                                                            |
-| `BE-LYRICS-004`     | `POST /api/v1/tracks/:id/lyrics`         | Stores custom user lyrics override in database.                                                        |
 | `BE-LYRICS-005`     | `PATCH /api/v1/tracks/:id/lyrics/offset` | Updates user playback offset in milliseconds.                                                          |
-| `BE-LYRICS-006`     | `DELETE /api/v1/tracks/:id/lyrics`       | Clears custom lyrics override for user.                                                                |
 | `BE-LYR-COV-001`    | `parseLrc`                               | Parses LRC string with offset tags and millisecond precision.                                          |
 | `BE-LYR-COV-002`    | `LyricsResolver.resolve`                 | Resolves lyrics via LRCLIB search fuzzy matching.                                                      |
 | `BE-LYR-COV-003`    | `LyricsResolver.resolve`                 | Null when LRCLIB has no match (no Genius link fallback).                                               |
@@ -149,7 +150,7 @@ This document maps all backend test IDs to their specifications, assertions, and
 | `BE-LYRICS-007`     | `GET /api/v1/tracks/:id/lyrics?script=`  | `script=latin` swaps Devanagari lyrics for the romanised LRCLIB version; no script keeps the original. |
 | `BE-LYRICS-008`     | `GET /api/v1/tracks/:id/lyrics?script=`  | Lyrics already in the preferred script are served without searching LRCLIB again.                      |
 | `BE-LYRICS-009`     | `GET /api/v1/tracks/:id/lyrics?script=`  | No version in that script: the original stays and the miss is cached (no second search).               |
-| `BE-LYRICS-010`     | `GET /api/v1/tracks/:id/lyrics?script=`  | The user's own lyrics win over the preferred script.                                                   |
+| `BE-LYRICS-010`     | `GET /api/v1/tracks/:id/lyrics`          | The stored offset is applied to the lyrics served.                                                     |
 | `BE-LYRICS-011`     | `GET /api/v1/tracks/:id/lyrics?script=`  | An unknown script is a 400; `original` behaves like no preference.                                     |
 | `BE-LYRICS-012`     | `GET /api/v1/tracks/:id/lyrics?script=`  | A failing version search still serves the original lyrics.                                             |
 | `BE-LYRICS-013`     | `GET /api/v1/tracks/:id/lyrics`          | 502 LYRICS_UNAVAILABLE when LRCLIB is down; nothing cached, so it finds lyrics once LRCLIB is back.    |
@@ -191,7 +192,7 @@ This document maps all backend test IDs to their specifications, assertions, and
 | `BE-ME-023`       | `POST /api/v1/me/playlists/:id/tracks`        | Adds tracks to playlist.                                                                             |
 | `BE-ME-024`       | `DELETE /api/v1/me/playlists/:id/tracks`      | Removes track from playlist by ID.                                                                   |
 | `BE-ME-025`       | `PATCH /api/v1/me/playlists/:id/tracks/order` | Reorders tracks in playlist.                                                                         |
-| `BE-ME-026`       | `GET /api/v1/me/settings`                     | Returns user audio and playback settings.                                                            |
+| `BE-ME-026`       | `GET /api/v1/me/settings`                     | Returns settings; defaults are eqPreset "Sonare", gapless true.                                      |
 | `BE-ME-027`       | `PUT /api/v1/me/settings`                     | Updates user equalizer and streaming preferences.                                                    |
 | `BE-ME-028`       | `GET /api/v1/me/player-state`                 | Restores persisted playback queue and position.                                                      |
 | `BE-ME-029`       | `PUT /api/v1/me/player-state`                 | Saves current player state and queue.                                                                |
@@ -202,6 +203,16 @@ This document maps all backend test IDs to their specifications, assertions, and
 | `BE-ME-034`       | `GET /api/v1/me/favourites/ids`               | Excludes other users' favourites.                                                                    |
 | `BE-ME-035`       | `GET /api/v1/me/favourites/ids`               | Rejects a request without a token with 401.                                                          |
 | `BE-ME-036`       | `GET /api/v1/me/favourites/tracks`            | Stubs the row when Piped is down while `/me/recently-played` still returns 502.                      |
+| `BE-ME-037`       | `GET /api/v1/me/playlists`                    | Lists playlists alphabetically (case-insensitive), then by creation.                                 |
+| `BE-ME-038`       | `PATCH /api/v1/me/playlists/:id`              | An empty description clears it to null.                                                              |
+| `BE-ME-039`       | `PATCH /api/v1/me/playlists/:id`              | A missing description keeps the stored value.                                                        |
+| `BE-ME-040`       | `POST /api/v1/me/playlists/:id/tracks`        | Appends tracks at positions after the current maximum.                                               |
+| `BE-ME-041`       | `GET /api/v1/me/playlists/:id/tracks`         | Every item carries an entryId (the playlist_tracks row id).                                          |
+| `BE-ME-042`       | `DELETE /api/v1/me/playlists/:id/tracks`      | entryIds removes exactly that entry when two songs share an id.                                      |
+| `BE-ME-043`       | `DELETE /api/v1/me/playlists/:id/tracks`      | Another user's entryId removes nothing from this playlist.                                           |
+| `BE-ME-044`       | `PATCH /api/v1/me/playlists/:id/tracks/order` | entryId moves that row when a device sends a stale from index.                                       |
+| `BE-ME-045`       | `GET /api/v1/me/player-state`                 | Reports updatedAt in epoch ms, 0 when there is no row.                                               |
+| `BE-ME-046`       | `DELETE /api/v1/me/playlists/:id/tracks`      | Renumbers remaining entries 0..n-1 after a removal.                                                  |
 | `BE-ME-EXTRA-001` | `GET /api/v1/me/playlists/:id`                | Returns 404 for missing playlist.                                                                    |
 | `BE-ME-EXTRA-002` | `PATCH /api/v1/me/playlists/:id`              | Returns 404 when attempting to edit another user's playlist.                                         |
 | `BE-ME-EXTRA-003` | `DELETE /api/v1/me/playlists/:id`             | Returns 200 idempotently when playlist is not found.                                                 |
@@ -561,7 +572,6 @@ with the first problem as the message, and nothing is written.
 | `BE-VAL-009` | `GET /api/v1/me/recently-played`              | Non-numeric `limit` → 400.                                                   |
 | `BE-VAL-010` | `GET /api/v1/me/library/tracks`               | Unknown `sort` → 400.                                                        |
 | `BE-VAL-011` | `GET /api/v1/me/most-played`                  | `limit=0` → 400 "Must be at least 1".                                        |
-| `BE-VAL-012` | `POST /api/v1/tracks/:id/lyrics`              | Neither `lrc` nor `plain` → 400 "Send lrc or plain lyrics".                  |
 | `BE-VAL-013` | `PATCH /api/v1/tracks/:id/lyrics/offset`      | Non-numeric `offsetMs` → 400 "offsetMs must be a number".                    |
 | `BE-VAL-014` | `GET /api/v1/tracks/:id/lyrics`               | Unknown `prefer` → 400.                                                      |
 | `BE-VAL-015` | `GET /api/v1/search`                          | Unknown `type` → 400.                                                        |

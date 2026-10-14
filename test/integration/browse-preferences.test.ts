@@ -6,7 +6,7 @@ import { createUser, samplePipedChannel, samplePipedStream, isLocalTestHost } fr
 import { db } from '../../src/db/index.js';
 import { artistFollows, favouriteTracks, playlists, playlistTracks } from '../../src/db/schema.js';
 import { PermanentCache } from '../../src/services/cache.js';
-import { saveDbLyricsOverride } from '../../src/services/lyrics.js';
+import { saveDbLyricsOffset } from '../../src/services/lyrics.js';
 
 // Browse categories, the Library's derived artists, the preferred lyrics script and album
 // cover hints that survive a restart.
@@ -220,16 +220,15 @@ describe('Browse categories, library artists, lyrics script, cover hints', () =>
     expect(searches.count).toBe(2);
   });
 
-  it("BE-LYRICS-010: the user's own lyrics win over the preferred script", async () => {
+  it('BE-LYRICS-010: the stored offset applies to the lyrics served', async () => {
     const { user, token } = await createUser();
-    await saveDbLyricsOverride('scr4', user.id, { lrc: '[00:01.00]मेरे बोल' });
-
-    const res = await request(app)
-      .get('/api/v1/tracks/yt:scr4/lyrics?script=latin')
-      .set('Authorization', `Bearer ${token}`);
+    await saveDbLyricsOffset('scr4', user.id, 500);
+    piped().intercept({ path: '/streams/scr4', method: 'GET' }).reply(200, samplePipedStream('scr4'));
+    exactMatchIsHindi();
+    const res = await request(app).get('/api/v1/tracks/yt:scr4/lyrics').set('Authorization', `Bearer ${token}`);
     expect(res.status).toBe(200);
-    expect(res.body).toMatchObject({ provider: 'user', synced: true });
-    expect(res.body.lines).toEqual([{ atMs: 1000, text: 'मेरे बोल' }]);
+    expect(res.body.offsetMs).toBe(500);
+    expect(res.body.lines[0].text).toBe('तुम ही हो');
   });
 
   it('BE-LYRICS-011: an unknown script is a 400; "original" behaves like no preference', async () => {

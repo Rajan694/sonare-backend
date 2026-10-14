@@ -496,6 +496,8 @@ describe('Me: profile & personal data', () => {
     expect(res.status).toBe(200);
     expect(res.body).toHaveProperty('streamQuality');
     expect(res.body).toHaveProperty('eqPreset');
+    expect(res.body.eqPreset).toBe('Sonare');
+    expect(res.body.gapless).toBe(true);
   });
 
   it('BE-ME-027: PUT /api/v1/me/settings updates user settings payload', async () => {
@@ -913,7 +915,7 @@ describe('Me: playlists & settings', () => {
     const res = await request(app)
       .put('/api/v1/me/settings')
       .set('Authorization', `Bearer ${token}`)
-      .send({ normalization: false, gapless: true, stayOffline: true });
+      .send({ normalization: false, gapless: false, stayOffline: true });
 
     expect(res.status).toBe(200);
     expect(res.body.ok).toBe(true);
@@ -921,7 +923,7 @@ describe('Me: playlists & settings', () => {
     const getRes = await request(app).get('/api/v1/me/settings').set('Authorization', `Bearer ${token}`);
 
     expect(getRes.body.normalization).toBe(false);
-    expect(getRes.body.gapless).toBe(true);
+    expect(getRes.body.gapless).toBe(false);
     expect(getRes.body.stayOffline).toBe(true);
   });
 
@@ -997,6 +999,250 @@ describe('Me: settings & player state', () => {
     const getRes = await request(app).get('/api/v1/me/player-state').set('Authorization', `Bearer ${token}`);
     expect(getRes.body.trackRef.kind).toBe('local');
     expect(getRes.body.trackRef.fingerprint).toBe('localFingerprint123');
+  });
+
+  it('BE-ME-045: GET /api/v1/me/player-state reports when it was saved', async () => {
+    const { user, token } = await createUser();
+    const before = Date.now() - 1_000;
+    await db.insert(playerState).values({
+      userId: user.id,
+      trackRefKind: 'server',
+      trackRefId: 'stampedState',
+      positionMs: 1000,
+      updatedAt: new Date(),
+    });
+
+    const res = await request(app).get('/api/v1/me/player-state').set('Authorization', `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    expect(typeof res.body.updatedAt).toBe('number');
+    expect(res.body.updatedAt).toBeGreaterThanOrEqual(before);
+
+    const fresh = await createUser();
+    const empty = await request(app).get('/api/v1/me/player-state').set('Authorization', `Bearer ${fresh.token}`);
+    expect(empty.body.updatedAt).toBe(0);
+  });
+});
+
+describe('Me: playlist ordering & entries', () => {
+  const app = createApp();
+
+  it('BE-ME-037: GET /api/v1/me/playlists lists playlists alphabetically, then by creation', async () => {
+    const { user, token } = await createUser();
+    await db.insert(playlists).values([
+      { id: 'sonare:pl_zzz', userId: user.id, name: 'zeta', kind: 'online', createdAt: new Date(1_000) },
+      { id: 'sonare:pl_bbb', userId: user.id, name: 'bravo', kind: 'online', createdAt: new Date(2_000) },
+      { id: 'sonare:pl_aaa', userId: user.id, name: 'Alpha', kind: 'online', createdAt: new Date(3_000) },
+    ]);
+
+    const res = await request(app).get('/api/v1/me/playlists').set('Authorization', `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    expect(res.body.items.map((p: { name: string }) => p.name)).toEqual(['Alpha', 'bravo', 'zeta']);
+  });
+
+  it('BE-ME-038: PATCH /api/v1/me/playlists/:id clears an empty description to null', async () => {
+    const { user, token } = await createUser();
+    const [pl] = await db
+      .insert(playlists)
+      .values({ id: 'sonare:pl_clear', userId: user.id, name: 'Has Desc', description: 'Old', kind: 'online' })
+      .returning();
+
+    const res = await request(app)
+      .patch(`/api/v1/me/playlists/${pl.id}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ description: '' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.description).toBeNull();
+    const [row] = await db.select().from(playlists).where(eq(playlists.id, pl.id));
+    expect(row.description).toBeNull();
+  });
+
+  it('BE-ME-039: PATCH /api/v1/me/playlists/:id keeps a stored description when the field is missing', async () => {
+    const { user, token } = await createUser();
+    const [pl] = await db
+      .insert(playlists)
+      .values({ id: 'sonare:pl_keep', userId: user.id, name: 'Old', description: 'Keep me', kind: 'online' })
+      .returning();
+
+    const res = await request(app)
+      .patch(`/api/v1/me/playlists/${pl.id}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ name: 'New' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.name).toBe('New');
+    expect(res.body.description).toBe('Keep me');
+  });
+
+  it('BE-ME-040: POST /api/v1/me/playlists/:id/tracks appends positions after the current max', async () => {
+    const { user, token } = await createUser();
+    const [pl] = await db
+      .insert(playlists)
+      .values({ id: 'sonare:pl_append', userId: user.id, name: 'Append', kind: 'online' })
+      .returning();
+    await db
+      .insert(playlistTracks)
+      .values({ playlistId: pl.id, trackRefKind: 'server', trackRefId: 'first', position: 0 });
+
+    const res = await request(app)
+      .post(`/api/v1/me/playlists/${pl.id}/tracks`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ trackIds: ['yt:second', 'yt:third'] });
+
+    expect(res.status).toBe(200);
+    const rows = await db
+      .select()
+      .from(playlistTracks)
+      .where(eq(playlistTracks.playlistId, pl.id))
+      .orderBy(playlistTracks.position);
+    expect(rows.map((r) => [r.trackRefId, r.position])).toEqual([
+      ['first', 0],
+      ['second', 1],
+      ['third', 2],
+    ]);
+  });
+
+  it('BE-ME-041: GET /api/v1/me/playlists/:id/tracks gives every item an entryId', async () => {
+    const { user, token } = await createUser();
+    const [pl] = await db
+      .insert(playlists)
+      .values({ id: 'sonare:pl_entries', userId: user.id, name: 'Entries', kind: 'online' })
+      .returning();
+    const [row1] = await db
+      .insert(playlistTracks)
+      .values({ playlistId: pl.id, trackRefKind: 'local', trackRefId: 'same', position: 0 })
+      .returning();
+    const [row2] = await db
+      .insert(playlistTracks)
+      .values({ playlistId: pl.id, trackRefKind: 'local', trackRefId: 'same', position: 1 })
+      .returning();
+
+    const res = await request(app).get(`/api/v1/me/playlists/${pl.id}/tracks`).set('Authorization', `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    expect(res.body.items.map((i: { entryId: string }) => i.entryId)).toEqual([row1.id, row2.id]);
+  });
+
+  it('BE-ME-042: DELETE by entryId removes only that entry when two songs share an id', async () => {
+    const { user, token } = await createUser();
+    const [pl] = await db
+      .insert(playlists)
+      .values({ id: 'sonare:pl_dupdel', userId: user.id, name: 'Dup Delete', kind: 'online' })
+      .returning();
+    const [row1] = await db
+      .insert(playlistTracks)
+      .values({ playlistId: pl.id, trackRefKind: 'local', trackRefId: 'same', position: 0 })
+      .returning();
+    await db
+      .insert(playlistTracks)
+      .values({ playlistId: pl.id, trackRefKind: 'local', trackRefId: 'same', position: 1 });
+
+    const res = await request(app)
+      .delete(`/api/v1/me/playlists/${pl.id}/tracks`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ entryIds: [row1.id] });
+
+    expect(res.status).toBe(200);
+    const rows = await db.select().from(playlistTracks).where(eq(playlistTracks.playlistId, pl.id));
+    expect(rows).toHaveLength(1);
+    expect(rows[0].id).not.toBe(row1.id);
+    expect(rows[0].position).toBe(0);
+  });
+
+  it("BE-ME-043: DELETE with another user's entryId removes nothing", async () => {
+    const userA = await createUser();
+    const userB = await createUser();
+    const [plA] = await db
+      .insert(playlists)
+      .values({ id: 'sonare:pl_a_entries', userId: userA.user.id, name: 'A', kind: 'online' })
+      .returning();
+    const [rowA] = await db
+      .insert(playlistTracks)
+      .values({ playlistId: plA.id, trackRefKind: 'local', trackRefId: 'aTrack', position: 0 })
+      .returning();
+    const [plB] = await db
+      .insert(playlists)
+      .values({ id: 'sonare:pl_b_entries', userId: userB.user.id, name: 'B', kind: 'online' })
+      .returning();
+    await db
+      .insert(playlistTracks)
+      .values({ playlistId: plB.id, trackRefKind: 'local', trackRefId: 'bTrack', position: 0 });
+
+    const res = await request(app)
+      .delete(`/api/v1/me/playlists/${plB.id}/tracks`)
+      .set('Authorization', `Bearer ${userB.token}`)
+      .send({ entryIds: [rowA.id] });
+
+    expect(res.status).toBe(200);
+    const aRows = await db.select().from(playlistTracks).where(eq(playlistTracks.playlistId, plA.id));
+    const bRows = await db.select().from(playlistTracks).where(eq(playlistTracks.playlistId, plB.id));
+    expect(aRows).toHaveLength(1);
+    expect(bRows).toHaveLength(1);
+  });
+
+  it('BE-ME-044: reorder by entryId moves the right song for a device showing an old order', async () => {
+    const { user, token } = await createUser();
+    const [pl] = await db
+      .insert(playlists)
+      .values({ id: 'sonare:pl_entryorder', userId: user.id, name: 'Entry Order', kind: 'online' })
+      .returning();
+    await db.insert(playlistTracks).values([
+      { playlistId: pl.id, trackRefKind: 'local', trackRefId: 'one', position: 0 },
+      { playlistId: pl.id, trackRefKind: 'local', trackRefId: 'two', position: 1 },
+      { playlistId: pl.id, trackRefKind: 'local', trackRefId: 'three', position: 2 },
+    ]);
+    const rows = await db
+      .select()
+      .from(playlistTracks)
+      .where(eq(playlistTracks.playlistId, pl.id))
+      .orderBy(playlistTracks.position);
+    const threeEntry = rows.find((r) => r.trackRefId === 'three')!;
+
+    // The device thinks "three" is first (from 0) and wants it last (to 2).
+    const res = await request(app)
+      .patch(`/api/v1/me/playlists/${pl.id}/tracks/order`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ from: 0, to: 2, entryId: threeEntry.id });
+
+    expect(res.status).toBe(200);
+    const after = await db
+      .select()
+      .from(playlistTracks)
+      .where(eq(playlistTracks.playlistId, pl.id))
+      .orderBy(playlistTracks.position);
+    expect(after.map((r) => [r.trackRefId, r.position])).toEqual([
+      ['one', 0],
+      ['two', 1],
+      ['three', 2],
+    ]);
+  });
+
+  it('BE-ME-046: DELETE renumbers remaining entries 0..n-1', async () => {
+    const { user, token } = await createUser();
+    const [pl] = await db
+      .insert(playlists)
+      .values({ id: 'sonare:pl_gaps', userId: user.id, name: 'Gaps', kind: 'online' })
+      .returning();
+    await db.insert(playlistTracks).values([
+      { playlistId: pl.id, trackRefKind: 'local', trackRefId: 'a', position: 0 },
+      { playlistId: pl.id, trackRefKind: 'local', trackRefId: 'b', position: 5 },
+      { playlistId: pl.id, trackRefKind: 'local', trackRefId: 'c', position: 9 },
+    ]);
+
+    const res = await request(app)
+      .delete(`/api/v1/me/playlists/${pl.id}/tracks`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ index: 0 });
+
+    expect(res.status).toBe(200);
+    const rows = await db
+      .select()
+      .from(playlistTracks)
+      .where(eq(playlistTracks.playlistId, pl.id))
+      .orderBy(playlistTracks.position);
+    expect(rows.map((r) => [r.trackRefId, r.position])).toEqual([
+      ['b', 0],
+      ['c', 1],
+    ]);
   });
 });
 

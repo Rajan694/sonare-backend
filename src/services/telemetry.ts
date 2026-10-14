@@ -1,7 +1,7 @@
 import type { Request, RequestHandler, Response } from 'express';
-import { and, eq, lt, sql } from 'drizzle-orm';
+import { and, eq, lt, or, sql } from 'drizzle-orm';
 import { db } from '../db/index.js';
-import { errorLogs, requestLogs } from '../db/schema.js';
+import { errorLogs, refreshTokens, requestLogs } from '../db/schema.js';
 import { logger } from '../logger.js';
 
 // Request logs and error logs for the admin page. Both are buffered in memory and written in
@@ -19,6 +19,7 @@ const ERROR_LOG_DAYS = 90;
 const FLUSH_MS = 5_000;
 const MAX_PENDING_REQUESTS = 5_000;
 const MAX_PENDING_ERRORS = 500;
+const REFRESH_TOKEN_DAYS = 90;
 
 export interface ErrorReport {
   source: ErrorSource;
@@ -219,6 +220,22 @@ const prune = async () => {
   }
 };
 
+export const pruneRefreshTokens = async () => {
+  try {
+    const utcNow = sql`(now() AT TIME ZONE 'UTC')`;
+    await db
+      .delete(refreshTokens)
+      .where(
+        or(
+          eq(refreshTokens.revoked, true),
+          lt(refreshTokens.createdAt, sql`${utcNow} - make_interval(days => ${REFRESH_TOKEN_DAYS})`),
+        ),
+      );
+  } catch (err) {
+    logger.warn({ err }, 'Telemetry: could not prune refresh tokens');
+  }
+};
+
 let started = false;
 
 export const startTelemetry = (): void => {
@@ -227,6 +244,8 @@ export const startTelemetry = (): void => {
   setInterval(() => void flushTelemetry(), FLUSH_MS).unref();
   void prune();
   setInterval(() => void prune(), 3600_000).unref();
+  void pruneRefreshTokens();
+  setInterval(() => void pruneRefreshTokens(), 6 * 3600_000).unref();
 
   // Recorded, then the process still exits as it would have without these handlers.
   const crash = (code: string) => (reason: unknown) => {

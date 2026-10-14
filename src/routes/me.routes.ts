@@ -11,7 +11,7 @@ import {
   userSettings,
   playerState,
 } from '../db/schema.js';
-import { eq, and, desc, sql, gte } from 'drizzle-orm';
+import { eq, and, desc, sql, gte, inArray } from 'drizzle-orm';
 import { requireAuth } from '../middleware/auth.js';
 import { idHelpers } from '../ids.js';
 import { hydrateTracks } from '../db/hydrate.js';
@@ -84,11 +84,18 @@ const addTracksSchema = z.object({
   metas: z.record(z.unknown()).optional(),
 });
 const removeTracksSchema = z.object({
+  entryIds: z.array(z.string().uuid()).max(500).optional(),
   index: z.number().int().min(0).optional(),
   trackIds: z.array(trackId).max(500).optional(),
 });
 const position = z.number({ required_error: 'Missing from or to' }).int().min(0);
-const reorderSchema = z.object({ from: position, to: position });
+const reorderSchema = z
+  .object({
+    from: position.optional(),
+    to: position,
+    entryId: z.string().uuid().optional(),
+  })
+  .refine((b) => b.from !== undefined || b.entryId !== undefined, 'Send from or entryId');
 
 const syncSchema = z.object({
   since: z.number().optional(),
@@ -593,7 +600,8 @@ meRouter.get('/playlists', async (req, res) => {
     .from(playlists)
     .leftJoin(playlistTracks, eq(playlists.id, playlistTracks.playlistId))
     .where(eq(playlists.userId, req.user!.id))
-    .groupBy(playlists.id, playlists.name, playlists.description, playlists.kind, playlists.updatedAt);
+    .groupBy(playlists.id, playlists.name, playlists.description, playlists.kind, playlists.updatedAt)
+    .orderBy(sql`lower(${playlists.name}) asc`, playlists.createdAt);
 
   res.json({
     items: list.map((p) => ({
@@ -681,7 +689,7 @@ meRouter.get('/playlists/:id/tracks', async (req, res) => {
     .select()
     .from(playlistTracks)
     .where(eq(playlistTracks.playlistId, p.id))
-    .orderBy(playlistTracks.position);
+    .orderBy(playlistTracks.position, playlistTracks.id);
 
   const items = await hydrateTracks(
     req.user!.id,
@@ -693,20 +701,19 @@ meRouter.get('/playlists/:id/tracks', async (req, res) => {
   );
 
   res.json({
-    items,
+    items: items.map((item, i) => ({ ...item, entryId: rows[i].id })),
     meta: { total: items.length },
   });
 });
 
 meRouter.patch('/playlists/:id', async (req, res) => {
   const { name, description } = parseBody(updatePlaylistSchema, req);
+  const set: { name?: string; description?: string | null; updatedAt: Date } = { updatedAt: new Date() };
+  if (name !== undefined) set.name = name;
+  if (description !== undefined) set.description = description === '' ? null : description;
   const [updated] = await db
     .update(playlists)
-    .set({
-      name: name || undefined,
-      description: description || undefined,
-      updatedAt: new Date(),
-    })
+    .set(set)
     .where(and(eq(playlists.id, req.params.id), eq(playlists.userId, req.user!.id)))
     .returning();
 
@@ -740,38 +747,37 @@ meRouter.delete('/playlists/:id', async (req, res) => {
 
 meRouter.post('/playlists/:id/tracks', async (req, res) => {
   const { trackIds, metas = {} } = parseBody(addTracksSchema, req);
+  const playlistId = req.params.id;
 
-  const [p] = await db
-    .select()
-    .from(playlists)
-    .where(and(eq(playlists.id, req.params.id), eq(playlists.userId, req.user!.id)))
-    .limit(1);
-
-  if (!p) {
+  if (!(await ownsPlaylist(req.user!.id, playlistId))) {
     res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Playlist not found' } });
     return;
   }
 
-  const current = await db.select().from(playlistTracks).where(eq(playlistTracks.playlistId, p.id));
-  let pos = current.length;
-
-  for (const fullId of trackIds) {
-    const isYt = String(fullId).startsWith('yt:');
-    const kind = isYt ? 'server' : 'local';
-    const trackRefId = isYt ? idHelpers.extractYtId(fullId) : String(fullId).replace(/^local:/, '');
-    const rawMeta = metas[fullId] ?? metas[trackRefId];
-    const parsedMeta = parseTrackMeta(rawMeta);
-
-    await db.insert(playlistTracks).values({
-      playlistId: p.id,
-      position: pos++,
-      trackRefKind: kind,
-      trackRefId,
-      meta: parsedMeta || null,
-    });
-  }
-
-  await db.update(playlists).set({ updatedAt: new Date() }).where(eq(playlists.id, p.id));
+  await db.transaction(async (tx) => {
+    const [{ max }] = await tx
+      .select({ max: sql<number>`coalesce(max(${playlistTracks.position}), -1)::int` })
+      .from(playlistTracks)
+      .where(eq(playlistTracks.playlistId, playlistId));
+    if (trackIds.length > 0) {
+      const rows = trackIds.map((fullId, i) => {
+        const isYt = String(fullId).startsWith('yt:');
+        const kind = isYt ? 'server' : 'local';
+        const trackRefId = isYt ? idHelpers.extractYtId(fullId) : String(fullId).replace(/^local:/, '');
+        const rawMeta = metas[fullId] ?? metas[trackRefId];
+        const parsedMeta = parseTrackMeta(rawMeta);
+        return {
+          playlistId,
+          position: max + 1 + i,
+          trackRefKind: kind,
+          trackRefId,
+          meta: parsedMeta || null,
+        };
+      });
+      await tx.insert(playlistTracks).values(rows);
+    }
+    await tx.update(playlists).set({ updatedAt: new Date() }).where(eq(playlists.id, playlistId));
+  });
   res.json({ ok: true });
 });
 
@@ -786,68 +792,94 @@ const ownsPlaylist = async (userId: string, playlistId: string): Promise<boolean
 };
 
 meRouter.delete('/playlists/:id/tracks', async (req, res) => {
-  const { index, trackIds } = parseBody(removeTracksSchema, req);
+  const { entryIds, index, trackIds } = parseBody(removeTracksSchema, req);
   const playlistId = req.params.id;
   if (!(await ownsPlaylist(req.user!.id, playlistId))) {
     res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Playlist not found' } });
     return;
   }
 
-  if (index !== undefined) {
-    await db
-      .delete(playlistTracks)
-      .where(and(eq(playlistTracks.playlistId, playlistId), eq(playlistTracks.position, index)));
-  } else if (trackIds) {
-    for (const id of trackIds) {
-      const rawId = id.startsWith('yt:') ? idHelpers.extractYtId(id) : id.replace(/^local:/, '');
-      await db
+  await db.transaction(async (tx) => {
+    if (entryIds) {
+      await tx
         .delete(playlistTracks)
-        .where(and(eq(playlistTracks.playlistId, playlistId), eq(playlistTracks.trackRefId, rawId)));
+        .where(and(eq(playlistTracks.playlistId, playlistId), inArray(playlistTracks.id, entryIds)));
+    } else if (index !== undefined) {
+      await tx
+        .delete(playlistTracks)
+        .where(and(eq(playlistTracks.playlistId, playlistId), eq(playlistTracks.position, index)));
+    } else if (trackIds) {
+      const rawIds = trackIds.map((id) =>
+        String(id).startsWith('yt:') ? idHelpers.extractYtId(id) : String(id).replace(/^local:/, ''),
+      );
+      await tx
+        .delete(playlistTracks)
+        .where(and(eq(playlistTracks.playlistId, playlistId), inArray(playlistTracks.trackRefId, rawIds)));
     }
-  }
 
-  // Re-index remaining positions
-  const remaining = await db
-    .select()
-    .from(playlistTracks)
-    .where(eq(playlistTracks.playlistId, playlistId))
-    .orderBy(playlistTracks.position);
-
-  for (let i = 0; i < remaining.length; i++) {
-    if (remaining[i].position !== i) {
-      await db.update(playlistTracks).set({ position: i }).where(eq(playlistTracks.id, remaining[i].id));
-    }
-  }
-
-  await db.update(playlists).set({ updatedAt: new Date() }).where(eq(playlists.id, playlistId));
+    await tx.execute(sql`
+      UPDATE playlist_tracks p SET position = r.rn
+      FROM (
+        SELECT id, row_number() OVER (ORDER BY position, id) - 1 AS rn
+        FROM playlist_tracks WHERE playlist_id = ${playlistId}
+      ) r
+      WHERE p.id = r.id AND p.position <> r.rn
+    `);
+    await tx.update(playlists).set({ updatedAt: new Date() }).where(eq(playlists.id, playlistId));
+  });
   res.json({ ok: true });
 });
 
 meRouter.patch('/playlists/:id/tracks/order', async (req, res) => {
-  const { from, to } = parseBody(reorderSchema, req);
+  const { from, to, entryId } = parseBody(reorderSchema, req);
 
   const playlistId = req.params.id;
   if (!(await ownsPlaylist(req.user!.id, playlistId))) {
     res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Playlist not found' } });
     return;
   }
-  const tracks = await db
-    .select()
-    .from(playlistTracks)
-    .where(eq(playlistTracks.playlistId, playlistId))
-    .orderBy(playlistTracks.position);
 
-  if (tracks[from] && tracks[to]) {
-    // Reorder in memory and update positions
-    const [moved] = tracks.splice(from, 1);
-    tracks.splice(to, 0, moved);
-
-    for (let i = 0; i < tracks.length; i++) {
-      await db.update(playlistTracks).set({ position: i }).where(eq(playlistTracks.id, tracks[i].id));
+  let notFound = false;
+  await db.transaction(async (tx) => {
+    const rows = await tx
+      .select({ id: playlistTracks.id, position: playlistTracks.position })
+      .from(playlistTracks)
+      .where(eq(playlistTracks.playlistId, playlistId))
+      .orderBy(playlistTracks.position, playlistTracks.id);
+    let fromIndex = from;
+    if (entryId) {
+      fromIndex = rows.findIndex((r) => r.id === entryId);
+      if (fromIndex === -1) {
+        notFound = true;
+        return;
+      }
     }
-  }
+    if (fromIndex === undefined) {
+      notFound = true;
+      return;
+    }
+    if (!rows[fromIndex] || to < 0 || to >= rows.length) {
+      return;
+    }
+    const reordered = rows.slice();
+    const [moved] = reordered.splice(fromIndex, 1);
+    reordered.splice(to, 0, moved);
+    const moves = sql.join(
+      reordered.map((r, i) => sql`(${r.id}::uuid, ${i}::int)`),
+      sql`, `,
+    );
+    await tx.execute(sql`
+      UPDATE playlist_tracks AS p SET position = v.pos
+      FROM (VALUES ${moves}) AS v(id, pos)
+      WHERE p.id = v.id AND p.position <> v.pos
+    `);
+    await tx.update(playlists).set({ updatedAt: new Date() }).where(eq(playlists.id, playlistId));
+  });
 
-  await db.update(playlists).set({ updatedAt: new Date() }).where(eq(playlists.id, playlistId));
+  if (notFound) {
+    res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Playlist entry not found' } });
+    return;
+  }
   res.json({ ok: true });
 });
 
@@ -930,6 +962,7 @@ meRouter.get('/player-state', async (req, res) => {
     index: state?.index || 0,
     shuffle: state?.shuffle || false,
     repeat: state?.repeat || 'off',
+    updatedAt: state?.updatedAt ? state.updatedAt.getTime() : 0,
   });
 });
 
@@ -969,8 +1002,8 @@ const QUALITIES = ['low', 'normal', 'high'] as const;
 const DOWNLOAD_FORMATS = ['opus', 'm4a'] as const;
 
 const DEFAULT_SETTINGS = {
-  eqPreset: 'Flat',
-  gapless: false,
+  eqPreset: 'Sonare',
+  gapless: true,
   normalization: true,
   downloadQuality: 'high',
   stayOffline: false,

@@ -6,6 +6,7 @@ import { users, refreshTokens } from '../../src/db/schema.js';
 import { eq } from 'drizzle-orm';
 import { createUser } from '../factories.js';
 import { generateRefreshToken, signAccessToken, hashToken, forgetAuthUser } from '../../src/middleware/auth.js';
+import { pruneRefreshTokens } from '../../src/services/telemetry.js';
 import jwt from 'jsonwebtoken';
 import { config } from '../../src/config.js';
 
@@ -394,5 +395,50 @@ describe('Auth: refresh token hashing and rate limiting', () => {
     const res = await request(app).get('/api/v1/me/favourites/ids').set('Authorization', `Bearer ${token}`);
     expect(res.status).toBe(401);
     expect(res.body.error.message).toBe('User no longer exists');
+  });
+
+  it('BE-AUTH-SEC-006: a refresh token older than 90 days is refused', async () => {
+    const { user, refreshToken } = await createUser();
+    await db
+      .update(refreshTokens)
+      .set({ createdAt: new Date(Date.now() - 91 * 24 * 60 * 60 * 1000) })
+      .where(eq(refreshTokens.userId, user.id));
+
+    const res = await request(app).post('/api/v1/auth/refresh').send({ refreshToken });
+    expect(res.status).toBe(401);
+    expect(res.body.error.code).toBe('UNAUTHORIZED');
+  });
+
+  it('BE-AUTH-SEC-007: rotation leaves exactly one row for the session', async () => {
+    const { user, refreshToken } = await createUser();
+
+    const res = await request(app).post('/api/v1/auth/refresh').send({ refreshToken });
+    expect(res.status).toBe(200);
+
+    // The spent row went and the new one arrived: still one row.
+    let rows = await db.select().from(refreshTokens).where(eq(refreshTokens.userId, user.id));
+    expect(rows).toHaveLength(1);
+    expect(rows[0].token).toBe(hashToken(res.body.refreshToken));
+
+    // The new token still works and again leaves one row.
+    const again = await request(app).post('/api/v1/auth/refresh').send({ refreshToken: res.body.refreshToken });
+    expect(again.status).toBe(200);
+    rows = await db.select().from(refreshTokens).where(eq(refreshTokens.userId, user.id));
+    expect(rows).toHaveLength(1);
+  });
+
+  it('BE-AUTH-SEC-008: pruneRefreshTokens removes revoked and expired rows and keeps live ones', async () => {
+    const { user } = await createUser();
+    const old = new Date(Date.now() - 91 * 24 * 60 * 60 * 1000);
+    await db.insert(refreshTokens).values([
+      { userId: user.id, token: hashToken('revoked-token'), revoked: true },
+      { userId: user.id, token: hashToken('expired-token'), createdAt: old },
+    ]);
+
+    await pruneRefreshTokens();
+
+    const rows = await db.select().from(refreshTokens).where(eq(refreshTokens.userId, user.id));
+    expect(rows).toHaveLength(1);
+    expect(rows[0].revoked).toBe(false);
   });
 });

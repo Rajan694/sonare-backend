@@ -22,6 +22,7 @@ import {
 export const authRouter = Router();
 
 const BCRYPT_COST = 10;
+const REFRESH_TOKEN_TTL_MS = 90 * 24 * 60 * 60 * 1000;
 
 const loginLimiter = createRateLimiter({ name: 'login', max: 5, windowMs: 15 * 60_000 });
 const registerLimiter = createRateLimiter({ name: 'register', max: 10, windowMs: 60 * 60_000 });
@@ -157,7 +158,7 @@ authRouter.post('/refresh', async (req, res) => {
     .from(refreshTokens)
     .where(and(eq(refreshTokens.token, hashToken(refreshToken)), eq(refreshTokens.revoked, false)))
     .limit(1);
-  if (!stored) {
+  if (!stored || Date.now() - stored.createdAt.getTime() > REFRESH_TOKEN_TTL_MS) {
     res.status(401).json({ error: { code: 'UNAUTHORIZED', message: 'Invalid or revoked refresh token' } });
     return;
   }
@@ -168,19 +169,19 @@ authRouter.post('/refresh', async (req, res) => {
     return;
   }
 
-  // Rotate: the old refresh token is spent.
-  await db.update(refreshTokens).set({ revoked: true }).where(eq(refreshTokens.id, stored.id));
-  const session = await startSession(user);
-  res.json({ accessToken: session.accessToken, refreshToken: session.refreshToken });
+  // Rotate: the spent row goes, the new one arrives in the same transaction.
+  const newRefreshToken = generateRefreshToken();
+  await db.transaction(async (tx) => {
+    await tx.delete(refreshTokens).where(eq(refreshTokens.id, stored.id));
+    await tx.insert(refreshTokens).values({ userId: user.id, token: hashToken(newRefreshToken) });
+  });
+  res.json({ accessToken: signAccessToken({ id: user.id, email: user.email }), refreshToken: newRefreshToken });
 });
 
 authRouter.post('/logout', async (req, res) => {
   const { refreshToken } = parseBody(logoutSchema, req);
   if (refreshToken) {
-    await db
-      .update(refreshTokens)
-      .set({ revoked: true })
-      .where(eq(refreshTokens.token, hashToken(refreshToken)));
+    await db.delete(refreshTokens).where(eq(refreshTokens.token, hashToken(refreshToken)));
   }
   res.json({ ok: true });
 });
@@ -270,7 +271,7 @@ authRouter.post('/reset-password', async (req, res) => {
       .set({ emailVerifiedAt: new Date() })
       .where(and(eq(users.id, userId), isNull(users.emailVerifiedAt)));
     // Sign out every device: whoever had the old password loses access.
-    await tx.update(refreshTokens).set({ revoked: true }).where(eq(refreshTokens.userId, userId));
+    await tx.delete(refreshTokens).where(eq(refreshTokens.userId, userId));
     return true;
   });
 

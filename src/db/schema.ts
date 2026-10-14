@@ -157,8 +157,8 @@ export const userSettings = pgTable('user_settings', {
   userId: uuid('user_id')
     .primaryKey()
     .references(() => users.id, { onDelete: 'cascade' }),
-  eqPreset: text('eq_preset').default('Flat'),
-  gapless: boolean('gapless').default(false),
+  eqPreset: text('eq_preset').default('Sonare'),
+  gapless: boolean('gapless').default(true),
   normalization: boolean('normalization').default(true),
   downloadQuality: text('download_quality').default('high'),
   stayOffline: boolean('stay_offline').default(false),
@@ -187,8 +187,6 @@ export const lyricsOverrides = pgTable(
       .references(() => users.id, { onDelete: 'cascade' })
       .notNull(),
     trackId: text('track_id').notNull(),
-    lrc: text('lrc'),
-    plain: text('plain'),
     offsetMs: integer('offset_ms').default(0),
     updatedAt: timestamp('updated_at').defaultNow().notNull(),
   },
