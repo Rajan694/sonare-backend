@@ -3,6 +3,7 @@ import { and, eq, lt, or, sql } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { errorLogs, refreshTokens, requestLogs } from '../db/schema.js';
 import { logger } from '../logger.js';
+import { pruneLyricsCache } from './cache.js';
 
 // Request logs and error logs for the admin page. Both are buffered in memory and written in
 // batches, so logging never adds a query to the request it describes.
@@ -246,6 +247,8 @@ export const startTelemetry = (): void => {
   setInterval(() => void prune(), 3600_000).unref();
   void pruneRefreshTokens();
   setInterval(() => void pruneRefreshTokens(), 6 * 3600_000).unref();
+  void pruneLyricsCache();
+  setInterval(() => void pruneLyricsCache(), 6 * 3600_000).unref();
 
   // Recorded, then the process still exits as it would have without these handlers.
   const crash = (code: string) => (reason: unknown) => {

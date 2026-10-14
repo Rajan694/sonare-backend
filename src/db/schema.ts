@@ -9,6 +9,7 @@ import {
   jsonb,
   index,
   bigserial,
+  customType,
 } from 'drizzle-orm/pg-core';
 
 export const users = pgTable('users', {
@@ -266,5 +267,37 @@ export const catalogItems = pgTable(
   },
   (t) => ({
     pk: primaryKey({ columns: [t.kind, t.id] }),
+  }),
+);
+
+/** Postgres has bytea; drizzle-orm's pg-core has no builder for it. */
+const bytea = customType<{ data: Buffer; driverData: Buffer }>({ dataType: () => 'bytea' });
+
+/**
+ * Waveforms the apps measured and uploaded (first upload wins, for everyone). Redis caches them
+ * in front; this table is what survives a Redis restart. One byte per bar (loudness 0..1 as
+ * 0..255): 150 bars are 150 bytes, which matters on Neon's 0.5 GB.
+ */
+export const waveforms = pgTable('waveforms', {
+  trackId: text('track_id').primaryKey(),
+  peaks: bytea('peaks').notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+});
+
+/**
+ * Lyrics found on LRCLIB, so a song's lyrics are looked up there once. `key` is the YouTube id,
+ * or `id|title|artist` when only the app knew the song, with `:script` for a preferred script.
+ * `lyrics` null records that LRCLIB had none; such misses expire (`expiresAt`) and are asked again.
+ */
+export const lyricsCache = pgTable(
+  'lyrics_cache',
+  {
+    key: text('key').primaryKey(),
+    lyrics: jsonb('lyrics'),
+    expiresAt: timestamp('expires_at'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (t) => ({
+    createdIdx: index('lyrics_cache_created_at_idx').on(t.createdAt),
   }),
 );

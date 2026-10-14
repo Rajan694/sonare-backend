@@ -4,6 +4,9 @@ import { config } from '../config.js';
 import { Piped } from '../upstream/piped.js';
 import * as T from '../upstream/piped.types.js';
 import { logger } from '../logger.js';
+import { db } from '../db/index.js';
+import { lyricsCache, waveforms } from '../db/schema.js';
+import { eq, sql } from 'drizzle-orm';
 
 export const TTL = {
   search: 5 * 60, // seconds for Redis
@@ -194,28 +197,129 @@ export const CachedPiped = {
   },
 };
 
+// Redis holds these for a week at a time; Postgres keeps them (H3: Render's Key Value is 25 MB
+// with LRU eviction and loses everything on a restart).
+const WARM_TTL = 7 * 24 * 3600;
+/** LRCLIB grows: "no lyrics" is asked again after a week. */
+const LYRICS_MISS_TTL_MS = 7 * 24 * 3600_000;
+
+/** Loudness 0..1 per bar as one byte each. */
+export const encodePeaks = (peaks: number[]): Buffer =>
+  Buffer.from(peaks.map((p) => Math.round(Math.min(1, Math.max(0, p)) * 255)));
+export const decodePeaks = (bytes: Buffer): number[] => [...bytes].map((b) => Math.round((b / 255) * 1000) / 1000);
+
+/** A stored lyrics row: `found` false when LRCLIB had none (and that answer hasn't expired). */
+const readLyricsRow = async (key: string): Promise<{ lyrics: ResolvedLyrics | null } | null> => {
+  try {
+    const [row] = await db.select().from(lyricsCache).where(eq(lyricsCache.key, key)).limit(1);
+    if (!row) return null;
+    if (row.expiresAt && row.expiresAt.getTime() < Date.now()) return null;
+    return { lyrics: (row.lyrics as ResolvedLyrics | null) ?? null };
+  } catch (err) {
+    logger.warn({ err }, 'Cache: could not read stored lyrics');
+    return null;
+  }
+};
+
+const writeLyricsRow = async (key: string, lyrics: ResolvedLyrics | null): Promise<void> => {
+  const expiresAt = lyrics ? null : new Date(Date.now() + LYRICS_MISS_TTL_MS);
+  try {
+    await db
+      .insert(lyricsCache)
+      .values({ key, lyrics, expiresAt, createdAt: new Date() })
+      .onConflictDoUpdate({ target: lyricsCache.key, set: { lyrics, expiresAt, createdAt: new Date() } });
+  } catch (err) {
+    logger.warn({ err }, 'Cache: could not store lyrics');
+  }
+};
+
+/** Most lyrics rows kept (a few KB each, compressed by Postgres): the oldest go beyond this. */
+export const LYRICS_CACHE_MAX_ROWS = 50_000;
+
+/** Drops expired "no lyrics" answers and the oldest rows past the cap. Logged, never thrown. */
+export const pruneLyricsCache = async (maxRows = LYRICS_CACHE_MAX_ROWS): Promise<void> => {
+  try {
+    // Timestamps are stored as UTC without a zone (as drizzle writes them), so compare in UTC.
+    await db.execute(
+      sql`DELETE FROM lyrics_cache WHERE expires_at IS NOT NULL AND expires_at < (now() AT TIME ZONE 'UTC')`,
+    );
+    await db.execute(sql`
+      DELETE FROM lyrics_cache WHERE key IN (
+        SELECT key FROM lyrics_cache ORDER BY created_at DESC OFFSET ${maxRows}
+      )
+    `);
+  } catch (err) {
+    logger.warn({ err }, 'Cache: could not prune stored lyrics');
+  }
+};
+
 export const PermanentCache = {
-  async getLyrics(key: string) {
-    return getCached<ResolvedLyrics>(`lyrics:${key}`);
+  async getLyrics(key: string): Promise<ResolvedLyrics | null> {
+    const warm = await getCached<ResolvedLyrics>(`lyrics:${key}`);
+    if (warm) return warm;
+    const stored = await readLyricsRow(key);
+    if (!stored?.lyrics) return null;
+    await setCached(`lyrics:${key}`, stored.lyrics, WARM_TTL);
+    return stored.lyrics;
   },
   async setLyrics(key: string, data: ResolvedLyrics | null) {
-    return setCached(`lyrics:${key}`, data);
+    if (!data) {
+      await db
+        .delete(lyricsCache)
+        .where(eq(lyricsCache.key, key))
+        .catch(() => {});
+      if (redisAvailable) await redis.del(`lyrics:${key}`).catch(() => {});
+      return;
+    }
+    await writeLyricsRow(key, data);
+    await setCached(`lyrics:${key}`, data, WARM_TTL);
   },
   // v3: the apps upload loudness (RMS) per bar since 2026-10-14. v2 waveforms held each bar's
   // loudest sample, which is near full scale in most music, so they drew a flat block.
-  async getPeaks(key: string) {
-    return getCached<number[]>(`peaks:v3:${key}`);
+  async getPeaks(key: string): Promise<number[] | null> {
+    const warm = await getCached<number[]>(`peaks:v3:${key}`);
+    if (warm) return warm;
+    try {
+      const [row] = await db.select().from(waveforms).where(eq(waveforms.trackId, key)).limit(1);
+      if (!row) return null;
+      const peaks = decodePeaks(row.peaks);
+      await setCached(`peaks:v3:${key}`, peaks, WARM_TTL);
+      return peaks;
+    } catch (err) {
+      logger.warn({ err }, 'Cache: could not read a stored waveform');
+      return null;
+    }
   },
-  async setPeaks(key: string, data: number[]) {
-    return setCached(`peaks:v3:${key}`, data);
+  /** First upload wins: an existing waveform is kept. False when one was already stored. */
+  async setPeaks(key: string, data: number[]): Promise<boolean> {
+    let stored = true;
+    try {
+      const rows = await db
+        .insert(waveforms)
+        .values({ trackId: key, peaks: encodePeaks(data) })
+        .onConflictDoNothing()
+        .returning({ trackId: waveforms.trackId });
+      stored = rows.length > 0;
+    } catch (err) {
+      logger.warn({ err }, 'Cache: could not store a waveform');
+    }
+    if (stored) await setCached(`peaks:v3:${key}`, data, WARM_TTL);
+    return stored;
   },
   /** Lyrics in a preferred script; `lyrics: null` records that LRCLIB has none, so it isn't asked every play. */
-  async getScriptLyrics(trackId: string, script: string) {
-    return getCached<{ lyrics: ResolvedLyrics | null }>(`lyricsScript:${trackId}:${script}`);
+  async getScriptLyrics(trackId: string, script: string): Promise<{ lyrics: ResolvedLyrics | null } | null> {
+    const key = `${trackId}:${script}`;
+    const warm = await getCached<{ lyrics: ResolvedLyrics | null }>(`lyricsScript:${key}`);
+    if (warm) return warm;
+    const stored = await readLyricsRow(`script:${key}`);
+    if (stored) await setCached(`lyricsScript:${key}`, stored, stored.lyrics ? WARM_TTL : 24 * 3600);
+    return stored;
   },
   async setScriptLyrics(trackId: string, script: string, lyrics: ResolvedLyrics | null) {
+    const key = `${trackId}:${script}`;
+    await writeLyricsRow(`script:${key}`, lyrics);
     // Found ones keep like other lyrics; misses are retried after a week, LRCLIB grows.
-    return setCached(`lyricsScript:${trackId}:${script}`, { lyrics }, lyrics ? undefined : 7 * 24 * 3600);
+    await setCached(`lyricsScript:${key}`, { lyrics }, lyrics ? WARM_TTL : LYRICS_MISS_TTL_MS / 1000);
   },
   async getAlbumThumb(albumId: string) {
     return getCached<string>(`albumThumb:${albumId}`);

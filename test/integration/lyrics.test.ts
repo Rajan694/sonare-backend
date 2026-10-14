@@ -3,6 +3,7 @@ import request from 'supertest';
 import { createApp } from '../../src/app.js';
 import { MockAgent, getGlobalDispatcher, setGlobalDispatcher, type Dispatcher } from 'undici';
 import { createUser, samplePipedStream, isLocalTestHost } from '../factories.js';
+import { redis } from '../../src/services/cache.js';
 
 describe('Lyrics endpoints & overrides', () => {
   const app = createApp();
@@ -119,6 +120,34 @@ describe('Lyrics endpoints & overrides', () => {
     const back = await request(app).get('/api/v1/tracks/yt:lrclibDown1/lyrics');
     expect(back.status).toBe(200);
     expect(back.body.plain).toBe('Back again');
+  });
+
+  it('BE-LYRICS-014: found lyrics are kept in Postgres: after Redis is emptied LRCLIB is not asked again', async () => {
+    const pipedMock = mockAgent!.get('http://localhost:8090');
+    pipedMock.intercept({ path: '/streams/keptLyrics1', method: 'GET' }).reply(200, samplePipedStream('keptLyrics1'));
+    let lrclibCalls = 0;
+    const lrcMock = mockAgent!.get('https://lrclib.net');
+    lrcMock
+      .intercept({ path: /^\/api\/get/, method: 'GET' })
+      .reply(() => {
+        lrclibCalls++;
+        return {
+          statusCode: 200,
+          data: { id: 1, syncedLyrics: '[00:01.00]Kept line', plainLyrics: 'Kept line' },
+        };
+      })
+      .persist();
+
+    const first = await request(app).get('/api/v1/tracks/yt:keptLyrics1/lyrics');
+    expect(first.status).toBe(200);
+    expect(lrclibCalls).toBe(1);
+
+    const keys = await redis.keys('lyrics:*');
+    if (keys.length) await redis.del(...keys.map((k) => k.replace(/^sonare:/, '')));
+    const second = await request(app).get('/api/v1/tracks/yt:keptLyrics1/lyrics');
+    expect(second.status).toBe(200);
+    expect(second.body.lines[0].text).toBe('Kept line');
+    expect(lrclibCalls).toBe(1);
   });
 
   it('BE-LYRICS-005: PATCH /api/v1/tracks/:id/lyrics/offset updates user timing offset', async () => {

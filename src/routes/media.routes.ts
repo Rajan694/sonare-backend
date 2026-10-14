@@ -382,8 +382,9 @@ mediaRouter.put('/tracks/:id/peaks', requireAuth, async (req, res) => {
     return;
   }
 
-  await PermanentCache.setPeaks(rawId, peaks);
-  res.status(201).json({ stored: true });
+  // Two devices uploading at once: the first insert wins.
+  const stored = await PermanentCache.setPeaks(rawId, peaks);
+  res.status(stored ? 201 : 200).json({ stored });
 });
 
 mediaRouter.get('/stream/:token', async (req, res) => {

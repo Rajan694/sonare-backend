@@ -1,5 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { CachedPiped, PermanentCache, TTL, streamTtl } from '../../src/services/cache.js';
+import {
+  CachedPiped,
+  PermanentCache,
+  TTL,
+  decodePeaks,
+  encodePeaks,
+  pruneLyricsCache,
+  redis,
+  streamTtl,
+} from '../../src/services/cache.js';
+import { db } from '../../src/db/index.js';
+import { lyricsCache } from '../../src/db/schema.js';
+import { sql } from 'drizzle-orm';
 import type * as T from '../../src/upstream/piped.types.js';
 import { MockAgent, getGlobalDispatcher, setGlobalDispatcher, type Dispatcher } from 'undici';
 import { samplePipedChannel, samplePipedPlaylist, samplePipedStream } from '../factories.js';
@@ -124,5 +136,39 @@ describe('cache.ts: Redis degradation', () => {
     mockAgent.assertNoPendingInterceptors();
     await mockAgent.close();
     setGlobalDispatcher(original);
+  });
+});
+
+describe('stored waveforms and lyrics (Postgres behind Redis)', () => {
+  it('BE-CACHE-007: a waveform is stored as one byte per bar and read back within 1/255', () => {
+    const peaks = [0, 0.004, 0.5, 0.751, 1];
+    const bytes = encodePeaks(peaks);
+    expect(bytes).toHaveLength(5);
+    decodePeaks(bytes).forEach((v, i) => expect(Math.abs(v - peaks[i])).toBeLessThanOrEqual(1 / 255));
+  });
+
+  it('BE-CACHE-008: the prune drops expired "no lyrics" answers and the oldest rows past the cap', async () => {
+    const lyrics = { synced: false, provider: 'lrclib', offsetMs: 0, lines: [], plain: 'x' };
+    await db.insert(lyricsCache).values([
+      { key: 'old', lyrics, createdAt: sql`(now() AT TIME ZONE 'UTC') - interval '3 days'` as never },
+      { key: 'mid', lyrics, createdAt: sql`(now() AT TIME ZONE 'UTC') - interval '2 days'` as never },
+      { key: 'new', lyrics },
+      { key: 'miss-expired', lyrics: null, expiresAt: sql`(now() AT TIME ZONE 'UTC') - interval '1 hour'` as never },
+      { key: 'miss-live', lyrics: null, expiresAt: sql`(now() AT TIME ZONE 'UTC') + interval '1 day'` as never },
+    ]);
+    await pruneLyricsCache(3);
+    const left = (await db.select({ key: lyricsCache.key }).from(lyricsCache)).map((r) => r.key).sort();
+    expect(left).toEqual(['mid', 'miss-live', 'new']);
+  });
+
+  it('BE-CACHE-009: a "no lyrics" answer for a script is kept until it expires', async () => {
+    await PermanentCache.setScriptLyrics('scriptTrack', 'latin', null);
+    expect(await PermanentCache.getScriptLyrics('scriptTrack', 'latin')).toEqual({ lyrics: null });
+    const [row] = await db.select().from(lyricsCache);
+    expect(row.key).toBe('script:scriptTrack:latin');
+    // Past its expiry, with Redis emptied, LRCLIB is asked again.
+    await db.execute(sql`UPDATE lyrics_cache SET expires_at = (now() AT TIME ZONE 'UTC') - interval '1 minute'`);
+    await redis.del('lyricsScript:scriptTrack:latin');
+    expect(await PermanentCache.getScriptLyrics('scriptTrack', 'latin')).toBeNull();
   });
 });

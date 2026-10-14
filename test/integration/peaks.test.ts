@@ -4,7 +4,7 @@ import { MockAgent, setGlobalDispatcher, getGlobalDispatcher } from 'undici';
 import { createApp } from '../../src/app.js';
 import { createUser, isLocalTestHost } from '../factories.js';
 import { Piped } from '../../src/upstream/piped.js';
-import { CachedPiped, PermanentCache } from '../../src/services/cache.js';
+import { CachedPiped, PermanentCache, redis } from '../../src/services/cache.js';
 import { CANONICAL_BARS, placeholderPeaks, resamplePeaks } from '../../src/services/peaks.js';
 
 describe('Peaks API (GET & PUT /tracks/:id/peaks)', () => {
@@ -119,6 +119,29 @@ describe('Peaks API (GET & PUT /tracks/:id/peaks)', () => {
     expect(getRes.status).toBe(200);
     expect(getRes.body.placeholder).toBe(false);
     expect(getRes.body.peaks).toEqual(firstPeaks);
+  });
+
+  it('BE-PEAK-012: a stored waveform outlives Redis: after a flush it comes back from Postgres, one byte per bar', async () => {
+    const { token } = await createUser();
+    const peaks = Array.from({ length: CANONICAL_BARS }, (_, i) => (i % 10) / 10);
+    const put = await request(app)
+      .put('/api/v1/tracks/yt:keptTrack1/peaks')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ peaks });
+    expect(put.status).toBe(201);
+
+    await redis.del('peaks:v3:keptTrack1');
+    const res = await request(app).get('/api/v1/tracks/yt:keptTrack1/peaks?bars=150');
+    expect(res.body.placeholder).toBe(false);
+    res.body.peaks.forEach((v: number, i: number) => expect(Math.abs(v - peaks[i])).toBeLessThanOrEqual(1 / 255));
+
+    // Still first upload wins, Redis or not.
+    await redis.del('peaks:v3:keptTrack1');
+    const again = await request(app)
+      .put('/api/v1/tracks/yt:keptTrack1/peaks')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ peaks: peaks.map(() => 1) });
+    expect(again.body).toEqual({ stored: false });
   });
 
   it('BE-PEAK-009: PUT /tracks/:id/peaks requires authentication (401 without auth)', async () => {

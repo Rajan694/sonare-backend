@@ -154,6 +154,7 @@ This document maps all backend test IDs to their specifications, assertions, and
 | `BE-LYRICS-011`     | `GET /api/v1/tracks/:id/lyrics?script=`  | An unknown script is a 400; `original` behaves like no preference.                                     |
 | `BE-LYRICS-012`     | `GET /api/v1/tracks/:id/lyrics?script=`  | A failing version search still serves the original lyrics.                                             |
 | `BE-LYRICS-013`     | `GET /api/v1/tracks/:id/lyrics`          | 502 LYRICS_UNAVAILABLE when LRCLIB is down; nothing cached, so it finds lyrics once LRCLIB is back.    |
+| `BE-LYRICS-014`     | `GET /api/v1/tracks/:id/lyrics`          | Found lyrics are kept in Postgres; after Redis is emptied LRCLIB is not asked again.                   |
 | `BE-LYR-SCRIPT-001` | `isInScript`                             | Tells scripts apart by most of the letters; digits, timestamps and symbols don't count.                |
 | `BE-LYR-SCRIPT-002` | `lyricsInScript`                         | Reads synced lines, else the plain text.                                                               |
 | `BE-LYR-SCRIPT-003` | `resolveLyricsInScript`                  | Picks the synced candidate in that script, within 15s of the song's length.                            |
@@ -476,16 +477,19 @@ This document maps all backend test IDs to their specifications, assertions, and
 
 ### Cache Layer
 
-| Test ID            | Description                                   |
-| :----------------- | :-------------------------------------------- |
-| `BE-CACHE-001`     | CachedPiped stream caching.                   |
-| `BE-CACHE-002`     | CachedPiped playlist caching.                 |
-| `BE-CACHE-003`     | CachedPiped channel caching.                  |
-| `BE-CACHE-004`     | PermanentCache lyrics storage and retrieval.  |
-| `BE-CACHE-005`     | PermanentCache peaks storage and retrieval.   |
-| `BE-CACHE-006`     | streamTtl caps the cache at the urls' expiry. |
-| `BE-CACHE-DEG-001` | Cache fallback on Redis degradation.          |
-| `BE-CACHE-DEG-002` | CachedPiped trending method export.           |
+| Test ID            | Description                                                                   |
+| :----------------- | :---------------------------------------------------------------------------- |
+| `BE-CACHE-001`     | CachedPiped stream caching.                                                   |
+| `BE-CACHE-002`     | CachedPiped playlist caching.                                                 |
+| `BE-CACHE-003`     | CachedPiped channel caching.                                                  |
+| `BE-CACHE-004`     | PermanentCache lyrics storage and retrieval.                                  |
+| `BE-CACHE-005`     | PermanentCache peaks storage and retrieval.                                   |
+| `BE-CACHE-006`     | streamTtl caps the cache at the urls' expiry.                                 |
+| `BE-CACHE-007`     | a waveform is stored as one byte per bar and read back within 1/255.          |
+| `BE-CACHE-008`     | the prune drops expired "no lyrics" answers and the oldest rows past the cap. |
+| `BE-CACHE-009`     | a "no lyrics" answer for a script is kept until it expires.                   |
+| `BE-CACHE-DEG-001` | Cache fallback on Redis degradation.                                          |
+| `BE-CACHE-DEG-002` | CachedPiped trending method export.                                           |
 
 ### Telemetry & Logging
 
@@ -632,3 +636,4 @@ with the first problem as the message, and nothing is written.
 | `BE-PEAK-009` | `PUT /api/v1/tracks/:id/peaks` auth        | Requires authentication; returns 401 when unauthenticated.                                                         |
 | `BE-PEAK-010` | `PUT /api/v1/tracks/:id/peaks` validation  | Rejects invalid bodies (149/151 bars, NaN, >1, <0, missing) with 400 Bad Request.                                  |
 | `BE-PEAK-011` | `GET /api/v1/tracks/:id/peaks` pinned      | GET with ?bars=8 returns pinned placeholder literal and placeholder:true.                                          |
+| `BE-PEAK-012` | `GET /api/v1/tracks/:id/peaks` kept        | A stored waveform outlives Redis (Postgres, one byte per bar); first upload still wins.                            |
