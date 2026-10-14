@@ -69,6 +69,10 @@ This document maps all backend test IDs to their specifications, assertions, and
 | `BE-EMAIL-016` | `POST /api/v1/auth/resend-verification` | Says when the mail didn't go out (502 MAIL_FAILED / 503 MAIL_UNAVAILABLE) instead of ok. |
 | `BE-EMAIL-017` | `POST /api/v1/auth/forgot-password`     | A server that can't send mail answers 503 MAIL_UNAVAILABLE for any address.              |
 | `BE-EMAIL-018` | `POST /api/v1/auth/forgot-password`     | A failed reset mail still answers ok, so accounts cannot be probed.                      |
+| `BE-EMAIL-019` | `POST /api/v1/auth/verify-email-code`   | The emailed code verifies the signed-in account once; "123 456" is accepted.             |
+| `BE-EMAIL-020` | `POST /api/v1/auth/verify-email-code`   | A wrong code gives 400 INVALID_CODE; after 5 wrong tries the code stops working.         |
+| `BE-EMAIL-021` | `POST /api/v1/auth/verify-email-code`   | Codes expire, a new email replaces the code, and a code only works for its account.      |
+| `BE-EMAIL-022` | `POST /api/v1/auth/verify-email-code`   | Needs a signed-in account (401) and six digits (400 BAD_REQUEST).                        |
 
 ---
 
@@ -417,7 +421,7 @@ This document maps all backend test IDs to their specifications, assertions, and
 | `BE-CONF-008`   | `assertProductionConfig` rejects a non-https APP_URL in production.                   |
 | `BE-CONF-009`   | `assertProductionConfig` skips all checks outside production.                         |
 | `BE-CONF-010`   | `parseTrustProxy` maps TRUST_PROXY to Express's `trust proxy` value.                  |
-| `BE-MAIL-001`   | `verifyEmailMessage` has the subject and the link in text and html.                   |
+| `BE-MAIL-001`   | `verifyEmailMessage` has the subject, the code and the link in text and html.         |
 | `BE-MAIL-002`   | `resetPasswordMessage` has the subject and the link in text and html.                 |
 | `BE-MAIL-003`   | With `RESEND_API_KEY`, mail is posted to Resend's API with the bearer key.            |
 | `BE-MAIL-004`   | A Resend refusal throws MAIL_FAILED with Resend's answer as the cause, never the key. |

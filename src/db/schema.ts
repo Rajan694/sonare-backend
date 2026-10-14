@@ -144,6 +144,8 @@ export const emailTokens = pgTable(
     tokenHash: text('token_hash').notNull().unique(),
     expiresAt: timestamp('expires_at').notNull(),
     usedAt: timestamp('used_at'),
+    /** Wrong guesses at an emailed code; the code stops working after a few. */
+    attempts: integer('attempts').default(0).notNull(),
     createdAt: timestamp('created_at').defaultNow().notNull(),
   },
   (t) => ({

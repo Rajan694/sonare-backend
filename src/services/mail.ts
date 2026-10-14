@@ -54,13 +54,17 @@ export const sendMail = async (mail: Mail): Promise<void> => {
   }
 };
 
-export const verifyEmailMessage = (link: string): MailMessage => {
+/** The link opens the web app; the code is for typing into whichever app is open (it lasts 30 minutes). */
+export const verifyEmailMessage = (link: string, code: string): MailMessage => {
+  const spaced = `${code.slice(0, 3)} ${code.slice(3)}`;
   return {
     subject: 'Verify your Sonare email address',
-    text: `Welcome to Sonare!\n\nVerify your email by clicking the link below. It expires in 24 hours.\n\n${link}\n\nIf you did not create an account, ignore this email.`,
+    text: `Welcome to Sonare!\n\nYour verification code is ${spaced}. Enter it in the app; it expires in 30 minutes.\n\nOr verify by opening this link (it expires in 24 hours):\n${link}\n\nIf you did not create an account, ignore this email.`,
     html: `<div style="font-family:sans-serif;max-width:480px;margin:0 auto">
   <h2 style="color:#111">Verify your email</h2>
-  <p>Welcome to Sonare! Click the button below to verify your email address. The link expires in <strong>24 hours</strong>.</p>
+  <p>Welcome to Sonare! Enter this code in the app to verify your email address. It expires in <strong>30 minutes</strong>.</p>
+  <p style="margin:24px 0;font-size:32px;font-weight:700;letter-spacing:6px;color:#111;font-family:monospace">${spaced}</p>
+  <p>Or click the button below. The link expires in <strong>24 hours</strong>.</p>
   <p style="margin:24px 0">
     <a href="${link}" style="background:#6366f1;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;display:inline-block">Verify email</a>
   </p>

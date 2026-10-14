@@ -7,12 +7,14 @@ import { MailError } from '../../src/errors.js';
 const mail = { to: 'a@example.com', subject: 'Hi', text: 'Text body', html: '<p>HTML body</p>' };
 
 describe('mail.ts', () => {
-  it('BE-MAIL-001: verifyEmailMessage includes link in text and html', () => {
+  it('BE-MAIL-001: verifyEmailMessage includes the code and the link in text and html', () => {
     const link = 'http://localhost:5183/verify?token=abc123';
-    const msg = verifyEmailMessage(link);
+    const msg = verifyEmailMessage(link, '042917');
     expect(msg.subject).toBe('Verify your Sonare email address');
     expect(msg.text).include(link);
     expect(msg.html).include(link);
+    expect(msg.text).include('042 917');
+    expect(msg.html).include('042 917');
   });
 
   it('BE-MAIL-002: resetPasswordMessage includes link in text and html', () => {

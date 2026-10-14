@@ -13,6 +13,8 @@ import { MailError } from '../errors.js';
 import {
   createEmailToken,
   consumeEmailToken,
+  consumeVerifyCode,
+  createVerifyCode,
   RESET_TOKEN_TTL_MS,
   VERIFY_TOKEN_TTL_MS,
 } from '../services/emailTokens.js';
@@ -39,6 +41,13 @@ const loginSchema = z.object({ email, password: z.string().min(1).max(128) });
 const forgotSchema = z.object({ email });
 const resetSchema = z.object({ token, password });
 const verifySchema = z.object({ token });
+// "123 456" and "123-456" are accepted as typed.
+const verifyCodeSchema = z.object({
+  code: z
+    .string()
+    .transform((v) => v.replace(/[\s-]/g, ''))
+    .pipe(z.string().regex(/^\d{6}$/, 'Enter the 6-digit code from the email')),
+});
 const refreshSchema = z.object({
   refreshToken: z.string({ required_error: 'Missing refreshToken' }).min(1, 'Missing refreshToken').max(500),
 });
@@ -84,8 +93,9 @@ const startSession = async (user: typeof users.$inferSelect) => {
 /** Throws MailError when the mail doesn't go out; callers decide whether that blocks the request. */
 const sendVerifyEmail = async (user: typeof users.$inferSelect) => {
   const raw = await createEmailToken(user.id, 'verify', VERIFY_TOKEN_TTL_MS);
+  const code = await createVerifyCode(user.id);
   const link = `${config.APP_URL}/verify-email?token=${raw}`;
-  await sendMail({ to: user.email, ...verifyEmailMessage(link) });
+  await sendMail({ to: user.email, ...verifyEmailMessage(link, code) });
 };
 
 const sendResetEmail = async (user: typeof users.$inferSelect) => {
@@ -184,6 +194,33 @@ authRouter.post('/verify-email', async (req, res) => {
     .update(users)
     .set({ emailVerifiedAt: new Date() })
     .where(and(eq(users.id, userId), isNull(users.emailVerifiedAt)));
+  res.json({ ok: true });
+});
+
+// The code from the email, typed into the app by the signed-in account it was sent to.
+authRouter.post('/verify-email-code', requireAuth, async (req, res) => {
+  const body = parseBody(verifyCodeSchema, req);
+  const [user] = await db.select().from(users).where(eq(users.id, req.user!.id)).limit(1);
+  if (user.emailVerifiedAt) {
+    res.json({ ok: true, alreadyVerified: true });
+    return;
+  }
+
+  const result = await consumeVerifyCode(user.id, body.code);
+  if (result === 'wrong') {
+    res
+      .status(400)
+      .json({ error: { code: 'INVALID_CODE', message: "That code isn't right. Check the email and try again." } });
+    return;
+  }
+  if (result === 'expired') {
+    res.status(400).json({ error: { code: 'CODE_EXPIRED', message: 'That code no longer works. Send a new one.' } });
+    return;
+  }
+  await db
+    .update(users)
+    .set({ emailVerifiedAt: new Date() })
+    .where(and(eq(users.id, user.id), isNull(users.emailVerifiedAt)));
   res.json({ ok: true });
 });
 
