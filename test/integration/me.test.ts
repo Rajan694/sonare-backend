@@ -97,6 +97,29 @@ describe('Me: profile & personal data', () => {
     expect(res.status).toBe(403);
   });
 
+  it('BE-ME-050: an account deleted elsewhere gets 401 from the account routes, not a crash', async () => {
+    const { user, token } = await createUser();
+    // Warms requireAuth's user cache, as the app's earlier requests would.
+    expect((await request(app).get('/api/v1/me').set('Authorization', `Bearer ${token}`)).status).toBe(200);
+    await db.delete(users).where(eq(users.id, user.id));
+
+    const rename = await request(app)
+      .patch('/api/v1/me')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ displayName: 'Ghost' });
+    expect(rename.status).toBe(401);
+    const remove = await request(app)
+      .delete('/api/v1/me')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ password: 'password123' });
+    expect(remove.status).toBe(401);
+    const change = await request(app)
+      .post('/api/v1/auth/change-password')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ currentPassword: 'password123', newPassword: 'newpassword1' });
+    expect(change.status).toBe(401);
+  });
+
   it('BE-ME-001: GET /api/v1/me returns authenticated user details', async () => {
     const { user, token } = await createUser({ email: 'myprofile@example.com', displayName: 'Profile Man' });
     const res = await request(app).get('/api/v1/me').set('Authorization', `Bearer ${token}`);

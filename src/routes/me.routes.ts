@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Router, type Request, type Response } from 'express';
 import { db } from '../db/index.js';
 import {
   users,
@@ -132,6 +132,18 @@ const playerStateSchema = z.object({
 // Protect all /me routes with requireAuth
 meRouter.use(requireAuth);
 
+/**
+ * The account behind a request, or a 401 when it is gone: requireAuth caches users for a minute,
+ * so an account deleted on another device can still get this far.
+ */
+const accountOr401 = async (req: Request, res: Response): Promise<typeof users.$inferSelect | null> => {
+  const [user] = await db.select().from(users).where(eq(users.id, req.user!.id)).limit(1);
+  if (user) return user;
+  forgetAuthUser(req.user!.id);
+  res.status(401).json({ error: { code: 'UNAUTHORIZED', message: 'User no longer exists' } });
+  return null;
+};
+
 const userResponse = (user: typeof users.$inferSelect) => ({
   id: user.id,
   email: user.email,
@@ -161,6 +173,11 @@ const deleteAccountSchema = z.object({ password: z.string({ required_error: 'Ent
 meRouter.patch('/', async (req, res) => {
   const { displayName } = parseBody(profileSchema, req);
   const [user] = await db.update(users).set({ displayName }).where(eq(users.id, req.user!.id)).returning();
+  if (!user) {
+    forgetAuthUser(req.user!.id);
+    res.status(401).json({ error: { code: 'UNAUTHORIZED', message: 'User no longer exists' } });
+    return;
+  }
   res.json(userResponse(user));
 });
 
@@ -168,7 +185,8 @@ meRouter.patch('/', async (req, res) => {
 // The password is asked again so a borrowed, signed-in phone can't do it.
 meRouter.delete('/', async (req, res) => {
   const { password } = parseBody(deleteAccountSchema, req);
-  const [user] = await db.select().from(users).where(eq(users.id, req.user!.id)).limit(1);
+  const user = await accountOr401(req, res);
+  if (!user) return;
   if (user.role !== 'user') {
     res.status(403).json({ error: { code: 'FORBIDDEN', message: 'The admin account cannot be deleted here' } });
     return;

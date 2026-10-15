@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { and, eq, isNull, sql } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { users, refreshTokens } from '../db/schema.js';
-import { signAccessToken, generateRefreshToken, hashToken, requireAuth } from '../middleware/auth.js';
+import { forgetAuthUser, signAccessToken, generateRefreshToken, hashToken, requireAuth } from '../middleware/auth.js';
 import { createRateLimiter } from '../middleware/rateLimit.js';
 import { config } from '../config.js';
 import { parseBody } from '../validation.js';
@@ -294,6 +294,12 @@ authRouter.post('/change-password', requireAuth, async (req, res) => {
   if (limit.blocked) return rateLimited(res, limit.retryAfterSec);
 
   const [user] = await db.select().from(users).where(eq(users.id, req.user!.id)).limit(1);
+  // requireAuth caches users for a minute: an account deleted meanwhile still gets here.
+  if (!user) {
+    forgetAuthUser(req.user!.id);
+    res.status(401).json({ error: { code: 'UNAUTHORIZED', message: 'User no longer exists' } });
+    return;
+  }
   if (!(await bcrypt.compare(body.currentPassword, user.passwordHash))) {
     await changePasswordLimiter.hit(user.id);
     res.status(400).json({ error: { code: 'WRONG_PASSWORD', message: "That isn't your current password" } });
