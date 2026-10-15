@@ -46,6 +46,8 @@ export interface Track {
   addedAt: number;
   lastPlayedAt?: number;
   thumbnail?: string;
+  /** In an own playlist's song list: that row of the playlist, so the same song twice can be told apart. */
+  entryId?: string;
 }
 
 export interface Album {
