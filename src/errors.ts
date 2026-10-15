@@ -41,6 +41,26 @@ export class LyricsUnavailableError extends Error {
   }
 }
 
+/**
+ * An account email that did not go out, so the app can say so instead of "sent".
+ * MAIL_UNAVAILABLE: this server has no RESEND_API_KEY. MAIL_FAILED: Resend refused or didn't answer.
+ */
+export class MailError extends Error {
+  public status: number;
+  public code: 'MAIL_UNAVAILABLE' | 'MAIL_FAILED';
+  constructor(code: 'MAIL_UNAVAILABLE' | 'MAIL_FAILED', options?: { cause?: unknown }) {
+    super(
+      code === 'MAIL_UNAVAILABLE'
+        ? "This server can't send email yet. Ask the admin to set it up."
+        : "The email couldn't be sent. Try again in a moment.",
+      options,
+    );
+    this.name = 'MailError';
+    this.status = code === 'MAIL_UNAVAILABLE' ? 503 : 502;
+    this.code = code;
+  }
+}
+
 /** A short reason for a caught error: its code (ECONNREFUSED, …) when it has one, else its message. */
 export const describeError = (e: unknown): string => {
   const code = (e as { code?: unknown } | null)?.code;

@@ -3,6 +3,7 @@ import request from 'supertest';
 import { createApp } from '../../src/app.js';
 import { MockAgent, getGlobalDispatcher, setGlobalDispatcher, type Dispatcher } from 'undici';
 import { createUser, samplePipedStream, isLocalTestHost } from '../factories.js';
+import { redis } from '../../src/services/cache.js';
 
 describe('Lyrics endpoints & overrides', () => {
   const app = createApp();
@@ -121,27 +122,32 @@ describe('Lyrics endpoints & overrides', () => {
     expect(back.body.plain).toBe('Back again');
   });
 
-  it('BE-LYRICS-004: POST /api/v1/tracks/:id/lyrics stores custom override text for authenticated user', async () => {
-    const { token } = await createUser();
-    const res = await request(app)
-      .post('/api/v1/tracks/yt:overrideTrack1/lyrics')
-      .set('Authorization', `Bearer ${token}`)
-      .send({
-        lrc: '[00:10.50] Custom override line 1\n[00:15.00] Custom override line 2',
-      });
+  it('BE-LYRICS-014: found lyrics are kept in Postgres: after Redis is emptied LRCLIB is not asked again', async () => {
+    const pipedMock = mockAgent!.get('http://localhost:8090');
+    pipedMock.intercept({ path: '/streams/keptLyrics1', method: 'GET' }).reply(200, samplePipedStream('keptLyrics1'));
+    let lrclibCalls = 0;
+    const lrcMock = mockAgent!.get('https://lrclib.net');
+    lrcMock
+      .intercept({ path: /^\/api\/get/, method: 'GET' })
+      .reply(() => {
+        lrclibCalls++;
+        return {
+          statusCode: 200,
+          data: { id: 1, syncedLyrics: '[00:01.00]Kept line', plainLyrics: 'Kept line' },
+        };
+      })
+      .persist();
 
-    expect(res.status).toBe(200);
-    expect(res.body.ok).toBe(true);
+    const first = await request(app).get('/api/v1/tracks/yt:keptLyrics1/lyrics');
+    expect(first.status).toBe(200);
+    expect(lrclibCalls).toBe(1);
 
-    // Fetching the lyrics should now return the override
-    const fetchRes = await request(app)
-      .get('/api/v1/tracks/yt:overrideTrack1/lyrics')
-      .set('Authorization', `Bearer ${token}`);
-
-    expect(fetchRes.status).toBe(200);
-    expect(fetchRes.body.provider).toBe('user');
-    expect(fetchRes.body.lines).toHaveLength(2);
-    expect(fetchRes.body.lines[0].text).toBe('Custom override line 1');
+    const keys = await redis.keys('lyrics:*');
+    if (keys.length) await redis.del(...keys.map((k) => k.replace(/^sonare:/, '')));
+    const second = await request(app).get('/api/v1/tracks/yt:keptLyrics1/lyrics');
+    expect(second.status).toBe(200);
+    expect(second.body.lines[0].text).toBe('Kept line');
+    expect(lrclibCalls).toBe(1);
   });
 
   it('BE-LYRICS-005: PATCH /api/v1/tracks/:id/lyrics/offset updates user timing offset', async () => {
@@ -153,20 +159,6 @@ describe('Lyrics endpoints & overrides', () => {
 
     expect(res.status).toBe(200);
     expect(res.body.ok).toBe(true);
-  });
-
-  it('BE-LYRICS-006: DELETE /api/v1/tracks/:id/lyrics removes custom override for user', async () => {
-    const { token } = await createUser();
-    await request(app).post('/api/v1/tracks/yt:delOverrideTrack1/lyrics').set('Authorization', `Bearer ${token}`).send({
-      plain: 'Some temporary text',
-    });
-
-    const delRes = await request(app)
-      .delete('/api/v1/tracks/yt:delOverrideTrack1/lyrics')
-      .set('Authorization', `Bearer ${token}`);
-
-    expect(delRes.status).toBe(200);
-    expect(delRes.body.ok).toBe(true);
   });
 });
 
@@ -230,17 +222,6 @@ describe('Lyrics search', () => {
 
 describe('Lyrics: request validation', () => {
   const app = createApp();
-
-  it('BE-VAL-012: POST /api/v1/tracks/:id/lyrics rejects a body with neither lrc nor plain', async () => {
-    const { token } = await createUser();
-    const res = await request(app)
-      .post('/api/v1/tracks/yt:valLyrics1/lyrics')
-      .set('Authorization', `Bearer ${token}`)
-      .send({});
-
-    expect(res.status).toBe(400);
-    expect(res.body.error).toEqual({ code: 'BAD_REQUEST', message: 'Send lrc or plain lyrics' });
-  });
 
   it('BE-VAL-013: PATCH /api/v1/tracks/:id/lyrics/offset rejects a non-numeric offset', async () => {
     const { token } = await createUser();

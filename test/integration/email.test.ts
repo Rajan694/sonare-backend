@@ -2,14 +2,17 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import request from 'supertest';
 import { eq } from 'drizzle-orm';
 
-// No SMTP server in tests: capture what would have been sent.
+// No Resend in tests: capture what would have been sent.
 const sendMail = vi.hoisted(() => vi.fn());
+const mailConfigured = vi.hoisted(() => vi.fn());
 vi.mock('../../src/services/mail.js', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../src/services/mail.js')>()),
   sendMail,
+  mailConfigured,
 }));
 
 import { createApp } from '../../src/app.js';
+import { MailError } from '../../src/errors.js';
 import { db } from '../../src/db/index.js';
 import { emailTokens, refreshTokens, users } from '../../src/db/schema.js';
 import { hashToken } from '../../src/middleware/auth.js';
@@ -21,12 +24,23 @@ const lastMailToken = (): string => {
   return text.match(/token=([0-9a-f]+)/)![1];
 };
 
+/** The 6-digit code in the most recent email. */
+const lastMailCode = (): string => {
+  const { text } = sendMail.mock.calls.at(-1)![0] as { text: string };
+  return text
+    .match(/code is (\d{3}) (\d{3})/)!
+    .slice(1)
+    .join('');
+};
+
 describe('Email verification and password reset', () => {
   const app = createApp();
 
   beforeEach(() => {
     sendMail.mockReset();
     sendMail.mockResolvedValue(undefined);
+    mailConfigured.mockReset();
+    mailConfigured.mockReturnValue(true);
   });
 
   const register = async (email = 'new@example.com', password = 'password123') => {
@@ -46,14 +60,17 @@ describe('Email verification and password reset', () => {
 
     const raw = lastMailToken();
     const rows = await db.select().from(emailTokens);
-    expect(rows).toHaveLength(1);
-    expect(rows[0].purpose).toBe('verify');
-    expect(rows[0].tokenHash).toBe(hashToken(raw));
-    expect(rows[0].tokenHash).not.toBe(raw);
+    expect(rows.map((r) => r.purpose).sort()).toEqual(['verify', 'verify-code']);
+    const link = rows.find((r) => r.purpose === 'verify')!;
+    expect(link.tokenHash).toBe(hashToken(raw));
+    expect(link.tokenHash).not.toBe(raw);
+    // The code is stored hashed with its account, never as the digits.
+    const code = rows.find((r) => r.purpose === 'verify-code')!;
+    expect(code.tokenHash).toBe(hashToken(`${res.body.user.id}:${lastMailCode()}`));
   });
 
   it('BE-EMAIL-002: register still succeeds when the email cannot be sent', async () => {
-    sendMail.mockRejectedValueOnce(new Error('SMTP down'));
+    sendMail.mockRejectedValueOnce(new MailError('MAIL_FAILED'));
     const res = await register();
     expect(res.status).toBe(201);
     expect(res.body.accessToken).toBeTruthy();
@@ -227,7 +244,7 @@ describe('Email verification and password reset', () => {
 
   it('BE-EMAIL-015: sign-in links share the 3-an-hour limit and a mail failure never blocks signing in', async () => {
     await createUser({ email: 'often@example.com' });
-    sendMail.mockRejectedValueOnce(new Error('Resend answered 500: down'));
+    sendMail.mockRejectedValueOnce(new MailError('MAIL_FAILED', { cause: new Error('Resend answered 500: down') }));
     for (let i = 0; i < 4; i++) {
       const res = await login('often@example.com');
       expect(res.status).toBe(200);
@@ -239,5 +256,175 @@ describe('Email verification and password reset', () => {
     const resend = await request(app).post('/api/v1/auth/resend-verification').set('Authorization', `Bearer ${token}`);
     expect(resend.status).toBe(429);
     expect(sendMail).toHaveBeenCalledTimes(3);
+  });
+
+  it("BE-EMAIL-016: resend-verification says when the mail didn't go out instead of answering ok", async () => {
+    const reg = await register();
+    const auth = { Authorization: `Bearer ${reg.body.accessToken}` };
+
+    sendMail.mockRejectedValueOnce(new MailError('MAIL_FAILED', { cause: new Error('Resend answered 403: nope') }));
+    const failed = await request(app).post('/api/v1/auth/resend-verification').set(auth);
+    expect(failed.status).toBe(502);
+    expect(failed.body.error.code).toBe('MAIL_FAILED');
+    expect(failed.body.error.message).not.toContain('Resend');
+
+    sendMail.mockRejectedValueOnce(new MailError('MAIL_UNAVAILABLE'));
+    const off = await request(app).post('/api/v1/auth/resend-verification').set(auth);
+    expect(off.status).toBe(503);
+    expect(off.body.error.code).toBe('MAIL_UNAVAILABLE');
+  });
+
+  it("BE-EMAIL-017: forgot-password on a server that can't send mail says so for any address", async () => {
+    mailConfigured.mockReturnValue(false);
+    await createUser({ email: 'known@example.com' });
+    for (const email of ['known@example.com', 'nobody@example.com']) {
+      const res = await request(app).post('/api/v1/auth/forgot-password').send({ email });
+      expect(res.status).toBe(503);
+      expect(res.body.error.code).toBe('MAIL_UNAVAILABLE');
+    }
+    expect(sendMail).not.toHaveBeenCalled();
+  });
+
+  it('BE-EMAIL-018: a failed reset mail still answers ok, so accounts cannot be probed', async () => {
+    await createUser({ email: 'known@example.com' });
+    sendMail.mockRejectedValueOnce(new MailError('MAIL_FAILED'));
+    const res = await request(app).post('/api/v1/auth/forgot-password').send({ email: 'known@example.com' });
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ ok: true });
+  });
+
+  const verifyCode = (accessToken: string, code: string) => {
+    return request(app)
+      .post('/api/v1/auth/verify-email-code')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send({ code });
+  };
+
+  it('BE-EMAIL-019: the emailed code verifies the signed-in account once, typed with or without a space', async () => {
+    const reg = await register();
+    const code = lastMailCode();
+    const res = await verifyCode(reg.body.accessToken, `${code.slice(0, 3)} ${code.slice(3)}`);
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ ok: true });
+
+    const me = await request(app).get('/api/v1/me').set('Authorization', `Bearer ${reg.body.accessToken}`);
+    expect(me.body.emailVerified).toBe(true);
+    const again = await verifyCode(reg.body.accessToken, code);
+    expect(again.body).toEqual({ ok: true, alreadyVerified: true });
+  });
+
+  it('BE-EMAIL-020: a wrong code is refused, and the code stops working after 5 wrong tries', async () => {
+    const reg = await register();
+    const code = lastMailCode();
+    const wrong = code === '000000' ? '111111' : '000000';
+
+    const first = await verifyCode(reg.body.accessToken, wrong);
+    expect(first.status).toBe(400);
+    expect(first.body.error.code).toBe('INVALID_CODE');
+    for (let i = 0; i < 3; i++) await verifyCode(reg.body.accessToken, wrong);
+    const fifth = await verifyCode(reg.body.accessToken, wrong);
+    expect(fifth.body.error.code).toBe('CODE_EXPIRED');
+
+    const right = await verifyCode(reg.body.accessToken, code);
+    expect(right.status).toBe(400);
+    expect(right.body.error.code).toBe('CODE_EXPIRED');
+    const me = await request(app).get('/api/v1/me').set('Authorization', `Bearer ${reg.body.accessToken}`);
+    expect(me.body.emailVerified).toBe(false);
+  });
+
+  it("BE-EMAIL-021: codes expire, only the newest works, and one account's code doesn't verify another", async () => {
+    const reg = await register();
+    const firstCode = lastMailCode();
+    await request(app).post('/api/v1/auth/resend-verification').set('Authorization', `Bearer ${reg.body.accessToken}`);
+    const secondCode = lastMailCode();
+    if (firstCode !== secondCode) {
+      expect((await verifyCode(reg.body.accessToken, firstCode)).body.error.code).toBe('INVALID_CODE');
+    }
+
+    const other = await register('other@example.com');
+    expect((await verifyCode(other.body.accessToken, secondCode)).status).toBe(400);
+
+    await db.update(emailTokens).set({ expiresAt: new Date(Date.now() - 1000) });
+    const late = await verifyCode(reg.body.accessToken, secondCode);
+    expect(late.body.error.code).toBe('CODE_EXPIRED');
+  });
+
+  it('BE-EMAIL-022: verify-email-code needs a signed-in account and a 6-digit code', async () => {
+    const anon = await request(app).post('/api/v1/auth/verify-email-code').send({ code: '123456' });
+    expect(anon.status).toBe(401);
+    const reg = await register();
+    const bad = await verifyCode(reg.body.accessToken, '12ab56');
+    expect(bad.status).toBe(400);
+    expect(bad.body.error.code).toBe('BAD_REQUEST');
+  });
+
+  const resetCode = (email: string, code: string) =>
+    request(app).post('/api/v1/auth/verify-reset-code').send({ email, code });
+
+  it('BE-EMAIL-023: forgot password in the apps: the emailed code buys a reset token that sets the new password', async () => {
+    const { refreshToken } = await createUser({ email: 'code@example.com' });
+    await request(app).post('/api/v1/auth/forgot-password').send({ email: 'code@example.com' });
+    const code = lastMailCode();
+
+    const verified = await resetCode('CODE@example.com', code.replace(/^(\d{3})/, '$1 '));
+    expect(verified.status).toBe(200);
+    expect(typeof verified.body.resetToken).toBe('string');
+    // A code works once.
+    expect((await resetCode('code@example.com', code)).body.error.code).toBe('CODE_EXPIRED');
+
+    const reset = await request(app)
+      .post('/api/v1/auth/reset-password')
+      .send({ token: verified.body.resetToken, password: 'from-the-code' });
+    expect(reset.status).toBe(200);
+    const login = await request(app)
+      .post('/api/v1/auth/login')
+      .send({ email: 'code@example.com', password: 'from-the-code' });
+    expect(login.status).toBe(200);
+    expect((await request(app).post('/api/v1/auth/refresh').send({ refreshToken })).status).toBe(401);
+  });
+
+  it("BE-EMAIL-024: a wrong reset code is refused, five wrong ones end it, and nobody else's code or an unknown address works", async () => {
+    await createUser({ email: 'guess@example.com' });
+    await request(app).post('/api/v1/auth/forgot-password').send({ email: 'guess@example.com' });
+    const code = lastMailCode();
+    const wrong = code === '000000' ? '111111' : '000000';
+
+    expect((await resetCode('nobody@example.com', code)).body.error.code).toBe('INVALID_CODE');
+    for (let i = 0; i < 4; i++)
+      expect((await resetCode('guess@example.com', wrong)).body.error.code).toBe('INVALID_CODE');
+    expect((await resetCode('guess@example.com', wrong)).body.error.code).toBe('CODE_EXPIRED');
+    expect((await resetCode('guess@example.com', code)).body.error.code).toBe('CODE_EXPIRED');
+
+    // The code that verifies an email address is not a reset code.
+    const reg = await register('verifier@example.com');
+    expect(reg.status).toBe(201);
+    expect((await resetCode('verifier@example.com', lastMailCode())).status).toBe(400);
+  });
+
+  it('BE-EMAIL-025: signed in, the password changes with the current one; other devices are signed out', async () => {
+    const { token, refreshToken } = await createUser({ email: 'change@example.com' });
+    const change = (currentPassword: string, newPassword: string) =>
+      request(app)
+        .post('/api/v1/auth/change-password')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ currentPassword, newPassword });
+
+    const wrong = await change('not-it', 'new-password-1');
+    expect(wrong.status).toBe(400);
+    expect(wrong.body.error.code).toBe('WRONG_PASSWORD');
+    expect((await change('password123', 'short')).status).toBe(400);
+
+    const ok = await change('password123', 'new-password-1');
+    expect(ok.status).toBe(200);
+    expect(typeof ok.body.accessToken).toBe('string');
+    expect((await request(app).post('/api/v1/auth/refresh').send({ refreshToken })).status).toBe(401);
+    expect((await request(app).post('/api/v1/auth/refresh').send({ refreshToken: ok.body.refreshToken })).status).toBe(
+      200,
+    );
+    const login = await request(app)
+      .post('/api/v1/auth/login')
+      .send({ email: 'change@example.com', password: 'new-password-1' });
+    expect(login.status).toBe(200);
+    expect((await request(app).post('/api/v1/auth/change-password').send({})).status).toBe(401);
   });
 });

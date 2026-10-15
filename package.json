@@ -1,7 +1,7 @@
 {
   "name": "sonare-backend",
   "version": "1.0.0",
-  "description": "Sonare native API \u2014 Express + TypeScript over a private Piped upstream",
+  "description": "Sonare native API — Express + TypeScript over a private Piped upstream",
   "main": "dist/server.js",
   "type": "module",
   "engines": {
@@ -35,7 +35,6 @@
     "ioredis": "^6.0.0",
     "jsonwebtoken": "^9.0.3",
     "lru-cache": "^10.2.0",
-    "nodemailer": "^10.0.13",
     "pino": "^9.0.0",
     "pino-http": "^10.5.0",
     "postgres": "^3.4.9",
@@ -49,7 +48,6 @@
     "@types/express": "^5.0.6",
     "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^20.11.30",
-    "@types/nodemailer": "^8.0.2",
     "@types/supertest": "^7.2.1",
     "@vitest/coverage-v8": "^4.1.11",
     "drizzle-kit": "^0.31.11",

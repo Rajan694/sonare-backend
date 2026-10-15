@@ -12,7 +12,7 @@ export interface LyricsLine {
 
 export interface ResolvedLyrics {
   synced: boolean;
-  provider: 'lrclib' | 'tags' | 'user';
+  provider: 'lrclib' | 'tags';
   offsetMs: number;
   lines: LyricsLine[];
   plain?: string;
@@ -122,35 +122,12 @@ export const getDbLyricsOverride = async (trackId: string, userId?: string) => {
         .from(lyricsOverrides)
         .where(and(eq(lyricsOverrides.trackId, trackId), eq(lyricsOverrides.userId, userId)))
         .limit(1);
-      if (row) return row;
+      return row || null;
     }
-    // Fallback to any user's override if no specific userId match
-    const [anyRow] = await db.select().from(lyricsOverrides).where(eq(lyricsOverrides.trackId, trackId)).limit(1);
-    return anyRow || null;
+    return null;
   } catch {
     return null;
   }
-};
-
-export const saveDbLyricsOverride = async (trackId: string, userId: string, data: { lrc?: string; plain?: string }) => {
-  const now = new Date();
-  await db
-    .insert(lyricsOverrides)
-    .values({
-      trackId,
-      userId,
-      lrc: data.lrc || null,
-      plain: data.plain || null,
-      updatedAt: now,
-    })
-    .onConflictDoUpdate({
-      target: [lyricsOverrides.userId, lyricsOverrides.trackId],
-      set: {
-        lrc: data.lrc || null,
-        plain: data.plain || null,
-        updatedAt: now,
-      },
-    });
 };
 
 export const saveDbLyricsOffset = async (trackId: string, userId: string, offsetMs: number) => {
@@ -170,16 +147,6 @@ export const saveDbLyricsOffset = async (trackId: string, userId: string, offset
         updatedAt: now,
       },
     });
-};
-
-export const deleteDbLyricsOverride = async (trackId: string, userId?: string) => {
-  if (userId) {
-    await db
-      .delete(lyricsOverrides)
-      .where(and(eq(lyricsOverrides.trackId, trackId), eq(lyricsOverrides.userId, userId)));
-  } else {
-    await db.delete(lyricsOverrides).where(eq(lyricsOverrides.trackId, trackId));
-  }
 };
 
 export const parseLrc = (lrc: string): LyricsLine[] => {
@@ -218,19 +185,7 @@ export const LyricsResolver = {
     artistName: string,
     albumName?: string,
     durationMs?: number,
-    userId?: string,
   ): Promise<ResolvedLyrics | null> {
-    const override = await getDbLyricsOverride(trackId, userId);
-    if (override && (override.lrc || override.plain)) {
-      return {
-        synced: !!override.lrc,
-        provider: 'user',
-        offsetMs: override.offsetMs || 0,
-        lines: override.lrc ? parseLrc(override.lrc) : [],
-        plain: override.plain || override.lrc?.replace(/\[.*?\]/g, '').trim(),
-      };
-    }
-
     let found: Partial<ResolvedLyrics> | null = null;
     // Whether LRCLIB answered at all. If neither call did, "no lyrics" would be a guess.
     let answered = false;
@@ -278,8 +233,9 @@ export const LyricsResolver = {
       }
     }
 
+    // The timing offset is per user; the route adds it, so cached lyrics carry none.
     if (found) {
-      return { ...found, offsetMs: override?.offsetMs || 0 } as ResolvedLyrics;
+      return { ...found, offsetMs: 0 } as ResolvedLyrics;
     }
     if (!answered) throw new LyricsUnavailableError();
 

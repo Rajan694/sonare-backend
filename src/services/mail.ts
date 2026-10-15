@@ -1,10 +1,10 @@
-import nodemailer, { type Transporter } from 'nodemailer';
 import { request } from 'undici';
 import { config } from '../config.js';
+import { MailError } from '../errors.js';
 
-// Account email. With RESEND_API_KEY set it goes out through Resend's HTTP API (production:
-// Render's free plan blocks outbound SMTP ports); otherwise through SMTP, which is Mailpit in
-// development (its inbox: http://localhost:8025).
+// Account email goes out through Resend's HTTP API, in development too, so a mail the app
+// calls sent really reaches the inbox. Without RESEND_API_KEY nothing can be sent, and the
+// routes that send on request answer MAIL_UNAVAILABLE instead of pretending.
 
 export const RESEND_API_URL = 'https://api.resend.com/emails';
 
@@ -16,18 +16,8 @@ export interface MailMessage {
 
 type Mail = MailMessage & { to: string };
 
-let smtp: Transporter | undefined;
-
-/** Made on first use, so a server that sends through Resend never opens an SMTP transport. */
-const smtpTransport = (): Transporter => {
-  smtp ??= nodemailer.createTransport({
-    host: config.SMTP_HOST,
-    port: config.SMTP_PORT,
-    secure: config.SMTP_SECURE,
-    auth: config.SMTP_USER ? { user: config.SMTP_USER, pass: config.SMTP_PASS } : undefined,
-  });
-  return smtp;
-};
+/** Mail can only go out once RESEND_API_KEY is set. */
+export const mailConfigured = (): boolean => Boolean(config.RESEND_API_KEY);
 
 const sendWithResend = async (apiKey: string, mail: Mail): Promise<void> => {
   const { statusCode, body } = await request(RESEND_API_URL, {
@@ -54,28 +44,27 @@ const sendWithResend = async (apiKey: string, mail: Mail): Promise<void> => {
   throw new Error(`Resend answered ${statusCode}: ${detail}`);
 };
 
-/** How mail leaves this server, for the startup log. */
-export const mailTransportName = (): string => {
-  if (config.RESEND_API_KEY) return 'Resend API';
-  const mailpit =
-    config.NODE_ENV === 'development' &&
-    ['127.0.0.1', 'localhost'].includes(config.SMTP_HOST) &&
-    config.SMTP_PORT === 1025;
-  return `SMTP ${config.SMTP_HOST}:${config.SMTP_PORT}${mailpit ? ' (Mailpit inbox: http://localhost:8025)' : ''}`;
-};
-
+/** Throws MailError: MAIL_UNAVAILABLE without a key, MAIL_FAILED (Resend's answer as the cause) otherwise. */
 export const sendMail = async (mail: Mail): Promise<void> => {
-  if (config.RESEND_API_KEY) return sendWithResend(config.RESEND_API_KEY, mail);
-  await smtpTransport().sendMail({ from: config.MAIL_FROM, ...mail });
+  if (!config.RESEND_API_KEY) throw new MailError('MAIL_UNAVAILABLE');
+  try {
+    await sendWithResend(config.RESEND_API_KEY, mail);
+  } catch (err) {
+    throw new MailError('MAIL_FAILED', { cause: err });
+  }
 };
 
-export const verifyEmailMessage = (link: string): MailMessage => {
+/** The link opens the web app; the code is for typing into whichever app is open (it lasts 30 minutes). */
+export const verifyEmailMessage = (link: string, code: string): MailMessage => {
+  const spaced = `${code.slice(0, 3)} ${code.slice(3)}`;
   return {
     subject: 'Verify your Sonare email address',
-    text: `Welcome to Sonare!\n\nVerify your email by clicking the link below. It expires in 24 hours.\n\n${link}\n\nIf you did not create an account, ignore this email.`,
+    text: `Welcome to Sonare!\n\nYour verification code is ${spaced}. Enter it in the app; it expires in 30 minutes.\n\nOr verify by opening this link (it expires in 24 hours):\n${link}\n\nIf you did not create an account, ignore this email.`,
     html: `<div style="font-family:sans-serif;max-width:480px;margin:0 auto">
   <h2 style="color:#111">Verify your email</h2>
-  <p>Welcome to Sonare! Click the button below to verify your email address. The link expires in <strong>24 hours</strong>.</p>
+  <p>Welcome to Sonare! Enter this code in the app to verify your email address. It expires in <strong>30 minutes</strong>.</p>
+  <p style="margin:24px 0;font-size:32px;font-weight:700;letter-spacing:6px;color:#111;font-family:monospace">${spaced}</p>
+  <p>Or click the button below. The link expires in <strong>24 hours</strong>.</p>
   <p style="margin:24px 0">
     <a href="${link}" style="background:#6366f1;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;display:inline-block">Verify email</a>
   </p>
@@ -85,18 +74,21 @@ export const verifyEmailMessage = (link: string): MailMessage => {
   };
 };
 
-export const resetPasswordMessage = (link: string): MailMessage => {
+export const resetPasswordMessage = (link: string, code: string): MailMessage => {
+  const spaced = `${code.slice(0, 3)} ${code.slice(3)}`;
   return {
     subject: 'Reset your Sonare password',
-    text: `You requested a password reset for your Sonare account.\n\nClick the link below to set a new password. It expires in 1 hour.\n\n${link}\n\nIf you did not request this, ignore this email. Your password will not change.`,
+    text: `You asked to reset the password of your Sonare account.\n\nYour reset code is ${spaced}. Enter it in the app; it expires in 30 minutes.\n\nOr set a new password by opening this link (it expires in 1 hour):\n${link}\n\nIf you did not ask for this, ignore this email. Your password will not change.`,
     html: `<div style="font-family:sans-serif;max-width:480px;margin:0 auto">
   <h2 style="color:#111">Reset your password</h2>
-  <p>You requested a password reset for your Sonare account. Click the button below to set a new password. The link expires in <strong>1 hour</strong>.</p>
+  <p>You asked to reset the password of your Sonare account. Enter this code in the app to choose a new one. It expires in <strong>30 minutes</strong>.</p>
+  <p style="margin:24px 0;font-size:32px;font-weight:700;letter-spacing:6px;color:#111;font-family:monospace">${spaced}</p>
+  <p>Or click the button below. The link expires in <strong>1 hour</strong>.</p>
   <p style="margin:24px 0">
     <a href="${link}" style="background:#6366f1;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;display:inline-block">Reset password</a>
   </p>
   <p style="color:#666;font-size:13px">Or copy this link: <a href="${link}" style="color:#6366f1">${link}</a></p>
-  <p style="color:#999;font-size:12px">If you did not request a password reset, ignore this email. Your password will not change.</p>
+  <p style="color:#999;font-size:12px">If you did not ask to reset your password, ignore this email. Your password will not change.</p>
 </div>`,
   };
 };

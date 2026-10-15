@@ -1,6 +1,6 @@
 import type { Request, Response, NextFunction } from 'express';
 import { UpstreamError } from '../upstream/piped.js';
-import { BadRequestError, LyricsUnavailableError, NoAudioStreamError, StreamTokenError } from '../errors.js';
+import { BadRequestError, LyricsUnavailableError, MailError, NoAudioStreamError, StreamTokenError } from '../errors.js';
 
 // The last middleware: turns thrown errors into the API's { error: { code, message } } shape.
 export const errorHandler = (err: unknown, req: Request, res: Response, _next: NextFunction) => {
@@ -40,7 +40,7 @@ export const errorHandler = (err: unknown, req: Request, res: Response, _next: N
     return;
   }
 
-  if (err instanceof LyricsUnavailableError) {
+  if (err instanceof LyricsUnavailableError || err instanceof MailError) {
     res.status(err.status).json({ error: { code: err.code, message: err.message } });
     return;
   }

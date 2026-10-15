@@ -34,6 +34,8 @@ beforeEach(async () => {
       user_settings,
       refresh_tokens,
       email_tokens,
+      waveforms,
+      lyrics_cache,
       users
     CASCADE;
   `);

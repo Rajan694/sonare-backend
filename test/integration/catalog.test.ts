@@ -369,6 +369,38 @@ describe('Catalog & public endpoints', () => {
     expect(res.body.items[0].id).toBe('yt:dQw4w9WgXcQ');
   });
 
+  it('BE-CATALOG-024: GET /api/v1/tracks/:id/related lists similar songs: no shorts, mixes, the song itself or repeats', async () => {
+    const item = (id: string, over: Record<string, unknown> = {}) => ({
+      url: `/watch?v=${id}`,
+      type: 'stream',
+      title: `Song ${id}`,
+      thumbnail: 'https://piped.video/t.jpg',
+      uploaderName: 'Some Artist - Topic',
+      uploaderUrl: '/channel/UCsome',
+      duration: 200,
+      ...over,
+    });
+    const pipedMock = mockAgent!.get('http://localhost:8090');
+    pipedMock.intercept({ path: '/streams/seedSong01', method: 'GET' }).reply(200, {
+      ...samplePipedStream('seedSong01'),
+      relatedStreams: [
+        item('relatedOne1'),
+        item('seedSong01'),
+        item('relatedOne1'),
+        item('shortClip01', { duration: 30 }),
+        item('longMix0001', { duration: 3 * 3600 }),
+        item('isAShort001', { isShort: true }),
+        { url: '/channel/UCx', type: 'channel', name: 'A channel', thumbnail: '' },
+        item('relatedTwo2'),
+      ],
+    });
+
+    const res = await request(app).get('/api/v1/tracks/yt:seedSong01/related?limit=5');
+    expect(res.status).toBe(200);
+    expect(res.body.items.map((t: { id: string }) => t.id)).toEqual(['yt:relatedOne1', 'yt:relatedTwo2']);
+    expect(res.body.items[0]).toMatchObject({ kind: 'track', artist: 'Some Artist' });
+  });
+
   it('BE-CATALOG-021: GET /api/v1/artists/:id/albums returns albums from artist channel tab', async () => {
     const pipedMock = mockAgent!.get('http://localhost:8090');
     pipedMock

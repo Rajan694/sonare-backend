@@ -85,6 +85,27 @@
       "when": 1791821657127,
       "tag": "0011_drop_app_releases",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1791989579351,
+      "tag": "0012_email_code_attempts",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1792003428400,
+      "tag": "0013_faithful_thunderball",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1792015593023,
+      "tag": "0014_waveforms_lyrics_cache",
+      "breakpoints": true
     }
   ]
 }

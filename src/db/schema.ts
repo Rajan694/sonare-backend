@@ -9,6 +9,7 @@ import {
   jsonb,
   index,
   bigserial,
+  customType,
 } from 'drizzle-orm/pg-core';
 
 export const users = pgTable('users', {
@@ -144,6 +145,8 @@ export const emailTokens = pgTable(
     tokenHash: text('token_hash').notNull().unique(),
     expiresAt: timestamp('expires_at').notNull(),
     usedAt: timestamp('used_at'),
+    /** Wrong guesses at an emailed code; the code stops working after a few. */
+    attempts: integer('attempts').default(0).notNull(),
     createdAt: timestamp('created_at').defaultNow().notNull(),
   },
   (t) => ({
@@ -155,8 +158,8 @@ export const userSettings = pgTable('user_settings', {
   userId: uuid('user_id')
     .primaryKey()
     .references(() => users.id, { onDelete: 'cascade' }),
-  eqPreset: text('eq_preset').default('Flat'),
-  gapless: boolean('gapless').default(false),
+  eqPreset: text('eq_preset').default('Sonare'),
+  gapless: boolean('gapless').default(true),
   normalization: boolean('normalization').default(true),
   downloadQuality: text('download_quality').default('high'),
   stayOffline: boolean('stay_offline').default(false),
@@ -185,8 +188,6 @@ export const lyricsOverrides = pgTable(
       .references(() => users.id, { onDelete: 'cascade' })
       .notNull(),
     trackId: text('track_id').notNull(),
-    lrc: text('lrc'),
-    plain: text('plain'),
     offsetMs: integer('offset_ms').default(0),
     updatedAt: timestamp('updated_at').defaultNow().notNull(),
   },
@@ -266,5 +267,37 @@ export const catalogItems = pgTable(
   },
   (t) => ({
     pk: primaryKey({ columns: [t.kind, t.id] }),
+  }),
+);
+
+/** Postgres has bytea; drizzle-orm's pg-core has no builder for it. */
+const bytea = customType<{ data: Buffer; driverData: Buffer }>({ dataType: () => 'bytea' });
+
+/**
+ * Waveforms the apps measured and uploaded (first upload wins, for everyone). Redis caches them
+ * in front; this table is what survives a Redis restart. One byte per bar (loudness 0..1 as
+ * 0..255): 150 bars are 150 bytes, which matters on Neon's 0.5 GB.
+ */
+export const waveforms = pgTable('waveforms', {
+  trackId: text('track_id').primaryKey(),
+  peaks: bytea('peaks').notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+});
+
+/**
+ * Lyrics found on LRCLIB, so a song's lyrics are looked up there once. `key` is the YouTube id,
+ * or `id|title|artist` when only the app knew the song, with `:script` for a preferred script.
+ * `lyrics` null records that LRCLIB had none; such misses expire (`expiresAt`) and are asked again.
+ */
+export const lyricsCache = pgTable(
+  'lyrics_cache',
+  {
+    key: text('key').primaryKey(),
+    lyrics: jsonb('lyrics'),
+    expiresAt: timestamp('expires_at'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (t) => ({
+    createdIdx: index('lyrics_cache_created_at_idx').on(t.createdAt),
   }),
 );

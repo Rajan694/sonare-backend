@@ -13,7 +13,7 @@ to it under `/api/v1`; the full contract is [`../docs/api-contract.md`](../docs/
 - Postgres 17 (16 works for development)
 - Redis 7 — optional at runtime: without it caching passes through and rate limits fail open
 - Piped running locally (`../sonare-piped-backend/runPiped.sh up`) — API on :8090, proxy on :8091
-- Docker, for Mailpit in development and for the production stack
+- Docker, for the production stack
 
 ## Setup
 
@@ -39,8 +39,8 @@ npm run db:migrate
 ./runBE.sh start    # the compiled build in dist/
 ```
 
-`runBE.sh` starts Mailpit (`docker-compose.dev.yml`) so verification and password-reset
-emails can be read at **http://localhost:8025**, and says whether Piped is up. The API
+`runBE.sh` says whether Piped is up and whether `RESEND_API_KEY` is set: verification and
+password-reset emails only go out through Resend, so without a key none are sent. The API
 listens on `PORT` (3010).
 
 ## Scripts
@@ -83,12 +83,7 @@ Development values are in `.env.example`, production ones in `.env.production.ex
 | `LOG_LEVEL`             | `info`                         | no                     | pino level; logs are pretty in development, JSON otherwise                                                |
 | `LRCLIB_BASE`           | `https://lrclib.net`           | no                     | LRCLIB API                                                                                                |
 | `LRCLIB_USER_AGENT`     | `Sonare/1.0`                   | no                     | User-Agent sent to LRCLIB                                                                                 |
-| `RESEND_API_KEY`        | unset                          | yes                    | Mail goes out through Resend's HTTP API (Render's free plan blocks SMTP ports)                            |
-| `SMTP_HOST`             | `127.0.0.1`                    | no                     | Used when `RESEND_API_KEY` is unset: Mailpit in development (inbox http://localhost:8025)                 |
-| `SMTP_PORT`             | `1025`                         | no                     | Mailpit's SMTP port                                                                                       |
-| `SMTP_SECURE`           | `false`                        | no                     | TLS for the SMTP fallback                                                                                 |
-| `SMTP_USER`             | unset                          | no                     | SMTP fallback login                                                                                       |
-| `SMTP_PASS`             | unset                          | no                     | SMTP fallback password                                                                                    |
+| `RESEND_API_KEY`        | unset                          | yes                    | Mail goes out through Resend's HTTP API; without it no account email is sent                              |
 | `MAIL_FROM`             | `Sonare <no-reply@sonare.vip>` | yes                    | Sender of account emails                                                                                  |
 | `APP_URL`               | `http://localhost:5183`        | yes (https)            | Base of the links in verification and reset emails                                                        |
 | `RELEASES_REPO`         | `Rajan694/sonare`              | no                     | GitHub repo whose latest release holds the app builds                                                     |

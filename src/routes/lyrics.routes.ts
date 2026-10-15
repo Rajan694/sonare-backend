@@ -4,9 +4,7 @@ import { idHelpers } from '../ids.js';
 import {
   LyricsResolver,
   type ResolvedLyrics,
-  saveDbLyricsOverride,
   saveDbLyricsOffset,
-  deleteDbLyricsOverride,
   getDbLyricsOverride,
   LYRICS_SCRIPTS,
   lyricsInScript,
@@ -24,13 +22,6 @@ export const lyricsRouter = Router();
 const clientLyricsKey = (rawId: string, title: string, artist: string): string =>
   `${rawId}|${title.trim().toLowerCase()}|${artist.trim().toLowerCase()}`;
 
-const LRC_MAX = 100_000;
-const overrideSchema = z
-  .object({
-    lrc: z.string().max(LRC_MAX, 'Lyrics are too long').optional(),
-    plain: z.string().max(LRC_MAX, 'Lyrics are too long').optional(),
-  })
-  .refine((b) => b.lrc !== undefined || b.plain !== undefined, 'Send lrc or plain lyrics');
 // Ten minutes either way is far more than any real timing drift.
 const offsetSchema = z.object({
   offsetMs: z
@@ -65,123 +56,108 @@ lyricsRouter.get('/tracks/:id/lyrics', async (req, res) => {
   } = parseQuery(lyricsQuery, req);
 
   let resolved: ResolvedLyrics | null = null;
-  const dbOverride = await getDbLyricsOverride(rawId, req.user?.id);
-  if (dbOverride && (dbOverride.lrc || dbOverride.plain)) {
-    // The user's own lyrics win over any preference.
-    resolved = await LyricsResolver.resolve(rawId, '', '', undefined, undefined, req.user?.id);
-  } else {
-    // 1. Look up server-known metadata in catalog_items first
-    const catalogMap = await getCatalogItems<TrackMeta>('track', [rawId]);
-    const serverTrack = catalogMap.get(rawId);
-    const hasServerMeta = !!(serverTrack && serverTrack.title && serverTrack.artist);
+  // 1. Look up server-known metadata in catalog_items first
+  const catalogMap = await getCatalogItems<TrackMeta>('track', [rawId]);
+  const serverTrack = catalogMap.get(rawId);
+  const hasServerMeta = !!(serverTrack && serverTrack.title && serverTrack.artist);
 
-    let streams: Awaited<ReturnType<typeof CachedPiped.getStream>> | null = null;
-    const getPipedMeta = async () => {
-      const s = (streams ??= await CachedPiped.getStream(rawId));
-      return {
-        title: s.title,
-        artist: s.uploader.replace(/\s*-\s*Topic$/i, '').trim(),
-        durationMs: s.duration * 1000,
-      };
+  let streams: Awaited<ReturnType<typeof CachedPiped.getStream>> | null = null;
+  const getPipedMeta = async () => {
+    const s = (streams ??= await CachedPiped.getStream(rawId));
+    return {
+      title: s.title,
+      artist: s.uploader.replace(/\s*-\s*Topic$/i, '').trim(),
+      durationMs: s.duration * 1000,
     };
+  };
 
-    if (hasServerMeta) {
-      // Server metadata wins over query params!
-      // Use normal shared cache key (rawId)
-      resolved = await PermanentCache.getLyrics(rawId);
+  if (hasServerMeta) {
+    // Server metadata wins over query params!
+    // Use normal shared cache key (rawId)
+    resolved = await PermanentCache.getLyrics(rawId);
+    if ((resolved?.provider as string | undefined) === 'genius') resolved = null;
+
+    if (!resolved) {
+      resolved = await LyricsResolver.resolve(
+        rawId,
+        serverTrack.title,
+        serverTrack.artist,
+        undefined,
+        serverTrack.durationMs ?? undefined,
+      );
+      if (resolved) await PermanentCache.setLyrics(rawId, resolved);
+    }
+  } else if (queryTitle && queryArtist) {
+    // Server knows nothing, and client's title+artist are used.
+    const clientKey = clientLyricsKey(rawId, queryTitle, queryArtist);
+
+    // Reads with client metadata check the plain key first, then the client-keyed one.
+    resolved = await PermanentCache.getLyrics(rawId);
+    if ((resolved?.provider as string | undefined) === 'genius') resolved = null;
+
+    if (!resolved) {
+      resolved = await PermanentCache.getLyrics(clientKey);
       if ((resolved?.provider as string | undefined) === 'genius') resolved = null;
-
-      if (!resolved) {
-        resolved = await LyricsResolver.resolve(
-          rawId,
-          serverTrack.title,
-          serverTrack.artist,
-          undefined,
-          serverTrack.durationMs ?? undefined,
-          req.user?.id,
-        );
-        if (resolved) await PermanentCache.setLyrics(rawId, resolved);
-      }
-    } else if (queryTitle && queryArtist) {
-      // Server knows nothing, and client's title+artist are used.
-      const clientKey = clientLyricsKey(rawId, queryTitle, queryArtist);
-
-      // Reads with client metadata check the plain key first, then the client-keyed one.
-      resolved = await PermanentCache.getLyrics(rawId);
-      if ((resolved?.provider as string | undefined) === 'genius') resolved = null;
-
-      if (!resolved) {
-        resolved = await PermanentCache.getLyrics(clientKey);
-        if ((resolved?.provider as string | undefined) === 'genius') resolved = null;
-      }
-
-      if (!resolved) {
-        resolved = await LyricsResolver.resolve(
-          rawId,
-          queryTitle,
-          queryArtist,
-          undefined,
-          queryDurationMs,
-          req.user?.id,
-        );
-        // Never write plain rawId keys from client data.
-        if (resolved) await PermanentCache.setLyrics(clientKey, resolved);
-      }
-    } else {
-      // Server knows nothing and no client metadata: fall back to Piped
-      resolved = await PermanentCache.getLyrics(rawId);
-      if ((resolved?.provider as string | undefined) === 'genius') resolved = null;
-
-      if (!resolved) {
-        const m = await getPipedMeta();
-        resolved = await LyricsResolver.resolve(rawId, m.title, m.artist, undefined, m.durationMs, req.user?.id);
-        if (resolved) await PermanentCache.setLyrics(rawId, resolved);
-      }
     }
 
-    // A preferred script the matched lyrics aren't in: look for that version, else keep the original.
-    if (script && script !== 'original' && !(resolved && lyricsInScript(resolved, script))) {
-      try {
-        let inScript = null;
-        if (hasServerMeta) {
-          const cached = await PermanentCache.getScriptLyrics(rawId, script);
-          inScript = cached ? cached.lyrics : null;
-          if (!cached) {
-            inScript = await resolveLyricsInScript(
-              serverTrack.title,
-              serverTrack.artist,
-              serverTrack.durationMs ?? undefined,
-              script,
-            );
-            await PermanentCache.setScriptLyrics(rawId, script, inScript);
-          }
-        } else if (queryTitle && queryArtist) {
-          const clientKey = clientLyricsKey(rawId, queryTitle, queryArtist);
-          const cached =
-            (await PermanentCache.getScriptLyrics(rawId, script)) ??
-            (await PermanentCache.getScriptLyrics(clientKey, script));
-          inScript = cached ? cached.lyrics : null;
-          if (!cached) {
-            inScript = await resolveLyricsInScript(queryTitle, queryArtist, queryDurationMs || undefined, script);
-            // Never write plain rawId keys from client data.
-            await PermanentCache.setScriptLyrics(clientKey, script, inScript);
-          }
-        } else {
-          const cached = await PermanentCache.getScriptLyrics(rawId, script);
-          inScript = cached ? cached.lyrics : null;
-          if (!cached) {
-            const m = await getPipedMeta();
-            inScript = await resolveLyricsInScript(m.title, m.artist, m.durationMs, script);
-            await PermanentCache.setScriptLyrics(rawId, script, inScript);
-          }
-        }
-        if (inScript) resolved = { ...inScript, offsetMs: resolved?.offsetMs ?? 0 };
-      } catch {
-        // The preference is best effort: the original lyrics (or the 404) stand, uncached.
-      }
+    if (!resolved) {
+      resolved = await LyricsResolver.resolve(rawId, queryTitle, queryArtist, undefined, queryDurationMs);
+      // Never write plain rawId keys from client data.
+      if (resolved) await PermanentCache.setLyrics(clientKey, resolved);
+    }
+  } else {
+    // Server knows nothing and no client metadata: fall back to Piped
+    resolved = await PermanentCache.getLyrics(rawId);
+    if ((resolved?.provider as string | undefined) === 'genius') resolved = null;
+
+    if (!resolved) {
+      const m = await getPipedMeta();
+      resolved = await LyricsResolver.resolve(rawId, m.title, m.artist, undefined, m.durationMs);
+      if (resolved) await PermanentCache.setLyrics(rawId, resolved);
     }
   }
 
+  // A preferred script the matched lyrics aren't in: look for that version, else keep the original.
+  if (script && script !== 'original' && !(resolved && lyricsInScript(resolved, script))) {
+    try {
+      let inScript = null;
+      if (hasServerMeta) {
+        const cached = await PermanentCache.getScriptLyrics(rawId, script);
+        inScript = cached ? cached.lyrics : null;
+        if (!cached) {
+          inScript = await resolveLyricsInScript(
+            serverTrack.title,
+            serverTrack.artist,
+            serverTrack.durationMs ?? undefined,
+            script,
+          );
+          await PermanentCache.setScriptLyrics(rawId, script, inScript);
+        }
+      } else if (queryTitle && queryArtist) {
+        const clientKey = clientLyricsKey(rawId, queryTitle, queryArtist);
+        const cached =
+          (await PermanentCache.getScriptLyrics(rawId, script)) ??
+          (await PermanentCache.getScriptLyrics(clientKey, script));
+        inScript = cached ? cached.lyrics : null;
+        if (!cached) {
+          inScript = await resolveLyricsInScript(queryTitle, queryArtist, queryDurationMs || undefined, script);
+          // Never write plain rawId keys from client data.
+          await PermanentCache.setScriptLyrics(clientKey, script, inScript);
+        }
+      } else {
+        const cached = await PermanentCache.getScriptLyrics(rawId, script);
+        inScript = cached ? cached.lyrics : null;
+        if (!cached) {
+          const m = await getPipedMeta();
+          inScript = await resolveLyricsInScript(m.title, m.artist, m.durationMs, script);
+          await PermanentCache.setScriptLyrics(rawId, script, inScript);
+        }
+      }
+      if (inScript) resolved = { ...inScript, offsetMs: resolved?.offsetMs ?? 0 };
+    } catch {
+      // The preference is best effort: the original lyrics (or the 404) stand, uncached.
+    }
+  }
   if (!resolved) {
     res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Lyrics not found' } });
     return;
@@ -193,18 +169,10 @@ lyricsRouter.get('/tracks/:id/lyrics', async (req, res) => {
     response.lines = [];
   }
 
+  // The listener's own timing offset (Earlier / Later); everyone else's lyrics carry none.
+  const override = await getDbLyricsOverride(rawId, req.user?.id);
+  response.offsetMs = override?.offsetMs ?? 0;
   res.json(response);
-});
-
-lyricsRouter.post('/tracks/:id/lyrics', async (req, res) => {
-  const rawId = idHelpers.extractYtId(req.params.id);
-  const { lrc, plain } = parseBody(overrideSchema, req);
-  const userId = req.user?.id || '00000000-0000-0000-0000-000000000000';
-
-  await saveDbLyricsOverride(rawId, userId, { lrc, plain });
-  await PermanentCache.setLyrics(rawId, null);
-
-  res.json({ ok: true });
 });
 
 lyricsRouter.patch('/tracks/:id/lyrics/offset', async (req, res) => {
@@ -213,13 +181,6 @@ lyricsRouter.patch('/tracks/:id/lyrics/offset', async (req, res) => {
   const userId = req.user?.id || '00000000-0000-0000-0000-000000000000';
 
   await saveDbLyricsOffset(rawId, userId, offsetMs);
-  res.json({ ok: true });
-});
-
-lyricsRouter.delete('/tracks/:id/lyrics', async (req, res) => {
-  const rawId = idHelpers.extractYtId(req.params.id);
-  await deleteDbLyricsOverride(rawId, req.user?.id);
-  await PermanentCache.setLyrics(rawId, null);
   res.json({ ok: true });
 });
 

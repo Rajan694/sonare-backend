@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Router, type Request, type Response } from 'express';
 import { db } from '../db/index.js';
 import {
   users,
@@ -11,11 +11,13 @@ import {
   userSettings,
   playerState,
 } from '../db/schema.js';
-import { eq, and, desc, sql, gte } from 'drizzle-orm';
-import { requireAuth } from '../middleware/auth.js';
+import { eq, and, desc, sql, gte, inArray } from 'drizzle-orm';
+import { forgetAuthUser, requireAuth } from '../middleware/auth.js';
+import bcrypt from 'bcrypt';
 import { idHelpers } from '../ids.js';
 import { hydrateTracks } from '../db/hydrate.js';
-import { CachedPiped } from '../services/cache.js';
+import { CachedPiped, PIPED_LOOKUP_CONCURRENCY } from '../services/cache.js';
+import { mapLimit } from '../mapLimit.js';
 import { normalizeChannelToArtist, normalizePlaylistToAlbum, normalizeStreamToTrack } from '../normalize/index.js';
 import crypto from 'node:crypto';
 import { z } from 'zod';
@@ -83,11 +85,18 @@ const addTracksSchema = z.object({
   metas: z.record(z.unknown()).optional(),
 });
 const removeTracksSchema = z.object({
+  entryIds: z.array(z.string().uuid()).max(500).optional(),
   index: z.number().int().min(0).optional(),
   trackIds: z.array(trackId).max(500).optional(),
 });
 const position = z.number({ required_error: 'Missing from or to' }).int().min(0);
-const reorderSchema = z.object({ from: position, to: position });
+const reorderSchema = z
+  .object({
+    from: position.optional(),
+    to: position,
+    entryId: z.string().uuid().optional(),
+  })
+  .refine((b) => b.from !== undefined || b.entryId !== undefined, 'Send from or entryId');
 
 const syncSchema = z.object({
   since: z.number().optional(),
@@ -123,19 +132,72 @@ const playerStateSchema = z.object({
 // Protect all /me routes with requireAuth
 meRouter.use(requireAuth);
 
+/**
+ * The account behind a request, or a 401 when it is gone: requireAuth caches users for a minute,
+ * so an account deleted on another device can still get this far.
+ */
+const accountOr401 = async (req: Request, res: Response): Promise<typeof users.$inferSelect | null> => {
+  const [user] = await db.select().from(users).where(eq(users.id, req.user!.id)).limit(1);
+  if (user) return user;
+  forgetAuthUser(req.user!.id);
+  res.status(401).json({ error: { code: 'UNAUTHORIZED', message: 'User no longer exists' } });
+  return null;
+};
+
+const userResponse = (user: typeof users.$inferSelect) => ({
+  id: user.id,
+  email: user.email,
+  displayName: user.displayName,
+  emailVerified: user.emailVerifiedAt !== null,
+  createdAt: user.createdAt,
+});
+
 meRouter.get('/', async (req, res) => {
   const [user] = await db.select().from(users).where(eq(users.id, req.user!.id)).limit(1);
   if (!user) {
     res.status(404).json({ error: { code: 'NOT_FOUND', message: 'User not found' } });
     return;
   }
-  res.json({
-    id: user.id,
-    email: user.email,
-    displayName: user.displayName,
-    emailVerified: user.emailVerifiedAt !== null,
-    createdAt: user.createdAt,
-  });
+  res.json(userResponse(user));
+});
+
+const profileSchema = z.object({
+  displayName: z
+    .string({ required_error: 'Missing displayName' })
+    .trim()
+    .min(1, 'Enter a name')
+    .max(100, 'Name must be at most 100 characters'),
+});
+const deleteAccountSchema = z.object({ password: z.string({ required_error: 'Enter your password' }).min(1).max(128) });
+
+meRouter.patch('/', async (req, res) => {
+  const { displayName } = parseBody(profileSchema, req);
+  const [user] = await db.update(users).set({ displayName }).where(eq(users.id, req.user!.id)).returning();
+  if (!user) {
+    forgetAuthUser(req.user!.id);
+    res.status(401).json({ error: { code: 'UNAUTHORIZED', message: 'User no longer exists' } });
+    return;
+  }
+  res.json(userResponse(user));
+});
+
+// Deleting the account takes its library, playlists, plays and settings with it (cascade).
+// The password is asked again so a borrowed, signed-in phone can't do it.
+meRouter.delete('/', async (req, res) => {
+  const { password } = parseBody(deleteAccountSchema, req);
+  const user = await accountOr401(req, res);
+  if (!user) return;
+  if (user.role !== 'user') {
+    res.status(403).json({ error: { code: 'FORBIDDEN', message: 'The admin account cannot be deleted here' } });
+    return;
+  }
+  if (!(await bcrypt.compare(password, user.passwordHash))) {
+    res.status(400).json({ error: { code: 'WRONG_PASSWORD', message: "That isn't your password" } });
+    return;
+  }
+  await db.delete(users).where(eq(users.id, user.id));
+  forgetAuthUser(user.id);
+  res.json({ ok: true });
 });
 
 // Library
@@ -178,50 +240,48 @@ meRouter.get('/library/albums', async (req, res) => {
       ? await getCatalogItems<AlbumMeta>('album', missingCatalogIds)
       : new Map<string, AlbumMeta>();
 
-  const items = await Promise.all(
-    favs.map(async (f) => {
-      const base = { id: idHelpers.prefixYt(f.albumId), addedAt: f.addedAt.getTime() };
-      const parsedRow = parseAlbumMeta(f.meta);
-      const meta = parsedRow ?? catalogMap.get(f.albumId);
+  const items = await mapLimit(favs, PIPED_LOOKUP_CONCURRENCY, async (f) => {
+    const base = { id: idHelpers.prefixYt(f.albumId), addedAt: f.addedAt.getTime() };
+    const parsedRow = parseAlbumMeta(f.meta);
+    const meta = parsedRow ?? catalogMap.get(f.albumId);
 
-      if (meta) {
-        return {
-          id: base.id,
-          title: meta.title,
-          artist: meta.artist,
-          artistId: meta.artistId ?? '',
-          year: meta.year ?? null,
-          trackCount: meta.trackCount ?? null,
-          genre: null,
-          source: 'server' as const,
-          downloaded: false,
-          thumbnail: meta.thumbnail || `/api/v1/albums/${base.id}/artwork`,
-          addedAt: base.addedAt,
-        };
-      }
+    if (meta) {
+      return {
+        id: base.id,
+        title: meta.title,
+        artist: meta.artist,
+        artistId: meta.artistId ?? '',
+        year: meta.year ?? null,
+        trackCount: meta.trackCount ?? null,
+        genre: null,
+        source: 'server' as const,
+        downloaded: false,
+        thumbnail: meta.thumbnail || `/api/v1/albums/${base.id}/artwork`,
+        addedAt: base.addedAt,
+      };
+    }
 
-      // Fall back to Piped
-      try {
-        const playlist = await CachedPiped.playlist(f.albumId);
-        const normalized = normalizePlaylistToAlbum(playlist, f.albumId);
-        await rememberCatalogItem('album', f.albumId, normalized);
-        return { ...normalized, ...base };
-      } catch {
-        return {
-          ...base,
-          title: 'Unavailable album',
-          artist: '',
-          artistId: '',
-          year: null,
-          trackCount: null,
-          genre: null,
-          source: 'server' as const,
-          downloaded: false,
-          thumbnail: `/api/v1/albums/${base.id}/artwork`,
-        };
-      }
-    }),
-  );
+    // Fall back to Piped
+    try {
+      const playlist = await CachedPiped.playlist(f.albumId);
+      const normalized = normalizePlaylistToAlbum(playlist, f.albumId);
+      await rememberCatalogItem('album', f.albumId, normalized);
+      return { ...normalized, ...base };
+    } catch {
+      return {
+        ...base,
+        title: 'Unavailable album',
+        artist: '',
+        artistId: '',
+        year: null,
+        trackCount: null,
+        genre: null,
+        source: 'server' as const,
+        downloaded: false,
+        thumbnail: `/api/v1/albums/${base.id}/artwork`,
+      };
+    }
+  });
   res.json({ items, meta: { total: favs.length } });
 });
 
@@ -243,34 +303,32 @@ meRouter.get('/library/artists', async (req, res) => {
       ? await getCatalogItems<ArtistMeta>('artist', missingArtistIds)
       : new Map<string, ArtistMeta>();
 
-  const followed = await Promise.all(
-    follows.map(async (f) => {
-      const base = { id: idHelpers.prefixYt(f.artistId), following: true };
-      const parsedRow = parseArtistMeta(f.meta);
-      const meta = parsedRow ?? artistCatalogMap.get(f.artistId);
+  const followed = await mapLimit(follows, PIPED_LOOKUP_CONCURRENCY, async (f) => {
+    const base = { id: idHelpers.prefixYt(f.artistId), following: true };
+    const parsedRow = parseArtistMeta(f.meta);
+    const meta = parsedRow ?? artistCatalogMap.get(f.artistId);
 
-      if (meta) {
-        return {
-          id: base.id,
-          name: meta.name,
-          albumCount: 0,
-          localTrackCount: 0,
-          following: true,
-          monthlyListeners: meta.monthlyListeners ?? null,
-          thumbnail: meta.thumbnail || `/api/v1/artists/${base.id}/artwork`,
-        };
-      }
+    if (meta) {
+      return {
+        id: base.id,
+        name: meta.name,
+        albumCount: 0,
+        localTrackCount: 0,
+        following: true,
+        monthlyListeners: meta.monthlyListeners ?? null,
+        thumbnail: meta.thumbnail || `/api/v1/artists/${base.id}/artwork`,
+      };
+    }
 
-      try {
-        const channel = await CachedPiped.channel(f.artistId);
-        const normalized = normalizeChannelToArtist(channel, f.artistId);
-        await rememberCatalogItem('artist', f.artistId, normalized);
-        return { ...normalized, ...base };
-      } catch {
-        return { ...base, name: 'Unavailable artist', albumCount: 0, localTrackCount: 0 };
-      }
-    }),
-  );
+    try {
+      const channel = await CachedPiped.channel(f.artistId);
+      const normalized = normalizeChannelToArtist(channel, f.artistId);
+      await rememberCatalogItem('artist', f.artistId, normalized);
+      return { ...normalized, ...base };
+    } catch {
+      return { ...base, name: 'Unavailable artist', albumCount: 0, localTrackCount: 0 };
+    }
+  });
 
   // 2. Artists from liked / playlisted songs: row meta -> catalog_items -> Piped
   const [favs, listed] = await Promise.all([
@@ -325,18 +383,16 @@ meRouter.get('/library/artists', async (req, res) => {
 
   // Only call Piped for ids it knows nothing about
   if (missingTrackIds.length > 0) {
-    const streams = await Promise.all(
-      missingTrackIds.map(async (id) => {
-        try {
-          const s = await CachedPiped.getStream(id);
-          const rawTrack = normalizeStreamToTrack(s, id);
-          await rememberCatalogItem('track', id, toCatalogTrackData(rawTrack));
-          return { id, stream: s };
-        } catch {
-          return null;
-        }
-      }),
-    );
+    const streams = await mapLimit(missingTrackIds, PIPED_LOOKUP_CONCURRENCY, async (id) => {
+      try {
+        const s = await CachedPiped.getStream(id);
+        const rawTrack = normalizeStreamToTrack(s, id);
+        await rememberCatalogItem('track', id, toCatalogTrackData(rawTrack));
+        return { id, stream: s };
+      } catch {
+        return null;
+      }
+    });
 
     for (const item of streams) {
       if (!item) continue;
@@ -398,6 +454,21 @@ meRouter.get('/favourites/tracks', async (req, res) => {
   res.json({
     items,
     meta: { total: items.length },
+  });
+});
+
+// Ids only, for the apps' heart state: no metadata lookups, no Piped.
+meRouter.get('/favourites/ids', async (req, res) => {
+  const rows = await db
+    .select({ trackRefKind: favouriteTracks.trackRefKind, trackRefId: favouriteTracks.trackRefId })
+    .from(favouriteTracks)
+    .where(eq(favouriteTracks.userId, req.user!.id))
+    .orderBy(desc(favouriteTracks.addedAt));
+
+  res.json({
+    ids: rows.map((r) =>
+      r.trackRefKind === 'server' ? idHelpers.prefixYt(r.trackRefId) : idHelpers.prefixLocal(r.trackRefId),
+    ),
   });
 });
 
@@ -583,7 +654,8 @@ meRouter.get('/playlists', async (req, res) => {
     .from(playlists)
     .leftJoin(playlistTracks, eq(playlists.id, playlistTracks.playlistId))
     .where(eq(playlists.userId, req.user!.id))
-    .groupBy(playlists.id, playlists.name, playlists.description, playlists.kind, playlists.updatedAt);
+    .groupBy(playlists.id, playlists.name, playlists.description, playlists.kind, playlists.updatedAt)
+    .orderBy(sql`lower(${playlists.name}) asc`, playlists.createdAt);
 
   res.json({
     items: list.map((p) => ({
@@ -671,7 +743,7 @@ meRouter.get('/playlists/:id/tracks', async (req, res) => {
     .select()
     .from(playlistTracks)
     .where(eq(playlistTracks.playlistId, p.id))
-    .orderBy(playlistTracks.position);
+    .orderBy(playlistTracks.position, playlistTracks.id);
 
   const items = await hydrateTracks(
     req.user!.id,
@@ -683,20 +755,19 @@ meRouter.get('/playlists/:id/tracks', async (req, res) => {
   );
 
   res.json({
-    items,
+    items: items.map((item, i) => ({ ...item, entryId: rows[i].id })),
     meta: { total: items.length },
   });
 });
 
 meRouter.patch('/playlists/:id', async (req, res) => {
   const { name, description } = parseBody(updatePlaylistSchema, req);
+  const set: { name?: string; description?: string | null; updatedAt: Date } = { updatedAt: new Date() };
+  if (name !== undefined) set.name = name;
+  if (description !== undefined) set.description = description === '' ? null : description;
   const [updated] = await db
     .update(playlists)
-    .set({
-      name: name || undefined,
-      description: description || undefined,
-      updatedAt: new Date(),
-    })
+    .set(set)
     .where(and(eq(playlists.id, req.params.id), eq(playlists.userId, req.user!.id)))
     .returning();
 
@@ -730,38 +801,37 @@ meRouter.delete('/playlists/:id', async (req, res) => {
 
 meRouter.post('/playlists/:id/tracks', async (req, res) => {
   const { trackIds, metas = {} } = parseBody(addTracksSchema, req);
+  const playlistId = req.params.id;
 
-  const [p] = await db
-    .select()
-    .from(playlists)
-    .where(and(eq(playlists.id, req.params.id), eq(playlists.userId, req.user!.id)))
-    .limit(1);
-
-  if (!p) {
+  if (!(await ownsPlaylist(req.user!.id, playlistId))) {
     res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Playlist not found' } });
     return;
   }
 
-  const current = await db.select().from(playlistTracks).where(eq(playlistTracks.playlistId, p.id));
-  let pos = current.length;
-
-  for (const fullId of trackIds) {
-    const isYt = String(fullId).startsWith('yt:');
-    const kind = isYt ? 'server' : 'local';
-    const trackRefId = isYt ? idHelpers.extractYtId(fullId) : String(fullId).replace(/^local:/, '');
-    const rawMeta = metas[fullId] ?? metas[trackRefId];
-    const parsedMeta = parseTrackMeta(rawMeta);
-
-    await db.insert(playlistTracks).values({
-      playlistId: p.id,
-      position: pos++,
-      trackRefKind: kind,
-      trackRefId,
-      meta: parsedMeta || null,
-    });
-  }
-
-  await db.update(playlists).set({ updatedAt: new Date() }).where(eq(playlists.id, p.id));
+  await db.transaction(async (tx) => {
+    const [{ max }] = await tx
+      .select({ max: sql<number>`coalesce(max(${playlistTracks.position}), -1)::int` })
+      .from(playlistTracks)
+      .where(eq(playlistTracks.playlistId, playlistId));
+    if (trackIds.length > 0) {
+      const rows = trackIds.map((fullId, i) => {
+        const isYt = String(fullId).startsWith('yt:');
+        const kind = isYt ? 'server' : 'local';
+        const trackRefId = isYt ? idHelpers.extractYtId(fullId) : String(fullId).replace(/^local:/, '');
+        const rawMeta = metas[fullId] ?? metas[trackRefId];
+        const parsedMeta = parseTrackMeta(rawMeta);
+        return {
+          playlistId,
+          position: max + 1 + i,
+          trackRefKind: kind,
+          trackRefId,
+          meta: parsedMeta || null,
+        };
+      });
+      await tx.insert(playlistTracks).values(rows);
+    }
+    await tx.update(playlists).set({ updatedAt: new Date() }).where(eq(playlists.id, playlistId));
+  });
   res.json({ ok: true });
 });
 
@@ -776,68 +846,94 @@ const ownsPlaylist = async (userId: string, playlistId: string): Promise<boolean
 };
 
 meRouter.delete('/playlists/:id/tracks', async (req, res) => {
-  const { index, trackIds } = parseBody(removeTracksSchema, req);
+  const { entryIds, index, trackIds } = parseBody(removeTracksSchema, req);
   const playlistId = req.params.id;
   if (!(await ownsPlaylist(req.user!.id, playlistId))) {
     res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Playlist not found' } });
     return;
   }
 
-  if (index !== undefined) {
-    await db
-      .delete(playlistTracks)
-      .where(and(eq(playlistTracks.playlistId, playlistId), eq(playlistTracks.position, index)));
-  } else if (trackIds) {
-    for (const id of trackIds) {
-      const rawId = id.startsWith('yt:') ? idHelpers.extractYtId(id) : id.replace(/^local:/, '');
-      await db
+  await db.transaction(async (tx) => {
+    if (entryIds) {
+      await tx
         .delete(playlistTracks)
-        .where(and(eq(playlistTracks.playlistId, playlistId), eq(playlistTracks.trackRefId, rawId)));
+        .where(and(eq(playlistTracks.playlistId, playlistId), inArray(playlistTracks.id, entryIds)));
+    } else if (index !== undefined) {
+      await tx
+        .delete(playlistTracks)
+        .where(and(eq(playlistTracks.playlistId, playlistId), eq(playlistTracks.position, index)));
+    } else if (trackIds) {
+      const rawIds = trackIds.map((id) =>
+        String(id).startsWith('yt:') ? idHelpers.extractYtId(id) : String(id).replace(/^local:/, ''),
+      );
+      await tx
+        .delete(playlistTracks)
+        .where(and(eq(playlistTracks.playlistId, playlistId), inArray(playlistTracks.trackRefId, rawIds)));
     }
-  }
 
-  // Re-index remaining positions
-  const remaining = await db
-    .select()
-    .from(playlistTracks)
-    .where(eq(playlistTracks.playlistId, playlistId))
-    .orderBy(playlistTracks.position);
-
-  for (let i = 0; i < remaining.length; i++) {
-    if (remaining[i].position !== i) {
-      await db.update(playlistTracks).set({ position: i }).where(eq(playlistTracks.id, remaining[i].id));
-    }
-  }
-
-  await db.update(playlists).set({ updatedAt: new Date() }).where(eq(playlists.id, playlistId));
+    await tx.execute(sql`
+      UPDATE playlist_tracks p SET position = r.rn
+      FROM (
+        SELECT id, row_number() OVER (ORDER BY position, id) - 1 AS rn
+        FROM playlist_tracks WHERE playlist_id = ${playlistId}
+      ) r
+      WHERE p.id = r.id AND p.position <> r.rn
+    `);
+    await tx.update(playlists).set({ updatedAt: new Date() }).where(eq(playlists.id, playlistId));
+  });
   res.json({ ok: true });
 });
 
 meRouter.patch('/playlists/:id/tracks/order', async (req, res) => {
-  const { from, to } = parseBody(reorderSchema, req);
+  const { from, to, entryId } = parseBody(reorderSchema, req);
 
   const playlistId = req.params.id;
   if (!(await ownsPlaylist(req.user!.id, playlistId))) {
     res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Playlist not found' } });
     return;
   }
-  const tracks = await db
-    .select()
-    .from(playlistTracks)
-    .where(eq(playlistTracks.playlistId, playlistId))
-    .orderBy(playlistTracks.position);
 
-  if (tracks[from] && tracks[to]) {
-    // Reorder in memory and update positions
-    const [moved] = tracks.splice(from, 1);
-    tracks.splice(to, 0, moved);
-
-    for (let i = 0; i < tracks.length; i++) {
-      await db.update(playlistTracks).set({ position: i }).where(eq(playlistTracks.id, tracks[i].id));
+  let notFound = false;
+  await db.transaction(async (tx) => {
+    const rows = await tx
+      .select({ id: playlistTracks.id, position: playlistTracks.position })
+      .from(playlistTracks)
+      .where(eq(playlistTracks.playlistId, playlistId))
+      .orderBy(playlistTracks.position, playlistTracks.id);
+    let fromIndex = from;
+    if (entryId) {
+      fromIndex = rows.findIndex((r) => r.id === entryId);
+      if (fromIndex === -1) {
+        notFound = true;
+        return;
+      }
     }
-  }
+    if (fromIndex === undefined) {
+      notFound = true;
+      return;
+    }
+    if (!rows[fromIndex] || to < 0 || to >= rows.length) {
+      return;
+    }
+    const reordered = rows.slice();
+    const [moved] = reordered.splice(fromIndex, 1);
+    reordered.splice(to, 0, moved);
+    const moves = sql.join(
+      reordered.map((r, i) => sql`(${r.id}::uuid, ${i}::int)`),
+      sql`, `,
+    );
+    await tx.execute(sql`
+      UPDATE playlist_tracks AS p SET position = v.pos
+      FROM (VALUES ${moves}) AS v(id, pos)
+      WHERE p.id = v.id AND p.position <> v.pos
+    `);
+    await tx.update(playlists).set({ updatedAt: new Date() }).where(eq(playlists.id, playlistId));
+  });
 
-  await db.update(playlists).set({ updatedAt: new Date() }).where(eq(playlists.id, playlistId));
+  if (notFound) {
+    res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Playlist entry not found' } });
+    return;
+  }
   res.json({ ok: true });
 });
 
@@ -920,6 +1016,7 @@ meRouter.get('/player-state', async (req, res) => {
     index: state?.index || 0,
     shuffle: state?.shuffle || false,
     repeat: state?.repeat || 'off',
+    updatedAt: state?.updatedAt ? state.updatedAt.getTime() : 0,
   });
 });
 
@@ -959,8 +1056,8 @@ const QUALITIES = ['low', 'normal', 'high'] as const;
 const DOWNLOAD_FORMATS = ['opus', 'm4a'] as const;
 
 const DEFAULT_SETTINGS = {
-  eqPreset: 'Flat',
-  gapless: false,
+  eqPreset: 'Sonare',
+  gapless: true,
   normalization: true,
   downloadQuality: 'high',
   stayOffline: false,

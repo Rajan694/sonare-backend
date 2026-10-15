@@ -12,12 +12,12 @@ import { placeholderPeaks, resamplePeaks, CANONICAL_BARS } from '../services/pea
 import { BadRequestError, NoAudioStreamError } from '../errors.js';
 import { getUserTrackFields } from '../db/userData.js';
 import { db } from '../db/index.js';
-import type { PipedStream } from '../upstream/piped.types.js';
 import { playlistTracks } from '../db/schema.js';
 import { rememberCatalogItem, toCatalogTrackData } from '../services/catalogMeta.js';
 import { requireAuth } from '../middleware/auth.js';
 import { createRateLimiter } from '../middleware/rateLimit.js';
 import { parseBody } from '../validation.js';
+import { selectBestAudioStream } from '../shared/catalog/streams.js';
 import { z } from 'zod';
 
 // Media: track details, artwork, image proxy, stream urls, the stream relay and peaks.
@@ -26,110 +26,10 @@ export const mediaRouter = Router();
 // Stream URL -> working replacement, for URLs the relay found dead (see /stream/:token).
 const replacedStreamUrls = new LRUCache<string, string>({ max: 500, ttl: 3600_000 });
 
-interface SelectedStream {
-  url: string;
-  itag: number;
-  mimeType: string;
-  codec: string;
-  bitrate: number;
-  contentLength: number;
-  muxed: boolean;
-}
-
-const selectBestAudioStream = (
-  audios: PipedStream[] | undefined,
-  quality: string,
-  format?: string,
-  videoStreams?: PipedStream[],
-): SelectedStream | null => {
-  // If adaptive audio streams exist, adaptive audio must still win
-  if (audios && audios.length > 0) {
-    const sorted = audios.slice().sort((a, b) => b.bitrate - a.bitrate);
-    const isOpus = (s: PipedStream) =>
-      s.codec?.toLowerCase().includes('opus') ||
-      s.format?.toLowerCase().includes('opus') ||
-      s.codec?.toLowerCase().includes('webm') ||
-      s.format?.toLowerCase().includes('webm');
-    const isAac = (s: PipedStream) =>
-      s.codec?.toLowerCase().includes('mp4a') ||
-      s.format?.toLowerCase().includes('m4a') ||
-      s.codec?.toLowerCase().includes('m4a') ||
-      s.format?.toLowerCase().includes('mp4a');
-
-    // `low`, `auto` and `high` are bitrate ceilings. `normal` is the middle tier of the format:
-    // YouTube's Opus comes in ~60 / ~75 / ~150 kbps and AAC in ~50 / ~128, so a ceiling
-    // can't tell "normal" from "high" (both would be the ~160 kbps Opus).
-    const targets: Record<string, number> = { low: 64_000, auto: 160_000, high: Infinity };
-    const pick = (list: PipedStream[]) => {
-      if (list.length === 0) return undefined;
-      if (quality === 'normal') {
-        const tiers = [...new Set(list.map((s) => s.itag))].reverse(); // lowest bitrate first
-        const middle = tiers[Math.floor(tiers.length / 2)];
-        return list.find((s) => s.itag === middle);
-      }
-      const target = targets[quality] ?? targets.auto;
-      return list.find((s) => s.bitrate <= target) ?? list[list.length - 1];
-    };
-
-    // Contract 8.2 says prefer opus and fall back to mp4a only when there is no opus. An
-    // explicit format is tried first at any bitrate before the other one is considered.
-    const order = format === 'mp4a' || format === 'm4a' ? [isAac, isOpus] : [isOpus, isAac];
-    const best = pick(sorted.filter(order[0])) ?? pick(sorted.filter(order[1])) ?? pick(sorted);
-
-    if (best) {
-      let mappedCodec = best.codec;
-      if (best.codec?.toLowerCase().includes('opus') || best.format?.toLowerCase().includes('opus'))
-        mappedCodec = 'OPUS';
-      else if (
-        best.codec?.toLowerCase().includes('mp4a') ||
-        best.format?.toLowerCase().includes('m4a') ||
-        best.format?.toLowerCase().includes('mp4a') ||
-        best.codec?.toLowerCase().includes('aac')
-      )
-        mappedCodec = 'AAC';
-
-      return {
-        url: best.url,
-        itag: best.itag,
-        mimeType: best.mimeType,
-        codec: mappedCodec || 'OPUS',
-        bitrate: best.bitrate,
-        contentLength: best.contentLength,
-        muxed: false,
-      };
-    }
-  }
-
-  // Fallback to muxed progressive video streams containing audio when audioStreams is empty.
-  // The muxed itag-18 stream is roughly 616 kbps of video plus only 48 kbps of AAC audio,
-  // so we download about thirteen times the bytes we need and get noticeably worse audio
-  // than a proper adaptive opus stream. It exists so playback works while the upstream
-  // extractor cannot produce adaptive audio formats, and it should stop being used the
-  // moment audioStreams comes back non-empty.
-  if (videoStreams && videoStreams.length > 0) {
-    const muxed = videoStreams.filter((s) => s.videoOnly === false || s.itag === 18);
-    if (muxed.length > 0) {
-      // Prefer the smallest such stream since we only want the audio
-      const sortedMuxed = muxed.slice().sort((a, b) => {
-        const aVal = a.bitrate > 0 ? a.bitrate : a.contentLength > 0 ? a.contentLength : Infinity;
-        const bVal = b.bitrate > 0 ? b.bitrate : b.contentLength > 0 ? b.contentLength : Infinity;
-        return aVal - bVal;
-      });
-      const chosen = sortedMuxed[0];
-      return {
-        url: chosen.url,
-        itag: chosen.itag,
-        mimeType: chosen.mimeType || 'video/mp4',
-        codec: 'AAC',
-        bitrate: chosen.bitrate || 48_000,
-        contentLength: chosen.contentLength,
-        muxed: true,
-      };
-    }
-  }
-
-  return null;
-};
+// The stream picker is the apps' own (shared/catalog/streams.ts, copied into src/shared), so the
+// relay and in-app YouTube choose the same format. The muxed itag-18 fallback is roughly
+// 616 kbps of video plus only 48 kbps of AAC: it only keeps playback going while the extractor
+// can't produce adaptive audio.
 
 // Large thumbnails aren't guaranteed: maxresdefault and hq720 are missing for some videos,
 // and a client (the lock screen especially) can't fall back on its own. Probe once per video.
@@ -382,8 +282,9 @@ mediaRouter.put('/tracks/:id/peaks', requireAuth, async (req, res) => {
     return;
   }
 
-  await PermanentCache.setPeaks(rawId, peaks);
-  res.status(201).json({ stored: true });
+  // Two devices uploading at once: the first insert wins.
+  const stored = await PermanentCache.setPeaks(rawId, peaks);
+  res.status(stored ? 201 : 200).json({ stored });
 });
 
 mediaRouter.get('/stream/:token', async (req, res) => {
