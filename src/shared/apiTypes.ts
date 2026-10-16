@@ -150,6 +150,55 @@ export interface AppConfig {
   inAppYoutube: boolean;
   youtubeClients: string[];
   updatedAt: number;
+  /**
+   * At least one AI provider the admin enabled is answering. False (or missing, on an older
+   * backend) hides every AI feature; the apps show nothing in their place.
+   */
+  ai?: boolean;
+}
+
+// ---- AI (the backend asks an LLM; the apps find the songs with their own search) ----
+
+/** A song the AI suggested, by name only: the apps look it up with their usual search. */
+export interface AiPick {
+  title: string;
+  artist: string;
+  /** A short "because ..." line, when the AI gave one. */
+  reason?: string;
+}
+
+/** GET /me/ai/you-may-like. `picks` is empty when the listening history is too short. */
+export interface AiYouMayLike {
+  picks: AiPick[];
+  /** The artists the picks were based on, most played first. */
+  basedOn: string[];
+  generatedAt: number;
+}
+
+/** GET /ai/search?q=: what to search for to answer a request in plain words. */
+export interface AiSearchPlan {
+  /** Up to 4 ordinary search queries, best first. */
+  queries: string[];
+  /** One line on how the request was read, e.g. "Sad Punjabi songs from the 2010s". */
+  summary?: string;
+}
+
+/** POST /me/ai/playlist: a playlist the AI drafted. Nothing is saved until the app creates it. */
+export interface AiPlaylistDraft {
+  name: string;
+  description: string;
+  picks: AiPick[];
+}
+
+/** A cleaner title and artist for a YouTube upload (POST /ai/titles), keyed by raw video id. */
+export interface AiTitleFix {
+  title: string;
+  artist: string;
+}
+
+/** POST /ai/titles answer: fixes the backend already has. The rest are worked out later; ask again. */
+export interface AiTitleFixes {
+  fixes: Record<string, AiTitleFix>;
 }
 
 // Catalog metadata for tracks, albums, and artists stored in row metadata or catalog_items table.

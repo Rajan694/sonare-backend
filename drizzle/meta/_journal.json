@@ -106,6 +106,13 @@
       "when": 1792015593023,
       "tag": "0014_waveforms_lyrics_cache",
       "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1792097927138,
+      "tag": "0015_ai_providers_usage",
+      "breakpoints": true
     }
   ]
 }

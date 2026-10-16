@@ -4,6 +4,8 @@ import { db } from '../db/index.js';
 import { errorLogs, refreshTokens, requestLogs } from '../db/schema.js';
 import { logger } from '../logger.js';
 import { pruneLyricsCache } from './cache.js';
+import { pruneCatalogItems } from './catalogMeta.js';
+import { prunePlayHistory } from './playHistory.js';
 
 // Request logs and error logs for the admin page. Both are buffered in memory and written in
 // batches, so logging never adds a query to the request it describes.
@@ -15,7 +17,11 @@ export const CLIENTS = ['web', 'linux', 'mobile'] as const;
 export type ClientName = (typeof CLIENTS)[number];
 export type ErrorSource = 'backend' | ClientName;
 
-const REQUEST_LOG_DAYS = 30;
+/**
+ * Request logs are kept by size, not age: the newest this many. A row is about 127 bytes with
+ * its indexes (measured on Neon), so this is about 250 MB of the free plan's 0.5 GB.
+ */
+export const REQUEST_LOG_MAX_ROWS = 2_100_000;
 const ERROR_LOG_DAYS = 90;
 const FLUSH_MS = 5_000;
 const MAX_PENDING_REQUESTS = 5_000;
@@ -209,10 +215,18 @@ export const flushTelemetry = (): Promise<void> => {
   return flushing;
 };
 
+/** Deletes all but the newest `maxRows` request logs. Ids only grow, so the primary key finds them. */
+export const pruneRequestLogs = async (maxRows = REQUEST_LOG_MAX_ROWS): Promise<void> => {
+  await db.execute(sql`
+    DELETE FROM request_logs
+    WHERE id <= (SELECT id FROM request_logs ORDER BY id DESC OFFSET ${maxRows} LIMIT 1)
+  `);
+};
+
 const prune = async () => {
   try {
     const utcNow = sql`(now() AT TIME ZONE 'UTC')`;
-    await db.delete(requestLogs).where(lt(requestLogs.at, sql`${utcNow} - make_interval(days => ${REQUEST_LOG_DAYS})`));
+    await pruneRequestLogs();
     await db
       .delete(errorLogs)
       .where(lt(errorLogs.lastSeenAt, sql`${utcNow} - make_interval(days => ${ERROR_LOG_DAYS})`));
@@ -249,6 +263,10 @@ export const startTelemetry = (): void => {
   setInterval(() => void pruneRefreshTokens(), 6 * 3600_000).unref();
   void pruneLyricsCache();
   setInterval(() => void pruneLyricsCache(), 6 * 3600_000).unref();
+  void prunePlayHistory();
+  setInterval(() => void prunePlayHistory(), 6 * 3600_000).unref();
+  void pruneCatalogItems();
+  setInterval(() => void pruneCatalogItems(), 6 * 3600_000).unref();
 
   // Recorded, then the process still exits as it would have without these handlers.
   const crash = (code: string) => (reason: unknown) => {
