@@ -338,8 +338,8 @@ This document maps all backend test IDs to their specifications, assertions, and
 | `BE-APP-001`    | `GET /api/v1/trending`                    | Returns filtered trending music tracks.                                                    |
 | `BE-APP-002`    | `GET /api/v1/tracks/:id/artwork`          | Redirects to standard track artwork thumbnail.                                             |
 | `BE-APP-003`    | `GET /api/v1/tracks/:id/artwork?size=640` | Redirects to large artwork thumbnail.                                                      |
-| `BE-APP-004`    | `GET /api/v1/albums/:id/artwork`          | Redirects to proxy album cover artwork route.                                              |
-| `BE-APP-005`    | `GET /api/v1/artists/:id/artwork`         | Redirects to artist avatar artwork image route.                                            |
+| `BE-APP-004`    | `GET /api/v1/albums/:id/artwork`          | Redirects to the album cover on the CDN, cacheable for a day.                              |
+| `BE-APP-005`    | `GET /api/v1/artists/:id/artwork`         | Redirects to the artist avatar on the CDN, cacheable for a day.                            |
 | `BE-APP-006`    | `GET /api/v1/image/:token`                | Proxies image buffer with headers from upstream.                                           |
 | `BE-APP-007`    | `GET /api/v1/image/:token`                | Returns 502 when image upstream fails.                                                     |
 | `BE-APP-008`    | `GET /api/v1/lyrics/search`               | Queries LRCLIB search endpoint.                                                            |
@@ -392,7 +392,7 @@ This document maps all backend test IDs to their specifications, assertions, and
 | Test ID            | Description                                    |
 | :----------------- | :--------------------------------------------- |
 | `BE-NORM-001`      | Attaches user metadata fields to tracks.       |
-| `BE-NORM-002`      | Generates proxy image route URL.               |
+| `BE-NORM-002`      | CDN image URL, as a JPEG.                      |
 | `BE-NORM-003`      | Normalizes full Piped stream to track shape.   |
 | `BE-NORM-004`      | Handles track with missing uploader.           |
 | `BE-NORM-005`      | Converts search item to track shape.           |

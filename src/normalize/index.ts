@@ -1,8 +1,8 @@
 import { LRUCache } from 'lru-cache';
-import { signStreamToken } from '../services/token.js';
 import { PermanentCache } from '../services/cache.js';
 import { directImageUrl } from '../upstream/ytImages.js';
 import { setCatalogImages } from '../shared/catalog/normalize.js';
+import { jpegImageUrl } from '../shared/catalog/images.js';
 
 // The normalizers themselves are the apps' own (sonare-frontend/shared/catalog/normalize.ts,
 // copied into src/shared by the root repo's scripts/sync-shared-catalog.mjs), so the backend
@@ -44,17 +44,21 @@ export const albumThumbFor = async (rawId: string): Promise<string | undefined> 
   return stored;
 };
 
-/** A 30-day image token; the backend fetches the image straight from Google's CDN. */
-export const proxyImageUrl = (url: string | undefined): string | undefined => {
+/**
+ * An image's address on Google's CDN, where the apps load it from directly: it is cached there
+ * and in the browser (a day), and the bytes don't pass through this server. /image/:token still
+ * answers the signed urls handed out before 2026-10-17.
+ */
+export const cdnImageUrl = (url: string | undefined): string | undefined => {
   if (!url) return undefined;
-  return `/api/v1/image/${signStreamToken(directImageUrl(url), 30 * 24 * 3600 * 1000)}`;
+  return jpegImageUrl(directImageUrl(url));
 };
 
 setCatalogImages({
   track: (videoId) => `/api/v1/tracks/yt:${videoId}/artwork`,
-  artist: (ytid, raw) => (ytid !== 'yt:unknown' ? `/api/v1/artists/${ytid}/artwork` : proxyImageUrl(raw)),
+  artist: (ytid, raw) => (ytid !== 'yt:unknown' ? `/api/v1/artists/${ytid}/artwork` : cdnImageUrl(raw)),
   album: (ytid, raw) => {
     rememberAlbumThumb(ytid.replace(/^yt:/, ''), raw);
-    return ytid !== 'yt:unknown' ? `/api/v1/albums/${ytid}/artwork` : proxyImageUrl(raw);
+    return ytid !== 'yt:unknown' ? `/api/v1/albums/${ytid}/artwork` : cdnImageUrl(raw);
   },
 });
