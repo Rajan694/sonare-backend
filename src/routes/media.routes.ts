@@ -3,7 +3,7 @@ import { eq } from 'drizzle-orm';
 import { request } from 'undici';
 import { LRUCache } from 'lru-cache';
 import { CachedPiped, PermanentCache } from '../services/cache.js';
-import { normalizeStreamToTrack, albumThumbFor, proxyImageUrl } from '../normalize/index.js';
+import { normalizeStreamToTrack, albumThumbFor, cdnImageUrl } from '../normalize/index.js';
 import { directImageUrl, ytThumbUrl, type YtThumbName } from '../upstream/ytImages.js';
 import { pipedAuthHeaders, pipedMediaUrl } from '../upstream/piped.js';
 import { idHelpers } from '../ids.js';
@@ -78,6 +78,15 @@ mediaRouter.get('/tracks/:id', async (req, res) => {
   res.json(track);
 });
 
+/**
+ * Artwork routes answer with a redirect to the image on Google's CDN. The browser keeps the
+ * redirect for `maxAgeS`, so a cover shown again costs neither a request here nor a download.
+ */
+const redirectToImage = (res: Response, url: string, maxAgeS = 24 * 3600) => {
+  res.setHeader('Cache-Control', `public, max-age=${maxAgeS}`);
+  res.redirect(302, url);
+};
+
 mediaRouter.get('/tracks/:id/artwork', async (req, res) => {
   const { size } = req.query;
   const rawId = idHelpers.extractYtId(req.params.id);
@@ -86,7 +95,7 @@ mediaRouter.get('/tracks/:id/artwork', async (req, res) => {
   // artwork. mqdefault is 16:9 without bars and exists for every video.
   const thumbRes = size === '640' ? await largestThumb(rawId) : 'mqdefault';
 
-  res.redirect(302, ytThumbUrl(rawId, thumbRes));
+  redirectToImage(res, ytThumbUrl(rawId, thumbRes));
 });
 
 const handlePlaylistArtwork = async (req: Request<{ id: string }>, res: Response) => {
@@ -107,7 +116,8 @@ const handlePlaylistArtwork = async (req: Request<{ id: string }>, res: Response
 
       if (firstTrack && firstTrack.kind === 'server') {
         const thumbSize = size ? `?size=${size}` : '';
-        res.redirect(302, `/api/v1/tracks/yt:${firstTrack.refId}/artwork${thumbSize}`);
+        // A playlist's cover follows its first song, which can change: kept for a few minutes only.
+        redirectToImage(res, `/api/v1/tracks/yt:${firstTrack.refId}/artwork${thumbSize}`, 300);
         return;
       }
     } catch {}
@@ -139,7 +149,7 @@ const handlePlaylistArtwork = async (req: Request<{ id: string }>, res: Response
       thumbUrl = thumbUrl.replace(/=s\d+/, `=s${targetSize}`).replace(/=w\d+-h\d+/, `=w${targetSize}-h${targetSize}`);
     }
 
-    res.redirect(302, proxyImageUrl(thumbUrl)!);
+    redirectToImage(res, cdnImageUrl(thumbUrl)!);
   } catch {
     res.status(404).end();
   }
@@ -164,7 +174,7 @@ mediaRouter.get('/artists/:id/artwork', async (req, res) => {
       avatarUrl = avatarUrl.replace(/=s\d+/, `=s${targetSize}`).replace(/=w\d+-h\d+/, `=w${targetSize}-h${targetSize}`);
     }
 
-    res.redirect(302, proxyImageUrl(avatarUrl)!);
+    redirectToImage(res, cdnImageUrl(avatarUrl)!);
   } catch {
     res.status(404).end();
   }

@@ -35,6 +35,8 @@ describe('Public app-config', () => {
       inAppYoutube: true,
       youtubeClients: DEFAULT_YOUTUBE_CLIENTS,
       updatedAt: 0,
+      // No AI provider set up.
+      ai: false,
     });
   });
 

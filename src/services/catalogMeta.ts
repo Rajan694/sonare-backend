@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { db } from '../db/index.js';
 import { catalogItems } from '../db/schema.js';
-import { eq, and, inArray } from 'drizzle-orm';
+import { eq, and, inArray, sql } from 'drizzle-orm';
 import { logger } from '../logger.js';
 import { idHelpers } from '../ids.js';
 
@@ -180,6 +180,26 @@ export const rememberCatalogItem = async (kind: CatalogKind, id: string, data: u
       });
   } catch (err) {
     logger.warn({ err, kind, id }, 'Failed to remember catalog item');
+  }
+};
+
+/** Most catalog rows kept (like lyrics_cache): the least recently written go beyond this. */
+export const CATALOG_ITEMS_MAX_ROWS = 50_000;
+
+/**
+ * Drops the rows past the newest `maxRows` by updated_at. Songs in favourites and playlists keep
+ * their own copy of the metadata in their rows, so a pruned row costs at most a Piped lookup.
+ * Logged, never thrown.
+ */
+export const pruneCatalogItems = async (maxRows = CATALOG_ITEMS_MAX_ROWS): Promise<void> => {
+  try {
+    await db.execute(sql`
+      DELETE FROM catalog_items WHERE (kind, id) IN (
+        SELECT kind, id FROM catalog_items ORDER BY updated_at DESC OFFSET ${maxRows}
+      )
+    `);
+  } catch (err) {
+    logger.warn({ err }, 'Could not prune catalog items');
   }
 };
 

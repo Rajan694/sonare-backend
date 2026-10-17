@@ -4,6 +4,12 @@ dotenv.config({ quiet: true });
 
 const DEV_JWT_SECRET = '__sonare_dev_secret__';
 
+/** `KEY=` in a .env file means not set. */
+const optionalSecret = z.preprocess(
+  (v) => (typeof v === 'string' && v.trim() === '' ? undefined : v),
+  z.string().optional(),
+);
+
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
   PORT: z.coerce.number().default(3010),
@@ -36,6 +42,15 @@ const envSchema = z.object({
     .regex(/^[\w.-]+\/[\w.-]+$/)
     .default('Rajan694/sonare'),
   GITHUB_TOKEN: z.string().optional(),
+  // AI providers (services/ai). Each one with a key is added to the admin's AI page on the first
+  // start; from then on the admin page is where they're managed. Any OpenAI-compatible
+  // chat-completions endpoint works.
+  OPENROUTER_API_KEY: optionalSecret,
+  OPENROUTER_BASE_URL: z.string().url().default('https://openrouter.ai/api/v1/chat/completions'),
+  OPENROUTER_MODEL: z.string().default('openrouter/free'),
+  GEMINI_API_KEY: optionalSecret,
+  GEMINI_BASE_URL: z.string().url().default('https://generativelanguage.googleapis.com/v1beta/openai/chat/completions'),
+  GEMINI_MODEL: z.string().default('gemini-3.1-flash-lite'),
 });
 
 export type Config = z.infer<typeof envSchema>;

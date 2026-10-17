@@ -5,7 +5,7 @@ instance. It turns Piped's YouTube data into Sonare's catalog (tracks, albums, a
 playlists), relays audio streams, resolves lyrics (LRCLIB), and stores accounts,
 libraries, playlists, settings and play history in Postgres. Redis caches upstream answers
 and backs the rate limiters. The desktop, web and mobile apps (`sonare-frontend`) all talk
-to it under `/api/v1`; the full contract is [`../docs/api-contract.md`](../docs/api-contract.md).
+to it under `/api/v1`; the response shapes are typed in `src/shared/apiTypes.ts`.
 
 ## Requirements
 

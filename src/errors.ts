@@ -61,6 +61,17 @@ export class MailError extends Error {
   }
 }
 
+export class AiUnavailableError extends Error {
+  public status: number;
+  public code: string;
+  constructor(message: string = "AI isn't available right now.") {
+    super(message);
+    this.name = 'AiUnavailableError';
+    this.status = 503;
+    this.code = 'AI_UNAVAILABLE';
+  }
+}
+
 /** A short reason for a caught error: its code (ECONNREFUSED, …) when it has one, else its message. */
 export const describeError = (e: unknown): string => {
   const code = (e as { code?: unknown } | null)?.code;

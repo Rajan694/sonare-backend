@@ -43,6 +43,23 @@ export const trackThumbUrl = (videoId: string): string => {
 };
 
 /**
+ * Google's image CDN answers an `-rw` option with a near-lossless WebP, about 2.7 times the size
+ * of the JPEG it sends otherwise (155 KB against 57 KB for one 300 px cover). Asks for the JPEG.
+ * String ops only.
+ */
+export function jpegImageUrl(url: string): string;
+export function jpegImageUrl(url: undefined): undefined;
+export function jpegImageUrl(url: string | undefined): string | undefined;
+export function jpegImageUrl(url: string | undefined): string | undefined {
+  if (!url || url.includes('?') || !/^https:\/\/[^/]*(googleusercontent\.com|ggpht\.com)\//.test(url)) return url;
+  const eq = url.lastIndexOf('=');
+  if (eq < 0) return url;
+  const options = url.slice(eq + 1).split('-');
+  if (!options.includes('rw')) return url;
+  return `${url.slice(0, eq + 1)}${options.map((o) => (o === 'rw' ? 'rj' : o)).join('-')}`;
+}
+
+/**
  * Resizes an image URL according to backend rules in handlePlaylistArtwork and artist artwork.
  * String ops only.
  * - Album covers are signed (/s_p/...&rs=...); skip signed `rs=` URLs.
@@ -66,5 +83,5 @@ export function sizedImageUrl(url: string | undefined, size: 64 | 140 | 300 | 64
   }
 
   res = res.replace(/=s\d+/, `=s${size}`).replace(/=w\d+-h\d+/, `=w${size}-h${size}`);
-  return res;
+  return jpegImageUrl(res);
 }
