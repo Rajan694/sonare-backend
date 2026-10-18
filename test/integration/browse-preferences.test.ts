@@ -262,7 +262,7 @@ describe('Browse categories, library artists, lyrics script, cover hints', () =>
     // No Piped intercept: the playlist endpoint would fail the request.
     const res = await request(app).get('/api/v1/albums/yt:PLstored1/artwork?size=140');
     expect(res.status).toBe(302);
-    expect(res.headers.location).toMatch(/^\/api\/v1\/image\//);
+    expect(res.headers.location).toBe('https://lh3.googleusercontent.com/cover=w140-h140-l90-rj');
   });
 
   it('BE-COVER-002: covers seen in search results are written to Redis for 30 days', async () => {

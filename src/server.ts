@@ -5,10 +5,17 @@ import { flushTelemetry, startTelemetry } from './services/telemetry.js';
 import { logger } from './logger.js';
 import { mailConfigured } from './services/mail.js';
 import { loadSettings, pipedApiUrl } from './services/settings.js';
+import { loadAiProviders, seedAiProvidersFromEnv } from './services/ai/providers.js';
+import { startAiHealthChecks } from './services/ai/health.js';
+import { startTitlesWorker } from './services/ai/titles.js';
 
 const start = async () => {
   await verifyDatabase();
   await loadSettings();
+  await loadAiProviders();
+  await seedAiProvidersFromEnv();
+  startAiHealthChecks();
+  startTitlesWorker();
   startTelemetry();
   const app = createApp();
   const server = app.listen(config.PORT, () => {

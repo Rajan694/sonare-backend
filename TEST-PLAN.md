@@ -338,8 +338,8 @@ This document maps all backend test IDs to their specifications, assertions, and
 | `BE-APP-001`    | `GET /api/v1/trending`                    | Returns filtered trending music tracks.                                                    |
 | `BE-APP-002`    | `GET /api/v1/tracks/:id/artwork`          | Redirects to standard track artwork thumbnail.                                             |
 | `BE-APP-003`    | `GET /api/v1/tracks/:id/artwork?size=640` | Redirects to large artwork thumbnail.                                                      |
-| `BE-APP-004`    | `GET /api/v1/albums/:id/artwork`          | Redirects to proxy album cover artwork route.                                              |
-| `BE-APP-005`    | `GET /api/v1/artists/:id/artwork`         | Redirects to artist avatar artwork image route.                                            |
+| `BE-APP-004`    | `GET /api/v1/albums/:id/artwork`          | Redirects to the album cover on the CDN, cacheable for a day.                              |
+| `BE-APP-005`    | `GET /api/v1/artists/:id/artwork`         | Redirects to the artist avatar on the CDN, cacheable for a day.                            |
 | `BE-APP-006`    | `GET /api/v1/image/:token`                | Proxies image buffer with headers from upstream.                                           |
 | `BE-APP-007`    | `GET /api/v1/image/:token`                | Returns 502 when image upstream fails.                                                     |
 | `BE-APP-008`    | `GET /api/v1/lyrics/search`               | Queries LRCLIB search endpoint.                                                            |
@@ -392,7 +392,7 @@ This document maps all backend test IDs to their specifications, assertions, and
 | Test ID            | Description                                    |
 | :----------------- | :--------------------------------------------- |
 | `BE-NORM-001`      | Attaches user metadata fields to tracks.       |
-| `BE-NORM-002`      | Generates proxy image route URL.               |
+| `BE-NORM-002`      | CDN image URL, as a JPEG.                      |
 | `BE-NORM-003`      | Normalizes full Piped stream to track shape.   |
 | `BE-NORM-004`      | Handles track with missing uploader.           |
 | `BE-NORM-005`      | Converts search item to track shape.           |
@@ -645,3 +645,44 @@ with the first problem as the message, and nothing is written.
 | `BE-PEAK-010` | `PUT /api/v1/tracks/:id/peaks` validation  | Rejects invalid bodies (149/151 bars, NaN, >1, <0, missing) with 400 Bad Request.                                  |
 | `BE-PEAK-011` | `GET /api/v1/tracks/:id/peaks` pinned      | GET with ?bars=8 returns pinned placeholder literal and placeholder:true.                                          |
 | `BE-PEAK-012` | `GET /api/v1/tracks/:id/peaks` kept        | A stored waveform outlives Redis (Postgres, one byte per bar); first upload still wins.                            |
+
+## 11. AI features and storage caps
+
+| ID           | File                                   | Checks                                                                                        |
+| ------------ | -------------------------------------- | --------------------------------------------------------------------------------------------- |
+| `BE-AI-001`  | `test/unit/aiLlm.test.ts`              | backoff grows 2, 5, 15, 30, 60 min and stays at 60                                            |
+| `BE-AI-002`  | `test/unit/aiLlm.test.ts`              | requestedWaitMs reads Retry-After, X-RateLimit-Reset and Google retryDelay                    |
+| `BE-AI-003`  | `test/unit/aiLlm.test.ts`              | errorMessage finds the provider's message in its usual shapes                                 |
+| `BE-AI-004`  | `test/unit/aiLlm.test.ts`              | parseJsonObject takes the object out of fences and chatter, else null                         |
+| `BE-AI-005`  | `test/integration/aiProviders.test.ts` | providers from the environment are added once; one deleted stays deleted                      |
+| `BE-AI-006`  | `test/integration/aiProviders.test.ts` | a 429 marks the first provider down until its Retry-After, and the second answers             |
+| `BE-AI-007`  | `test/integration/aiProviders.test.ts` | a rejected key is down for an hour; a 400 or an unusable answer moves on without marking down |
+| `BE-AI-008`  | `test/integration/aiProviders.test.ts` | an answer brings a down provider back; the backoff grows with each failure                    |
+| `BE-AI-009`  | `test/integration/aiProviders.test.ts` | none answering, none set up, or all disabled: AiUnavailableError                              |
+| `BE-AI-010`  | `test/integration/aiProviders.test.ts` | GET /app-config says whether AI is available                                                  |
+| `BE-AI-011`  | `test/integration/aiProviders.test.ts` | every call is counted per day, provider and feature, with its tokens                          |
+| `BE-AI-012`  | `test/integration/aiProviders.test.ts` | isCheckDue: unknown, down past its retry, and ok-but-stale are due; disabled never            |
+| `BE-AI-013`  | `test/integration/aiProviders.test.ts` | runDueAiChecks checks only the due ones and counts them as health usage                       |
+| `BE-AI-014`  | `test/integration/aiProviders.test.ts` | a check refused with 400 (a wrong model, say) marks the provider down for an hour             |
+| `BE-AI-015`  | `test/integration/aiRoutes.test.ts`    | the signed-in AI routes answer 401 when signed out                                            |
+| `BE-AI-016`  | `test/integration/aiRoutes.test.ts`    | with no provider answering they answer 503 AI_UNAVAILABLE                                     |
+| `BE-AI-017`  | `test/integration/aiRoutes.test.ts`    | you-may-like with fewer than 5 plays answers no picks without asking the AI                   |
+| `BE-AI-018`  | `test/integration/aiRoutes.test.ts`    | you-may-like sends the listening history, drops listed and repeated songs, and caches         |
+| `BE-AI-019`  | `test/integration/aiRoutes.test.ts`    | search plans are deduped, capped at 4, and cached for everyone by the request text            |
+| `BE-AI-020`  | `test/integration/aiRoutes.test.ts`    | a playlist draft is validated, deduped, and needs 3 songs (else the next provider is asked)   |
+| `BE-AI-021`  | `test/integration/aiRoutes.test.ts`    | playlists are limited to 10 an hour per user                                                  |
+| `BE-AI-022`  | `test/integration/aiRoutes.test.ts`    | /ai/titles answers stored fixes at once, queues the rest, and the worker fills them in        |
+| `BE-AI-023`  | `test/integration/aiRoutes.test.ts`    | /ai/titles validates its input and never answers 503 when AI is down                          |
+| `BE-AI-024`  | `test/integration/aiRoutes.test.ts`    | a provider that answers then gets marked ok, and its latency is kept                          |
+| `BE-AI-025`  | `test/integration/adminAi.test.ts`     | the AI admin routes need an admin token, not a user one                                       |
+| `BE-AI-026`  | `test/integration/adminAi.test.ts`     | adding a provider never returns its key, and checks it right away                             |
+| `BE-AI-027`  | `test/integration/adminAi.test.ts`     | adding validates the fields                                                                   |
+| `BE-AI-028`  | `test/integration/adminAi.test.ts`     | editing a name keeps the key and status; a new key resets it to unknown and re-checks         |
+| `BE-AI-029`  | `test/integration/adminAi.test.ts`     | disabling hides AI when it was the only provider; enabling checks it again                    |
+| `BE-AI-030`  | `test/integration/adminAi.test.ts`     | Check now reports the result and the provider; unknown ids are 404                            |
+| `BE-AI-031`  | `test/integration/adminAi.test.ts`     | providers are reordered with every id once, and deleted                                       |
+| `BE-AI-032`  | `test/integration/adminAi.test.ts`     | /admin/analytics/ai sums calls and tokens by provider, feature and day                        |
+| `BE-CAP-001` | `test/integration/storageCaps.test.ts` | prunePlayHistory keeps each user’s newest plays only                                          |
+| `BE-CAP-002` | `test/integration/storageCaps.test.ts` | a sync that goes past 1000 plays drops that user’s oldest                                     |
+| `BE-CAP-003` | `test/integration/storageCaps.test.ts` | pruneCatalogItems keeps the most recently written rows                                        |
+| `BE-CAP-004` | `test/integration/storageCaps.test.ts` | request logs are kept by count (the newest 2.1 million), not by age                           |

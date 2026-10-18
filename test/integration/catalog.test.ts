@@ -604,7 +604,7 @@ describe('Catalog: trending, artwork & image proxy', () => {
     expect(res.headers.location).toContain('maxresdefault.jpg');
   });
 
-  it('BE-APP-004: GET /api/v1/albums/:id/artwork redirects to proxy image route', async () => {
+  it('BE-APP-004: GET /api/v1/albums/:id/artwork redirects to the cover on the CDN, cacheable for a day', async () => {
     const pipedMock = mockAgent!.get('http://localhost:8090');
     pipedMock
       .intercept({ path: '/playlists/PLalbumArt1', method: 'GET' })
@@ -612,10 +612,11 @@ describe('Catalog: trending, artwork & image proxy', () => {
 
     const res = await request(app).get('/api/v1/albums/yt:PLalbumArt1/artwork?size=300');
     expect(res.status).toBe(302);
-    expect(res.headers.location).toMatch(/^\/api\/v1\/image\//);
+    expect(res.headers.location).toMatch(/^https:\/\//);
+    expect(res.headers['cache-control']).toBe('public, max-age=86400');
   });
 
-  it('BE-APP-005: GET /api/v1/artists/:id/artwork redirects to signed channel avatar image', async () => {
+  it('BE-APP-005: GET /api/v1/artists/:id/artwork redirects to the channel avatar on the CDN', async () => {
     const pipedMock = mockAgent!.get('http://localhost:8090');
     pipedMock
       .intercept({ path: '/channel/UCartistArt1', method: 'GET' })
@@ -623,7 +624,8 @@ describe('Catalog: trending, artwork & image proxy', () => {
 
     const res = await request(app).get('/api/v1/artists/yt:UCartistArt1/artwork?size=140');
     expect(res.status).toBe(302);
-    expect(res.headers.location).toMatch(/^\/api\/v1\/image\//);
+    expect(res.headers.location).toMatch(/^https:\/\//);
+    expect(res.headers['cache-control']).toBe('public, max-age=86400');
   });
 
   it('BE-APP-006: GET /api/v1/image/:token proxies image buffer from upstream', async () => {

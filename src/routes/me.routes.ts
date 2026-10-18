@@ -18,6 +18,7 @@ import { idHelpers } from '../ids.js';
 import { hydrateTracks } from '../db/hydrate.js';
 import { CachedPiped, PIPED_LOOKUP_CONCURRENCY } from '../services/cache.js';
 import { mapLimit } from '../mapLimit.js';
+import { prunePlayHistoryForUser } from '../services/playHistory.js';
 import { normalizeChannelToArtist, normalizePlaylistToAlbum, normalizeStreamToTrack } from '../normalize/index.js';
 import crypto from 'node:crypto';
 import { z } from 'zod';
@@ -973,6 +974,7 @@ meRouter.post('/sync', async (req, res) => {
         });
       }
     });
+    await prunePlayHistoryForUser(req.user!.id);
   }
 
   if (favourites) {

@@ -8,6 +8,7 @@ import type { Channel, ChannelTabItem, Playlist, StreamItem, Streams } from './p
 import type { Track, Album, Artist } from '../apiTypes.js';
 import { idHelpers } from './ids.js';
 import { directImageUrl, trackThumbUrl } from './images.js';
+import { applyTitleFix } from './titleFixes.js';
 
 /**
  * Where artwork urls point. The apps use the CDN directly; the backend points at its own
@@ -90,12 +91,14 @@ export const normalizeStreamToTrack = (
   userFields?: UserTrackFields,
 ): Track & { thumbnail: string } => {
   const durationSec = sanitizeCount(streams.duration);
+  // A cleaner title the AI found for this upload, if any (shared/catalog/titleFixes.ts).
+  const named = applyTitleFix(videoId, stripTitle(streams.title), stripArtist(streams.uploader), streams.uploader);
   return withUserFields(
     {
       id: idHelpers.prefixYt(videoId),
-      title: stripTitle(streams.title),
+      title: named.title,
       artistId: idHelpers.artistIdFromUrl(streams.uploaderUrl),
-      artist: stripArtist(streams.uploader),
+      artist: named.artist,
       albumId: null,
       album: null,
       durationMs: durationSec !== null ? durationSec * 1000 : null,
@@ -119,13 +122,15 @@ export const normalizeStreamItemToTrack = (
   }
 
   const durationSec = sanitizeCount(item.duration);
+  const uploader = item.uploaderName || item.uploader || item.author;
+  const named = applyTitleFix(id, stripTitle(item.title || item.name || ''), stripArtist(uploader), uploader);
 
   return withUserFields(
     {
       id: idHelpers.prefixYt(id),
-      title: stripTitle(item.title || item.name || ''),
+      title: named.title,
       artistId: idHelpers.artistIdFromUrl(item.uploaderUrl),
-      artist: stripArtist(item.uploaderName || item.uploader || item.author),
+      artist: named.artist,
       albumId: null,
       album: null,
       durationMs: durationSec !== null ? durationSec * 1000 : null,

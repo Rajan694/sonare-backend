@@ -9,7 +9,7 @@ import {
   normalizeStreamItemToArtist,
   normalizeStreamItemToTrack,
   normalizeStreamToTrack,
-  proxyImageUrl,
+  cdnImageUrl,
   withUserFields,
 } from '../../src/normalize/index.js';
 
@@ -28,9 +28,14 @@ describe('normalize: Piped → Sonare mapping', () => {
     expect(res.lastPlayedAt).toBe(78910);
   });
 
-  it('BE-NORM-002: proxyImageUrl returns signed image route or undefined', () => {
-    expect(proxyImageUrl(undefined)).toBeUndefined();
-    expect(proxyImageUrl('https://thumb.jpg')).toMatch(/^\/api\/v1\/image\//);
+  it('BE-NORM-002: cdnImageUrl points straight at the CDN, as a JPEG, or is undefined', () => {
+    expect(cdnImageUrl(undefined)).toBeUndefined();
+    expect(cdnImageUrl('http://proxy.local/vi/abc/mqdefault.jpg?host=i.ytimg.com')).toBe(
+      'https://i.ytimg.com/vi/abc/mqdefault.jpg',
+    );
+    expect(cdnImageUrl('https://yt3.googleusercontent.com/cover=w300-h300-l90-rw')).toBe(
+      'https://yt3.googleusercontent.com/cover=w300-h300-l90-rj',
+    );
   });
 
   it('BE-NORM-003: normalizeStreamToTrack transforms full piped stream object', () => {

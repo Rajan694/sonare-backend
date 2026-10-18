@@ -9,6 +9,8 @@ import {
   jsonb,
   index,
   bigserial,
+  bigint,
+  date,
   customType,
 } from 'drizzle-orm/pg-core';
 
@@ -267,6 +269,8 @@ export const catalogItems = pgTable(
   },
   (t) => ({
     pk: primaryKey({ columns: [t.kind, t.id] }),
+    // The newest 50,000 are kept (pruneCatalogItems).
+    updatedAtIdx: index('catalog_items_updated_at_idx').on(t.updatedAt),
   }),
 );
 
@@ -299,5 +303,54 @@ export const lyricsCache = pgTable(
   },
   (t) => ({
     createdIdx: index('lyrics_cache_created_at_idx').on(t.createdAt),
+  }),
+);
+
+// --- AI (services/ai): the LLM providers the admin set up, and what they used.
+
+/**
+ * An OpenAI-compatible chat-completions endpoint, tried in `position` order. `status` is what the
+ * last call or health check found; a `down` provider is skipped until `retryAt`.
+ */
+export const aiProviders = pgTable('ai_providers', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  name: text('name').notNull(),
+  baseUrl: text('base_url').notNull(),
+  apiKey: text('api_key').notNull(),
+  model: text('model').notNull(),
+  enabled: boolean('enabled').default(true).notNull(),
+  position: integer('position').default(0).notNull(),
+  /** ok | down | unknown */
+  status: text('status').default('unknown').notNull(),
+  lastCheckedAt: timestamp('last_checked_at'),
+  lastOkAt: timestamp('last_ok_at'),
+  lastError: text('last_error'),
+  retryAt: timestamp('retry_at'),
+  latencyMs: integer('latency_ms'),
+  /** Failures in a row, for the backoff. */
+  failures: integer('failures').default(0).notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
+/**
+ * Calls and tokens per UTC day, provider and feature, for the admin analytics. No foreign key:
+ * a deleted provider's history stays, under the name it had.
+ */
+export const aiUsageDaily = pgTable(
+  'ai_usage_daily',
+  {
+    day: date('day').notNull(),
+    providerId: uuid('provider_id').notNull(),
+    providerName: text('provider_name').notNull(),
+    /** you-may-like | search | playlist | titles | health */
+    feature: text('feature').notNull(),
+    calls: integer('calls').default(0).notNull(),
+    failures: integer('failures').default(0).notNull(),
+    promptTokens: bigint('prompt_tokens', { mode: 'number' }).default(0).notNull(),
+    completionTokens: bigint('completion_tokens', { mode: 'number' }).default(0).notNull(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.day, t.providerId, t.feature] }),
   }),
 );

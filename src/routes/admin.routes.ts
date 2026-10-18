@@ -11,6 +11,7 @@ import { config } from '../config.js';
 import { createRateLimiter } from '../middleware/rateLimit.js';
 import { Piped } from '../upstream/piped.js';
 import { parseBody } from '../validation.js';
+import { adminAiRouter, aiUsageHandler } from './adminAi.routes.js';
 import {
   pipedApiUrl,
   setPipedApiUrl,
@@ -86,6 +87,10 @@ adminRouter.post('/login', async (req, res) => {
 });
 
 adminRouter.use(requireAdmin);
+
+// AI providers (adminAi.routes.ts); their usage is with the other analytics below.
+adminRouter.use('/ai', adminAiRouter);
+adminRouter.get('/analytics/ai', aiUsageHandler);
 
 // ---- Settings ----
 

@@ -11,6 +11,7 @@ import { mediaRouter } from './routes/media.routes.js';
 import { lyricsRouter } from './routes/lyrics.routes.js';
 import { releasesRouter } from './routes/releases.routes.js';
 import { appConfigRouter } from './routes/appConfig.routes.js';
+import { aiRouter } from './routes/ai.routes.js';
 import { requestLogger } from './services/telemetry.js';
 import { optionalAuth } from './middleware/auth.js';
 import { errorHandler } from './middleware/errorHandler.js';
@@ -86,6 +87,8 @@ export const createApp = () => {
   v1.use(lyricsRouter);
   v1.use(releasesRouter);
   v1.use(appConfigRouter);
+  // After /me: /me/ai/* falls through meRouter (signed in) to here.
+  v1.use(aiRouter);
 
   app.use('/api/v1', v1);
 
