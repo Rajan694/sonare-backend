@@ -705,6 +705,10 @@ with the first problem as the message, and nothing is written.
 | `BE-AI-030`  | `test/integration/adminAi.test.ts`     | Check now reports the result and the provider; unknown ids are 404                            |
 | `BE-AI-031`  | `test/integration/adminAi.test.ts`     | providers are reordered with every id once, and deleted                                       |
 | `BE-AI-032`  | `test/integration/adminAi.test.ts`     | /admin/analytics/ai sums calls and tokens by provider, feature and day                        |
+| `BE-AI-033`  | `test/integration/aiRoutes.test.ts`    | /ai/titles with wait: true resolves missing fixes immediately, stores them, and returns them  |
+| `BE-AI-034`  | `test/integration/aiRoutes.test.ts`    | /ai/titles with wait: true falls back to known fixes without 503 when AI is unavailable       |
+| `BE-AI-035`  | `test/integration/aiRoutes.test.ts`    | /ai/titles with wait: true limits calls to 20 per 10 minutes per user or IP                   |
+| `BE-AI-036`  | `test/integration/aiRoutes.test.ts`    | prompt includes long format rules (series name, episode, speaker, max length)                 |
 | `BE-CAP-001` | `test/integration/storageCaps.test.ts` | prunePlayHistory keeps each user’s newest plays only                                          |
 | `BE-CAP-002` | `test/integration/storageCaps.test.ts` | a sync that goes past 1000 plays drops that user’s oldest                                     |
 | `BE-CAP-003` | `test/integration/storageCaps.test.ts` | pruneCatalogItems keeps the most recently written rows                                        |
