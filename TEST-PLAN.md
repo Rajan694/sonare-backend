@@ -168,93 +168,99 @@ This document maps all backend test IDs to their specifications, assertions, and
 
 ## 5. User Personal Library & Preferences
 
-| Test ID           | Method / Scope                                          | Description & Assertions                                                                             |
-| :---------------- | :------------------------------------------------------ | :--------------------------------------------------------------------------------------------------- |
-| `BE-ME-001`       | `GET /api/v1/me`                                        | Returns authenticated user profile.                                                                  |
-| `BE-ME-002`       | `GET /api/v1/me/library/tracks`                         | Returns user favourited tracks sorted.                                                               |
-| `BE-ME-003`       | `GET /api/v1/me/library/albums`                         | Resolves user saved albums from catalog cache.                                                       |
-| `BE-ME-004`       | `GET /api/v1/me/library/artists`                        | Resolves followed artists from channel cache.                                                        |
-| `BE-LIBART-001`   | `GET /api/v1/me/library/artists`                        | Followed artists first, then artists of liked and playlisted songs by song count, each counted once. |
-| `BE-LIBART-002`   | `GET /api/v1/me/library/artists`                        | Unavailable songs, local songs and other users' playlists add no artists.                            |
-| `BE-ME-005`       | `GET /api/v1/me/library/genres`                         | Returns library genres payload.                                                                      |
-| `BE-ME-006`       | `GET /api/v1/me/favourites/tracks`                      | Returns favourited tracks list.                                                                      |
-| `BE-ME-007`       | `PUT /api/v1/me/favourites/tracks/:id`                  | Adds track to favourites.                                                                            |
-| `BE-ME-008`       | `DELETE /api/v1/me/favourites/tracks/:id`               | Removes track from favourites.                                                                       |
-| `BE-ME-009`       | `GET /api/v1/me/favourites/albums`                      | Returns saved favourite albums.                                                                      |
-| `BE-ME-010`       | `PUT /api/v1/me/favourites/albums/:id`                  | Adds album to favourites.                                                                            |
-| `BE-ME-011`       | `DELETE /api/v1/me/favourites/albums/:id`               | Removes album from favourites.                                                                       |
-| `BE-ME-012`       | `GET /api/v1/me/library/artists`                        | Returns list of followed artists.                                                                    |
-| `BE-ME-013`       | `PUT /api/v1/me/following/artists/:id`                  | Follows an artist channel.                                                                           |
-| `BE-ME-014`       | `DELETE /api/v1/me/following/artists/:id`               | Unfollows an artist channel.                                                                         |
-| `BE-ME-015`       | `GET /api/v1/me/recently-played`                        | Returns hydrated play history.                                                                       |
-| `BE-ME-016`       | `POST /api/v1/me/sync`                                  | Syncs play history events and favourites idempotently.                                               |
-| `BE-ME-017`       | `GET /api/v1/me/most-played`                            | Aggregates playback history counts.                                                                  |
-| `BE-ME-018`       | `GET /api/v1/me/playlists`                              | Lists user created playlists with track counts.                                                      |
-| `BE-ME-019`       | `POST /api/v1/me/playlists`                             | Creates new playlist with custom title and description.                                              |
-| `BE-ME-020`       | `GET /api/v1/me/playlists/:id`                          | Returns playlist details and track listing.                                                          |
-| `BE-ME-021`       | `PATCH /api/v1/me/playlists/:id`                        | Updates playlist name and metadata.                                                                  |
-| `BE-ME-022`       | `DELETE /api/v1/me/playlists/:id`                       | Deletes user playlist.                                                                               |
-| `BE-ME-023`       | `POST /api/v1/me/playlists/:id/tracks`                  | Adds tracks to playlist.                                                                             |
-| `BE-ME-024`       | `DELETE /api/v1/me/playlists/:id/tracks`                | Removes track from playlist by ID.                                                                   |
-| `BE-ME-025`       | `PATCH /api/v1/me/playlists/:id/tracks/order`           | Reorders tracks in playlist.                                                                         |
-| `BE-ME-026`       | `GET /api/v1/me/settings`                               | Returns settings; defaults are eqPreset "Sonare", gapless true.                                      |
-| `BE-ME-027`       | `PUT /api/v1/me/settings`                               | Updates user equalizer and streaming preferences.                                                    |
-| `BE-ME-028`       | `GET /api/v1/me/player-state`                           | Restores persisted playback queue and position.                                                      |
-| `BE-ME-029`       | `PUT /api/v1/me/player-state`                           | Saves current player state and queue.                                                                |
-| `BE-ME-030`       | `POST /api/v1/me/sync`                                  | Accepts a ~500 KB body of 1000 plays and stores 1000 history rows.                                   |
-| `BE-ME-031`       | `PUT /api/v1/me/player-state`                           | Accepts a ~600 KB queue body.                                                                        |
-| `BE-ME-032`       | `PUT /api/v1/me/settings`                               | Still rejects a ~200 KB body with 413 PAYLOAD_TOO_LARGE.                                             |
-| `BE-ME-033`       | `GET /api/v1/me/favourites/ids`                         | Returns prefixed liked ids, newest first.                                                            |
-| `BE-ME-034`       | `GET /api/v1/me/favourites/ids`                         | Excludes other users' favourites.                                                                    |
-| `BE-ME-035`       | `GET /api/v1/me/favourites/ids`                         | Rejects a request without a token with 401.                                                          |
-| `BE-ME-036`       | `GET /api/v1/me/favourites/tracks`                      | Stubs the row when Piped is down while `/me/recently-played` still returns 502.                      |
-| `BE-ME-037`       | `GET /api/v1/me/playlists`                              | Lists playlists alphabetically (case-insensitive), then by creation.                                 |
-| `BE-ME-038`       | `PATCH /api/v1/me/playlists/:id`                        | An empty description clears it to null.                                                              |
-| `BE-ME-039`       | `PATCH /api/v1/me/playlists/:id`                        | A missing description keeps the stored value.                                                        |
-| `BE-ME-040`       | `POST /api/v1/me/playlists/:id/tracks`                  | Appends tracks at positions after the current maximum.                                               |
-| `BE-ME-041`       | `GET /api/v1/me/playlists/:id/tracks`                   | Every item carries an entryId (the playlist_tracks row id).                                          |
-| `BE-ME-042`       | `DELETE /api/v1/me/playlists/:id/tracks`                | entryIds removes exactly that entry when two songs share an id.                                      |
-| `BE-ME-043`       | `DELETE /api/v1/me/playlists/:id/tracks`                | Another user's entryId removes nothing from this playlist.                                           |
-| `BE-ME-044`       | `PATCH /api/v1/me/playlists/:id/tracks/order`           | entryId moves that row when a device sends a stale from index.                                       |
-| `BE-ME-045`       | `GET /api/v1/me/player-state`                           | Reports updatedAt in epoch ms, 0 when there is no row.                                               |
-| `BE-ME-046`       | `DELETE /api/v1/me/playlists/:id/tracks`                | Renumbers remaining entries 0..n-1 after a removal.                                                  |
-| `BE-ME-047`       | `PATCH /api/v1/me`                                      | Changes the display name (trimmed); a blank one is refused.                                          |
-| `BE-ME-048`       | `DELETE /api/v1/me`                                     | Needs the password; removes the account and its data; the old token is refused at once.              |
-| `BE-ME-049`       | `DELETE /api/v1/me`                                     | The admin account cannot be deleted from the apps.                                                   |
-| `BE-ME-050`       | `PATCH/DELETE /api/v1/me`, `POST /auth/change-password` | An account deleted elsewhere gets 401, not a server error, while its user is still cached.           |
-| `BE-ME-051`       | `GET /api/v1/me/library/tracks`                         | Lists liked and playlist songs once, newest add first; another device's local file is left out.      |
-| `BE-ME-052`       | `GET /api/v1/me/library/tracks`                         | `filter=liked` leaves out songs that are only in playlists.                                          |
-| `BE-ME-053`       | `GET /api/v1/me/library/tracks`                         | Sorts by title, artist, album, duration and plays from stored details; unknown ones go last.         |
-| `BE-ME-054`       | `GET /api/v1/me/library/tracks`                         | Pages with `limit` and `cursor`; the last page has no nextCursor; a bad cursor is a 400.             |
-| `BE-ME-055`       | `GET /api/v1/me/library/tracks`                         | Leaves out other users' playlists.                                                                   |
-| `BE-ME-056`       | `DELETE /api/v1/me/favourites/tracks`                   | Removes exactly the listed ids and leaves the rest; `removed` count equals rows deleted.             |
-| `BE-ME-057`       | `DELETE /api/v1/me/favourites/tracks`                   | Does not touch another user's rows with the same raw id.                                             |
-| `BE-ME-058`       | `DELETE /api/v1/me/favourites/tracks`                   | Rejects an empty array and a 501-element array with 400 BAD_REQUEST.                                 |
-| `BE-ME-059`       | `DELETE /api/v1/me/favourites/tracks`                   | Returns 401 UNAUTHORIZED when no token is provided.                                                  |
-| `BE-ME-EXTRA-001` | `GET /api/v1/me/playlists/:id`                          | Returns 404 for missing playlist.                                                                    |
-| `BE-ME-EXTRA-002` | `PATCH /api/v1/me/playlists/:id`                        | Returns 404 when attempting to edit another user's playlist.                                         |
-| `BE-ME-EXTRA-003` | `DELETE /api/v1/me/playlists/:id`                       | Returns 200 idempotently when playlist is not found.                                                 |
-| `BE-ME-EXTRA-004` | `POST /api/v1/me/playlists`                             | Rejects empty playlist name with 400 BAD_REQUEST.                                                    |
-| `BE-ME-EXTRA-005` | `POST /api/v1/me/playlists/:id/tracks`                  | Rejects non-array track IDs payload with 400 BAD_REQUEST.                                            |
-| `BE-ME-EXTRA-006` | `PATCH /api/v1/me/playlists/:id/tracks/order`           | Rejects missing from/to reorder indices with 400 BAD_REQUEST.                                        |
-| `BE-ME-EXTRA-007` | `GET /api/v1/me/library/genres`                         | Verifies genres placeholder response format.                                                         |
-| `BE-ME-EXTRA-008` | `GET /api/v1/me/new-releases`                           | Verifies new releases payload format.                                                                |
-| `BE-ME-BR-001`    | `PATCH /api/v1/me/playlists/:id`                        | Updates description when title is unchanged.                                                         |
-| `BE-ME-BR-002`    | `PATCH /api/v1/me/playlists/:id/tracks/order`           | Returns 404 for non-existent playlist.                                                               |
-| `BE-ME-BR-003`    | `DELETE /api/v1/me/playlists/:id/tracks`                | Handles local track IDs removal.                                                                     |
-| `BE-ME-BR2-001`   | `POST /api/v1/me/playlists/:id/tracks`                  | Adds local track format IDs to playlist.                                                             |
-| `BE-EXP-001`      | `POST /api/v1/me/playlists`                             | Creates offline-kind playlists.                                                                      |
-| `BE-EXP-002`      | `DELETE /api/v1/me/playlists/:id/tracks`                | Deletes tracks by numerical index position.                                                          |
-| `BE-EXP-003`      | `DELETE /api/v1/me/playlists/:id/tracks`                | Returns 404 when modifying playlist owned by another user.                                           |
-| `BE-EXP-004`      | `PUT /api/v1/me/settings`                               | Updates normalization, gapless, and offline settings.                                                |
-| `BE-EXP-005`      | `PUT /api/v1/me/settings`                               | Handles empty changes object gracefully.                                                             |
-| `BE-EXP-006`      | `PUT /api/v1/me/settings`                               | Normalizes lossless quality setting to high.                                                         |
-| `BE-EXP-007`      | `PUT /api/v1/me/player-state`                           | Handles shuffle and repeat modes.                                                                    |
-| `BE-SETT-001`     | `PUT /api/v1/me/settings`                               | Updates download format preference.                                                                  |
-| `BE-SETT-002`     | `PUT /api/v1/me/player-state`                           | Saves local trackRef player state.                                                                   |
-| `BE-SYNC-001`     | `POST /api/v1/me/sync`                                  | Syncs multiple favourite items idempotently.                                                         |
-| `BE-SYNC-002`     | `GET /api/v1/me/library/tracks`                         | Sorts tracks by title ascending and descending.                                                      |
-| `BE-SYNC-003`     | `GET /api/v1/me/library/tracks`                         | Sorts tracks by playCount.                                                                           |
+| Test ID           | Method / Scope                                          | Description & Assertions                                                                                |
+| :---------------- | :------------------------------------------------------ | :------------------------------------------------------------------------------------------------------ |
+| `BE-ME-001`       | `GET /api/v1/me`                                        | Returns authenticated user profile.                                                                     |
+| `BE-ME-002`       | `GET /api/v1/me/library/tracks`                         | Returns user favourited tracks sorted.                                                                  |
+| `BE-ME-003`       | `GET /api/v1/me/library/albums`                         | Resolves user saved albums from catalog cache.                                                          |
+| `BE-ME-004`       | `GET /api/v1/me/library/artists`                        | Resolves followed artists from channel cache.                                                           |
+| `BE-LIBART-001`   | `GET /api/v1/me/library/artists`                        | Followed artists first, then artists of liked and playlisted songs by song count, each counted once.    |
+| `BE-LIBART-002`   | `GET /api/v1/me/library/artists`                        | Unavailable songs, local songs and other users' playlists add no artists.                               |
+| `BE-ME-005`       | `GET /api/v1/me/library/genres`                         | Returns library genres payload.                                                                         |
+| `BE-ME-006`       | `GET /api/v1/me/favourites/tracks`                      | Returns favourited tracks list.                                                                         |
+| `BE-ME-007`       | `PUT /api/v1/me/favourites/tracks/:id`                  | Adds track to favourites.                                                                               |
+| `BE-ME-008`       | `DELETE /api/v1/me/favourites/tracks/:id`               | Removes track from favourites.                                                                          |
+| `BE-ME-009`       | `GET /api/v1/me/favourites/albums`                      | Returns saved favourite albums.                                                                         |
+| `BE-ME-010`       | `PUT /api/v1/me/favourites/albums/:id`                  | Adds album to favourites.                                                                               |
+| `BE-ME-011`       | `DELETE /api/v1/me/favourites/albums/:id`               | Removes album from favourites.                                                                          |
+| `BE-ME-012`       | `GET /api/v1/me/library/artists`                        | Returns list of followed artists.                                                                       |
+| `BE-ME-013`       | `PUT /api/v1/me/following/artists/:id`                  | Follows an artist channel.                                                                              |
+| `BE-ME-014`       | `DELETE /api/v1/me/following/artists/:id`               | Unfollows an artist channel.                                                                            |
+| `BE-ME-015`       | `GET /api/v1/me/recently-played`                        | Returns hydrated play history.                                                                          |
+| `BE-ME-016`       | `POST /api/v1/me/sync`                                  | Syncs play history events and favourites idempotently.                                                  |
+| `BE-ME-017`       | `GET /api/v1/me/most-played`                            | Aggregates playback history counts.                                                                     |
+| `BE-ME-018`       | `GET /api/v1/me/playlists`                              | Lists user created playlists with track counts.                                                         |
+| `BE-ME-019`       | `POST /api/v1/me/playlists`                             | Creates new playlist with custom title and description.                                                 |
+| `BE-ME-020`       | `GET /api/v1/me/playlists/:id`                          | Returns playlist details and track listing.                                                             |
+| `BE-ME-021`       | `PATCH /api/v1/me/playlists/:id`                        | Updates playlist name and metadata.                                                                     |
+| `BE-ME-022`       | `DELETE /api/v1/me/playlists/:id`                       | Deletes user playlist.                                                                                  |
+| `BE-ME-023`       | `POST /api/v1/me/playlists/:id/tracks`                  | Adds tracks to playlist.                                                                                |
+| `BE-ME-024`       | `DELETE /api/v1/me/playlists/:id/tracks`                | Removes track from playlist by ID.                                                                      |
+| `BE-ME-025`       | `PATCH /api/v1/me/playlists/:id/tracks/order`           | Reorders tracks in playlist.                                                                            |
+| `BE-ME-026`       | `GET /api/v1/me/settings`                               | Returns settings; defaults are eqPreset "Sonare", gapless true.                                         |
+| `BE-ME-027`       | `PUT /api/v1/me/settings`                               | Updates user equalizer and streaming preferences.                                                       |
+| `BE-ME-028`       | `GET /api/v1/me/player-state`                           | Restores persisted playback queue and position.                                                         |
+| `BE-ME-029`       | `PUT /api/v1/me/player-state`                           | Saves current player state and queue.                                                                   |
+| `BE-ME-030`       | `POST /api/v1/me/sync`                                  | Accepts a ~500 KB body of 1000 plays and stores 1000 history rows.                                      |
+| `BE-ME-031`       | `PUT /api/v1/me/player-state`                           | Accepts a ~600 KB queue body.                                                                           |
+| `BE-ME-032`       | `PUT /api/v1/me/settings`                               | Still rejects a ~200 KB body with 413 PAYLOAD_TOO_LARGE.                                                |
+| `BE-ME-033`       | `GET /api/v1/me/favourites/ids`                         | Returns prefixed liked ids, newest first.                                                               |
+| `BE-ME-034`       | `GET /api/v1/me/favourites/ids`                         | Excludes other users' favourites.                                                                       |
+| `BE-ME-035`       | `GET /api/v1/me/favourites/ids`                         | Rejects a request without a token with 401.                                                             |
+| `BE-ME-036`       | `GET /api/v1/me/favourites/tracks`                      | Stubs the row when Piped is down while `/me/recently-played` still returns 502.                         |
+| `BE-ME-037`       | `GET /api/v1/me/playlists`                              | Lists playlists alphabetically (case-insensitive), then by creation.                                    |
+| `BE-ME-038`       | `PATCH /api/v1/me/playlists/:id`                        | An empty description clears it to null.                                                                 |
+| `BE-ME-039`       | `PATCH /api/v1/me/playlists/:id`                        | A missing description keeps the stored value.                                                           |
+| `BE-ME-040`       | `POST /api/v1/me/playlists/:id/tracks`                  | Appends tracks at positions after the current maximum.                                                  |
+| `BE-ME-041`       | `GET /api/v1/me/playlists/:id/tracks`                   | Every item carries an entryId (the playlist_tracks row id).                                             |
+| `BE-ME-042`       | `DELETE /api/v1/me/playlists/:id/tracks`                | entryIds removes exactly that entry when two songs share an id.                                         |
+| `BE-ME-043`       | `DELETE /api/v1/me/playlists/:id/tracks`                | Another user's entryId removes nothing from this playlist.                                              |
+| `BE-ME-044`       | `PATCH /api/v1/me/playlists/:id/tracks/order`           | entryId moves that row when a device sends a stale from index.                                          |
+| `BE-ME-045`       | `GET /api/v1/me/player-state`                           | Reports updatedAt in epoch ms, 0 when there is no row.                                                  |
+| `BE-ME-046`       | `DELETE /api/v1/me/playlists/:id/tracks`                | Renumbers remaining entries 0..n-1 after a removal.                                                     |
+| `BE-ME-047`       | `PATCH /api/v1/me`                                      | Changes the display name (trimmed); a blank one is refused.                                             |
+| `BE-ME-048`       | `DELETE /api/v1/me`                                     | Needs the password; removes the account and its data; the old token is refused at once.                 |
+| `BE-ME-049`       | `DELETE /api/v1/me`                                     | The admin account cannot be deleted from the apps.                                                      |
+| `BE-ME-050`       | `PATCH/DELETE /api/v1/me`, `POST /auth/change-password` | An account deleted elsewhere gets 401, not a server error, while its user is still cached.              |
+| `BE-ME-051`       | `GET /api/v1/me/library/tracks`                         | Lists liked and playlist songs once, newest add first; another device's local file is left out.         |
+| `BE-ME-052`       | `GET /api/v1/me/library/tracks`                         | `filter=liked` leaves out songs that are only in playlists.                                             |
+| `BE-ME-053`       | `GET /api/v1/me/library/tracks`                         | Sorts by title, artist, album, duration and plays from stored details; unknown ones go last.            |
+| `BE-ME-054`       | `GET /api/v1/me/library/tracks`                         | Pages with `limit` and `cursor`; the last page has no nextCursor; a bad cursor is a 400.                |
+| `BE-ME-055`       | `GET /api/v1/me/library/tracks`                         | Leaves out other users' playlists.                                                                      |
+| `BE-ME-056`       | `DELETE /api/v1/me/favourites/tracks`                   | Removes exactly the listed ids and leaves the rest; `removed` count equals rows deleted.                |
+| `BE-ME-057`       | `DELETE /api/v1/me/favourites/tracks`                   | Does not touch another user's rows with the same raw id.                                                |
+| `BE-ME-058`       | `DELETE /api/v1/me/favourites/tracks`                   | Rejects an empty array and a 501-element array with 400 BAD_REQUEST.                                    |
+| `BE-ME-059`       | `DELETE /api/v1/me/favourites/tracks`                   | Returns 401 UNAUTHORIZED when no token is provided.                                                     |
+| `BE-ME-060`       | `GET /api/v1/me/not-played-lately`                      | Returns songs played at least twice whose newest play is > 30 days old with playCount and lastPlayedAt. |
+| `BE-ME-061`       | `GET /api/v1/me/not-played-lately`                      | Excludes songs played only once, songs played within 30 days, and other users' plays.                   |
+| `BE-ME-062`       | `GET /api/v1/me/not-played-lately`                      | Orders by most plays first, then longest-unplayed (oldest max playedAt) first.                          |
+| `BE-ME-063`       | `GET /api/v1/me/not-played-lately`                      | Validates limit (default 20, 1..50; rejects 0, 51, non-numeric).                                        |
+| `BE-ME-064`       | `GET /api/v1/me/not-played-lately`                      | Returns 502 UPSTREAM_UNAVAILABLE when Piped is down and track has no stored details.                    |
+| `BE-ME-065`       | `GET /api/v1/me/not-played-lately`                      | Returns 401 UNAUTHORIZED when no token is provided.                                                     |
+| `BE-ME-EXTRA-001` | `GET /api/v1/me/playlists/:id`                          | Returns 404 for missing playlist.                                                                       |
+| `BE-ME-EXTRA-002` | `PATCH /api/v1/me/playlists/:id`                        | Returns 404 when attempting to edit another user's playlist.                                            |
+| `BE-ME-EXTRA-003` | `DELETE /api/v1/me/playlists/:id`                       | Returns 200 idempotently when playlist is not found.                                                    |
+| `BE-ME-EXTRA-004` | `POST /api/v1/me/playlists`                             | Rejects empty playlist name with 400 BAD_REQUEST.                                                       |
+| `BE-ME-EXTRA-005` | `POST /api/v1/me/playlists/:id/tracks`                  | Rejects non-array track IDs payload with 400 BAD_REQUEST.                                               |
+| `BE-ME-EXTRA-006` | `PATCH /api/v1/me/playlists/:id/tracks/order`           | Rejects missing from/to reorder indices with 400 BAD_REQUEST.                                           |
+| `BE-ME-EXTRA-007` | `GET /api/v1/me/library/genres`                         | Verifies genres placeholder response format.                                                            |
+| `BE-ME-EXTRA-008` | `GET /api/v1/me/new-releases`                           | Verifies new releases payload format.                                                                   |
+| `BE-ME-BR-001`    | `PATCH /api/v1/me/playlists/:id`                        | Updates description when title is unchanged.                                                            |
+| `BE-ME-BR-002`    | `PATCH /api/v1/me/playlists/:id/tracks/order`           | Returns 404 for non-existent playlist.                                                                  |
+| `BE-ME-BR-003`    | `DELETE /api/v1/me/playlists/:id/tracks`                | Handles local track IDs removal.                                                                        |
+| `BE-ME-BR2-001`   | `POST /api/v1/me/playlists/:id/tracks`                  | Adds local track format IDs to playlist.                                                                |
+| `BE-EXP-001`      | `POST /api/v1/me/playlists`                             | Creates offline-kind playlists.                                                                         |
+| `BE-EXP-002`      | `DELETE /api/v1/me/playlists/:id/tracks`                | Deletes tracks by numerical index position.                                                             |
+| `BE-EXP-003`      | `DELETE /api/v1/me/playlists/:id/tracks`                | Returns 404 when modifying playlist owned by another user.                                              |
+| `BE-EXP-004`      | `PUT /api/v1/me/settings`                               | Updates normalization, gapless, and offline settings.                                                   |
+| `BE-EXP-005`      | `PUT /api/v1/me/settings`                               | Handles empty changes object gracefully.                                                                |
+| `BE-EXP-006`      | `PUT /api/v1/me/settings`                               | Normalizes lossless quality setting to high.                                                            |
+| `BE-EXP-007`      | `PUT /api/v1/me/player-state`                           | Handles shuffle and repeat modes.                                                                       |
+| `BE-SETT-001`     | `PUT /api/v1/me/settings`                               | Updates download format preference.                                                                     |
+| `BE-SETT-002`     | `PUT /api/v1/me/player-state`                           | Saves local trackRef player state.                                                                      |
+| `BE-SYNC-001`     | `POST /api/v1/me/sync`                                  | Syncs multiple favourite items idempotently.                                                            |
+| `BE-SYNC-002`     | `GET /api/v1/me/library/tracks`                         | Sorts tracks by title ascending and descending.                                                         |
+| `BE-SYNC-003`     | `GET /api/v1/me/library/tracks`                         | Sorts tracks by playCount.                                                                              |
 
 ---
 

@@ -11,7 +11,7 @@ import {
   userSettings,
   playerState,
 } from '../db/schema.js';
-import { eq, and, desc, sql, gte, inArray } from 'drizzle-orm';
+import { eq, and, desc, asc, sql, gte, inArray } from 'drizzle-orm';
 import { forgetAuthUser, requireAuth } from '../middleware/auth.js';
 import bcrypt from 'bcrypt';
 import { idHelpers } from '../ids.js';
@@ -69,6 +69,7 @@ const mostPlayedQuery = z.object({
   limit: queryInt(1, 100).default(20),
   window: z.enum(['30d', '365d']).optional(),
 });
+const notPlayedLatelyQuery = z.object({ limit: queryInt(1, 50).default(20) });
 
 const playlistName = z
   .string({ required_error: 'Missing playlist name', invalid_type_error: 'Playlist name must be text' })
@@ -737,6 +738,47 @@ meRouter.get('/most-played', async (req, res) => {
       trackRefKind: p.trackRefKind,
       trackRefId: p.trackRefId,
       playCount: p.count,
+      rowMeta: p.meta,
+    })),
+    { failIfPipedDown: true },
+  );
+
+  res.json({
+    items,
+    meta: { total: items.length },
+  });
+});
+
+// Songs played at least twice whose newest play is more than 30 days old.
+// Note: history is capped at the newest 1000 plays per user (services/playHistory.ts),
+// so "a while" only reaches back that far.
+meRouter.get('/not-played-lately', async (req, res) => {
+  const { limit } = parseQuery(notPlayedLatelyQuery, req);
+  const before = new Date(Date.now() - 30 * 24 * 3600 * 1000);
+
+  const plays = await db
+    .select({
+      trackRefKind: playHistory.trackRefKind,
+      trackRefId: playHistory.trackRefId,
+      count: sql<number>`count(*)::int`,
+      lastPlayedAt: sql<Date>`max(${playHistory.playedAt})`,
+      // The newest snapshot an app sent with a play, if any.
+      meta: sql<unknown>`(array_agg(${playHistory.meta} order by ${playHistory.playedAt} desc) filter (where ${playHistory.meta} is not null))[1]`,
+    })
+    .from(playHistory)
+    .where(eq(playHistory.userId, req.user!.id))
+    .groupBy(playHistory.trackRefKind, playHistory.trackRefId)
+    .having(sql`count(*) >= 2 and max(${playHistory.playedAt}) < ${sql.param(before, playHistory.playedAt)}`)
+    .orderBy(desc(sql`count(*)`), asc(sql`max(${playHistory.playedAt})`))
+    .limit(limit);
+
+  const items = await hydrateTracks(
+    req.user!.id,
+    plays.map((p) => ({
+      trackRefKind: p.trackRefKind,
+      trackRefId: p.trackRefId,
+      playCount: p.count,
+      lastPlayedAt: p.lastPlayedAt ? new Date(p.lastPlayedAt).getTime() : undefined,
       rowMeta: p.meta,
     })),
     { failIfPipedDown: true },

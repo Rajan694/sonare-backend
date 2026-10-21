@@ -1723,3 +1723,307 @@ describe('Me: bulk unlike', () => {
     expect(res.body.error.code).toBe('UNAUTHORIZED');
   });
 });
+
+describe('Me: not played lately', () => {
+  const app = createApp();
+
+  const songMeta = (title: string, artist: string, durationMs: number | null = 200_000, album?: string) => ({
+    title,
+    artist,
+    artistId: '',
+    durationMs,
+    ...(album && { album }),
+  });
+
+  const daysAgo = (days: number) => new Date(Date.now() - days * 24 * 3600 * 1000);
+
+  it('BE-ME-060: GET /api/v1/me/not-played-lately returns songs played >= 2 times with newest play > 30 days ago', async () => {
+    const { user, token } = await createUser();
+    const play1 = daysAgo(42);
+    const play2 = daysAgo(41);
+    const play3 = daysAgo(40);
+
+    await db.insert(playHistory).values([
+      {
+        userId: user.id,
+        trackRefKind: 'server',
+        trackRefId: 'oldFavorite',
+        playedAt: play1,
+        msPlayed: 30000,
+        meta: songMeta('Old Favorite', 'Artist One'),
+      },
+      {
+        userId: user.id,
+        trackRefKind: 'server',
+        trackRefId: 'oldFavorite',
+        playedAt: play2,
+        msPlayed: 30000,
+        meta: songMeta('Old Favorite', 'Artist One'),
+      },
+      {
+        userId: user.id,
+        trackRefKind: 'server',
+        trackRefId: 'oldFavorite',
+        playedAt: play3,
+        msPlayed: 30000,
+        meta: songMeta('Old Favorite', 'Artist One'),
+      },
+    ]);
+
+    const res = await request(app).get('/api/v1/me/not-played-lately').set('Authorization', `Bearer ${token}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.items).toHaveLength(1);
+    expect(res.body.items[0].id).toBe('yt:oldFavorite');
+    expect(res.body.items[0].title).toBe('Old Favorite');
+    expect(res.body.items[0].playCount).toBe(3);
+    expect(typeof res.body.items[0].lastPlayedAt).toBe('number');
+    // lastPlayedAt reflects the latest play (> 30 days ago, ~40 days ago)
+    expect(res.body.items[0].lastPlayedAt).toBeLessThan(Date.now() - 30 * 24 * 3600 * 1000);
+    expect(Math.abs(res.body.items[0].lastPlayedAt - play3.getTime())).toBeLessThan(24 * 3600 * 1000);
+    expect(res.body.meta).toEqual({ total: 1 });
+  });
+
+  it("BE-ME-061: GET /api/v1/me/not-played-lately excludes songs played once, songs played recently, and other users' plays", async () => {
+    const { user, token } = await createUser();
+    const { user: other } = await createUser();
+
+    // Song played once 40 days ago
+    await db.insert(playHistory).values({
+      userId: user.id,
+      trackRefKind: 'server',
+      trackRefId: 'playedOnce',
+      playedAt: daysAgo(40),
+      msPlayed: 30000,
+      meta: songMeta('Played Once', 'Artist A'),
+    });
+
+    // Song played 5 times: 4 times 40 days ago, but 1 time yesterday
+    await db.insert(playHistory).values([
+      {
+        userId: user.id,
+        trackRefKind: 'server',
+        trackRefId: 'playedRecent',
+        playedAt: daysAgo(40),
+        msPlayed: 30000,
+        meta: songMeta('Recent Song', 'Artist B'),
+      },
+      {
+        userId: user.id,
+        trackRefKind: 'server',
+        trackRefId: 'playedRecent',
+        playedAt: daysAgo(39),
+        msPlayed: 30000,
+        meta: songMeta('Recent Song', 'Artist B'),
+      },
+      {
+        userId: user.id,
+        trackRefKind: 'server',
+        trackRefId: 'playedRecent',
+        playedAt: daysAgo(38),
+        msPlayed: 30000,
+        meta: songMeta('Recent Song', 'Artist B'),
+      },
+      {
+        userId: user.id,
+        trackRefKind: 'server',
+        trackRefId: 'playedRecent',
+        playedAt: daysAgo(35),
+        msPlayed: 30000,
+        meta: songMeta('Recent Song', 'Artist B'),
+      },
+      {
+        userId: user.id,
+        trackRefKind: 'server',
+        trackRefId: 'playedRecent',
+        playedAt: daysAgo(1),
+        msPlayed: 30000,
+        meta: songMeta('Recent Song', 'Artist B'),
+      },
+    ]);
+
+    // Another user played a song 3 times 40 days ago
+    await db.insert(playHistory).values([
+      {
+        userId: other.id,
+        trackRefKind: 'server',
+        trackRefId: 'otherUserSong',
+        playedAt: daysAgo(40),
+        msPlayed: 30000,
+        meta: songMeta('Other Song', 'Artist C'),
+      },
+      {
+        userId: other.id,
+        trackRefKind: 'server',
+        trackRefId: 'otherUserSong',
+        playedAt: daysAgo(39),
+        msPlayed: 30000,
+        meta: songMeta('Other Song', 'Artist C'),
+      },
+      {
+        userId: other.id,
+        trackRefKind: 'server',
+        trackRefId: 'otherUserSong',
+        playedAt: daysAgo(38),
+        msPlayed: 30000,
+        meta: songMeta('Other Song', 'Artist C'),
+      },
+    ]);
+
+    const res = await request(app).get('/api/v1/me/not-played-lately').set('Authorization', `Bearer ${token}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.items).toHaveLength(0);
+    expect(res.body.meta).toEqual({ total: 0 });
+  });
+
+  it('BE-ME-062: GET /api/v1/me/not-played-lately orders by playCount desc, then longest unplayed (oldest max playedAt) first', async () => {
+    const { user, token } = await createUser();
+
+    // Song 1: 5 plays, last played 35 days ago
+    for (let i = 0; i < 5; i++) {
+      await db.insert(playHistory).values({
+        userId: user.id,
+        trackRefKind: 'server',
+        trackRefId: 'songHighestCount',
+        playedAt: daysAgo(35 + i),
+        msPlayed: 30000,
+        meta: songMeta('Highest Count', 'Artist 1'),
+      });
+    }
+
+    // Song 2: 3 plays, last played 50 days ago (longer unplayed than Song 3)
+    for (let i = 0; i < 3; i++) {
+      await db.insert(playHistory).values({
+        userId: user.id,
+        trackRefKind: 'server',
+        trackRefId: 'songLongestUnplayed',
+        playedAt: daysAgo(50 + i),
+        msPlayed: 30000,
+        meta: songMeta('Longest Unplayed', 'Artist 2'),
+      });
+    }
+
+    // Song 3: 3 plays, last played 32 days ago
+    for (let i = 0; i < 3; i++) {
+      await db.insert(playHistory).values({
+        userId: user.id,
+        trackRefKind: 'server',
+        trackRefId: 'songShorterUnplayed',
+        playedAt: daysAgo(32 + i),
+        msPlayed: 30000,
+        meta: songMeta('Shorter Unplayed', 'Artist 3'),
+      });
+    }
+
+    const res = await request(app).get('/api/v1/me/not-played-lately').set('Authorization', `Bearer ${token}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.items).toHaveLength(3);
+    expect(res.body.items.map((t: { id: string }) => t.id)).toEqual([
+      'yt:songHighestCount',
+      'yt:songLongestUnplayed',
+      'yt:songShorterUnplayed',
+    ]);
+  });
+
+  it('BE-ME-063: GET /api/v1/me/not-played-lately validates limit (default 20, 1..50; rejects 0, 51, non-numeric)', async () => {
+    const { user, token } = await createUser();
+
+    // Insert 22 qualifying tracks
+    for (let t = 0; t < 22; t++) {
+      await db.insert(playHistory).values([
+        {
+          userId: user.id,
+          trackRefKind: 'server',
+          trackRefId: `track_${t}`,
+          playedAt: daysAgo(40),
+          msPlayed: 30000,
+          meta: songMeta(`Track ${t}`, 'Artist'),
+        },
+        {
+          userId: user.id,
+          trackRefKind: 'server',
+          trackRefId: `track_${t}`,
+          playedAt: daysAgo(41),
+          msPlayed: 30000,
+          meta: songMeta(`Track ${t}`, 'Artist'),
+        },
+      ]);
+    }
+
+    // Default limit should be 20
+    const defaultRes = await request(app).get('/api/v1/me/not-played-lately').set('Authorization', `Bearer ${token}`);
+    expect(defaultRes.status).toBe(200);
+    expect(defaultRes.body.items).toHaveLength(20);
+
+    // Custom limit
+    const customRes = await request(app)
+      .get('/api/v1/me/not-played-lately?limit=5')
+      .set('Authorization', `Bearer ${token}`);
+    expect(customRes.status).toBe(200);
+    expect(customRes.body.items).toHaveLength(5);
+
+    // Rejects limit 0
+    const zeroRes = await request(app)
+      .get('/api/v1/me/not-played-lately?limit=0')
+      .set('Authorization', `Bearer ${token}`);
+    expect(zeroRes.status).toBe(400);
+    expect(zeroRes.body.error.code).toBe('BAD_REQUEST');
+
+    // Rejects limit 51
+    const excessRes = await request(app)
+      .get('/api/v1/me/not-played-lately?limit=51')
+      .set('Authorization', `Bearer ${token}`);
+    expect(excessRes.status).toBe(400);
+    expect(excessRes.body.error.code).toBe('BAD_REQUEST');
+
+    // Rejects non-numeric limit
+    const nanRes = await request(app)
+      .get('/api/v1/me/not-played-lately?limit=many')
+      .set('Authorization', `Bearer ${token}`);
+    expect(nanRes.status).toBe(400);
+    expect(nanRes.body.error.code).toBe('BAD_REQUEST');
+  });
+
+  it('BE-ME-064: GET /api/v1/me/not-played-lately returns 502 UPSTREAM_UNAVAILABLE when Piped is down and track has no stored details', async () => {
+    const { user, token } = await createUser();
+
+    await db.insert(playHistory).values([
+      {
+        userId: user.id,
+        trackRefKind: 'server',
+        trackRefId: 'unreachableTrack',
+        playedAt: daysAgo(40),
+        msPlayed: 30000,
+      },
+      {
+        userId: user.id,
+        trackRefKind: 'server',
+        trackRefId: 'unreachableTrack',
+        playedAt: daysAgo(41),
+        msPlayed: 30000,
+      },
+    ]);
+
+    const probe = net.createServer();
+    await new Promise<void>((resolve) => probe.listen(0, '127.0.0.1', resolve));
+    const { port } = probe.address() as net.AddressInfo;
+    await new Promise((resolve) => probe.close(resolve));
+    const original = config.PIPED_API_URL;
+    config.PIPED_API_URL = `http://127.0.0.1:${port}`;
+    try {
+      const res = await request(app).get('/api/v1/me/not-played-lately').set('Authorization', `Bearer ${token}`);
+      expect(res.status).toBe(502);
+      expect(res.body.error.code).toBe('UPSTREAM_UNAVAILABLE');
+    } finally {
+      config.PIPED_API_URL = original;
+    }
+  });
+
+  it('BE-ME-065: GET /api/v1/me/not-played-lately requires a token, returning 401 without one', async () => {
+    const res = await request(app).get('/api/v1/me/not-played-lately');
+    expect(res.status).toBe(401);
+    expect(res.body.error.code).toBe('UNAUTHORIZED');
+  });
+});
