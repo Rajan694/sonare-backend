@@ -150,19 +150,19 @@ describe('Me: profile & personal data', () => {
     const { user, token } = await createUser();
     await db.insert(favouriteAlbums).values({
       userId: user.id,
-      albumId: 'PLfavAlbum123',
+      albumId: 'OLAK5uy_favAlbum123',
     });
 
     const pipedMock = mockAgent!.get('http://localhost:8090');
     pipedMock
-      .intercept({ path: '/playlists/PLfavAlbum123', method: 'GET' })
-      .reply(200, samplePipedPlaylist('PLfavAlbum123'));
+      .intercept({ path: '/playlists/OLAK5uy_favAlbum123', method: 'GET' })
+      .reply(200, samplePipedPlaylist('OLAK5uy_favAlbum123'));
 
     const res = await request(app).get('/api/v1/me/library/albums').set('Authorization', `Bearer ${token}`);
 
     expect(res.status).toBe(200);
     expect(res.body.items).toHaveLength(1);
-    expect(res.body.items[0].id).toBe('yt:PLfavAlbum123');
+    expect(res.body.items[0].id).toBe('yt:OLAK5uy_favAlbum123');
   });
 
   it('BE-ME-004: GET /api/v1/me/library/artists resolves followed artists', async () => {
@@ -243,19 +243,19 @@ describe('Me: profile & personal data', () => {
     const { user, token } = await createUser();
     await db.insert(favouriteAlbums).values({
       userId: user.id,
-      albumId: 'PLmyFavAlb1',
+      albumId: 'OLAK5uy_myFavAlb1',
     });
 
     const pipedMock = mockAgent!.get('http://localhost:8090');
     pipedMock
-      .intercept({ path: '/playlists/PLmyFavAlb1', method: 'GET' })
-      .reply(200, samplePipedPlaylist('PLmyFavAlb1'));
+      .intercept({ path: '/playlists/OLAK5uy_myFavAlb1', method: 'GET' })
+      .reply(200, samplePipedPlaylist('OLAK5uy_myFavAlb1'));
 
     const res = await request(app).get('/api/v1/me/library/albums').set('Authorization', `Bearer ${token}`);
 
     expect(res.status).toBe(200);
     expect(res.body.items).toHaveLength(1);
-    expect(res.body.items[0].id).toBe('yt:PLmyFavAlb1');
+    expect(res.body.items[0].id).toBe('yt:OLAK5uy_myFavAlb1');
   });
 
   it('BE-ME-010: PUT /api/v1/me/favourites/albums/:id adds album to favourites', async () => {
@@ -2098,18 +2098,16 @@ describe('Me: not played lately', () => {
   it('BE-ME-068: DELETE /api/v1/me/history causes recently-played and most-played to return empty lists', async () => {
     const { user, token } = await createUser();
 
-    await db
-      .insert(playHistory)
-      .values([
-        {
-          userId: user.id,
-          trackRefKind: 'server',
-          trackRefId: 'playedTrack',
-          playedAt: new Date(),
-          msPlayed: 30000,
-          meta: songMeta('Track', 'Artist'),
-        },
-      ]);
+    await db.insert(playHistory).values([
+      {
+        userId: user.id,
+        trackRefKind: 'server',
+        trackRefId: 'playedTrack',
+        playedAt: new Date(),
+        msPlayed: 30000,
+        meta: songMeta('Track', 'Artist'),
+      },
+    ]);
 
     const delRes = await request(app).delete('/api/v1/me/history').set('Authorization', `Bearer ${token}`);
     expect(delRes.status).toBe(200);
@@ -2126,6 +2124,134 @@ describe('Me: not played lately', () => {
 
   it('BE-ME-069: DELETE /api/v1/me/history requires a token, returning 401 without one', async () => {
     const res = await request(app).delete('/api/v1/me/history');
+    expect(res.status).toBe(401);
+    expect(res.body.error.code).toBe('UNAUTHORIZED');
+  });
+
+  it('BE-ME-070: OLAK album shows only in /library/albums; PL playlist shows only in /saved-playlists with metadata', async () => {
+    const { user, token } = await createUser();
+
+    // Insert an album (OLAK5uy_) with row meta
+    await db.insert(favouriteAlbums).values({
+      userId: user.id,
+      albumId: 'OLAK5uy_realAlbum',
+      addedAt: new Date(Date.now() - 5000),
+      meta: {
+        title: 'Real Album',
+        artist: 'Band Name',
+        artistId: 'yt:UCband',
+        year: 2024,
+        trackCount: 12,
+        thumbnail: 'https://images.example/album.jpg',
+      },
+    });
+
+    // Insert a YouTube playlist (PL...) with row meta (title=name, artist=owner)
+    await db.insert(favouriteAlbums).values({
+      userId: user.id,
+      albumId: 'PLsavedPlaylist1',
+      addedAt: new Date(),
+      meta: {
+        title: 'My Curated Playlist',
+        artist: 'Curator Channel',
+        artistId: 'yt:UCchannel',
+        trackCount: 45,
+        thumbnail: 'https://i.ytimg.com/vi/abc/hqdefault.jpg',
+      },
+    });
+
+    // /me/library/albums should return only the OLAK5uy_ album
+    const albumRes = await request(app).get('/api/v1/me/library/albums').set('Authorization', `Bearer ${token}`);
+    expect(albumRes.status).toBe(200);
+    expect(albumRes.body.items).toHaveLength(1);
+    expect(albumRes.body.items[0]).toMatchObject({
+      id: 'yt:OLAK5uy_realAlbum',
+      title: 'Real Album',
+      artist: 'Band Name',
+    });
+
+    // /me/saved-playlists should return only the PL playlist with SavedPlaylist fields
+    const plRes = await request(app).get('/api/v1/me/saved-playlists').set('Authorization', `Bearer ${token}`);
+    expect(plRes.status).toBe(200);
+    expect(plRes.body.items).toHaveLength(1);
+    expect(plRes.body.items[0]).toMatchObject({
+      id: 'yt:PLsavedPlaylist1',
+      name: 'My Curated Playlist',
+      owner: 'Curator Channel',
+      trackCount: 45,
+      thumbnail: 'https://i.ytimg.com/vi/abc/hqdefault.jpg',
+    });
+    expect(typeof plRes.body.items[0].addedAt).toBe('number');
+    expect(plRes.body.meta).toEqual({ total: 1 });
+  });
+
+  it('BE-ME-071: GET /api/v1/me/saved-playlists orders newest first and excludes another user rows', async () => {
+    const { user, token } = await createUser();
+    const { user: other } = await createUser();
+
+    const now = Date.now();
+    await db.insert(favouriteAlbums).values([
+      {
+        userId: user.id,
+        albumId: 'PLolder',
+        addedAt: new Date(now - 10000),
+        meta: { title: 'Older Playlist', artist: 'Owner 1', artistId: 'yt:UC1' },
+      },
+      {
+        userId: user.id,
+        albumId: 'PLnewer',
+        addedAt: new Date(now - 1000),
+        meta: { title: 'Newer Playlist', artist: 'Owner 2', artistId: 'yt:UC2' },
+      },
+      {
+        userId: other.id,
+        albumId: 'PLotherUser',
+        addedAt: new Date(now),
+        meta: { title: 'Other Playlist', artist: 'Other Owner', artistId: 'yt:UC3' },
+      },
+    ]);
+
+    const res = await request(app).get('/api/v1/me/saved-playlists').set('Authorization', `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    expect(res.body.items).toHaveLength(2);
+    expect(res.body.items.map((p: { id: string }) => p.id)).toEqual(['yt:PLnewer', 'yt:PLolder']);
+    expect(res.body.meta).toEqual({ total: 2 });
+  });
+
+  it('BE-ME-072: GET /api/v1/me/saved-playlists falls back to placeholder when Piped is unreachable and row has no meta', async () => {
+    const { user, token } = await createUser();
+
+    await db.insert(favouriteAlbums).values({
+      userId: user.id,
+      albumId: 'PLunreachable',
+      addedAt: new Date(),
+    });
+
+    const probe = net.createServer();
+    await new Promise<void>((resolve) => probe.listen(0, '127.0.0.1', resolve));
+    const { port } = probe.address() as net.AddressInfo;
+    await new Promise((resolve) => probe.close(resolve));
+
+    const original = config.PIPED_API_URL;
+    config.PIPED_API_URL = `http://127.0.0.1:${port}`;
+    try {
+      const res = await request(app).get('/api/v1/me/saved-playlists').set('Authorization', `Bearer ${token}`);
+      expect(res.status).toBe(200);
+      expect(res.body.items).toHaveLength(1);
+      expect(res.body.items[0]).toMatchObject({
+        id: 'yt:PLunreachable',
+        name: 'Unavailable playlist',
+        owner: '',
+        trackCount: null,
+      });
+      expect(res.body.items[0].thumbnail).toBeUndefined();
+    } finally {
+      config.PIPED_API_URL = original;
+    }
+  });
+
+  it('BE-ME-073: GET /api/v1/me/saved-playlists requires a token, returning 401 without one', async () => {
+    const res = await request(app).get('/api/v1/me/saved-playlists');
     expect(res.status).toBe(401);
     expect(res.body.error.code).toBe('UNAUTHORIZED');
   });

@@ -11,7 +11,7 @@ import {
   userSettings,
   playerState,
 } from '../db/schema.js';
-import { eq, and, desc, asc, sql, gte, inArray } from 'drizzle-orm';
+import { eq, and, desc, asc, sql, gte, inArray, like, notLike } from 'drizzle-orm';
 import { forgetAuthUser, requireAuth } from '../middleware/auth.js';
 import bcrypt from 'bcrypt';
 import { idHelpers } from '../ids.js';
@@ -331,8 +331,15 @@ meRouter.get('/library/tracks', async (req, res) => {
   res.json({ items, meta: { total: all.length, ...(end < all.length && { nextCursor: String(end) }) } });
 });
 
+// Saved albums and saved YouTube playlists share favourite_albums; albums are the OLAK5uy_ ids.
+// The underscore is escaped: in LIKE it would match any character.
+const ALBUM_ID_PATTERN = 'OLAK5uy\\_%';
+
 meRouter.get('/library/albums', async (req, res) => {
-  const favs = await db.select().from(favouriteAlbums).where(eq(favouriteAlbums.userId, req.user!.id));
+  const favs = await db
+    .select()
+    .from(favouriteAlbums)
+    .where(and(eq(favouriteAlbums.userId, req.user!.id), like(favouriteAlbums.albumId, ALBUM_ID_PATTERN)));
 
   // 1. Check row meta; missing ones fetch from catalog_items in ONE batch query
   const missingCatalogIds = favs.filter((f) => !parseAlbumMeta(f.meta)).map((f) => f.albumId);
@@ -385,6 +392,65 @@ meRouter.get('/library/albums', async (req, res) => {
     }
   });
   res.json({ items, meta: { total: favs.length } });
+});
+
+// Saved YouTube playlists (favourite_albums rows whose id does NOT start with OLAK5uy_).
+meRouter.get('/saved-playlists', async (req, res) => {
+  const favs = await db
+    .select()
+    .from(favouriteAlbums)
+    .where(and(eq(favouriteAlbums.userId, req.user!.id), notLike(favouriteAlbums.albumId, ALBUM_ID_PATTERN)))
+    .orderBy(desc(favouriteAlbums.addedAt));
+
+  // 1. Check row meta; missing ones fetch from catalog_items in ONE batch query
+  const missingCatalogIds = favs.filter((f) => !parseAlbumMeta(f.meta)).map((f) => f.albumId);
+
+  const catalogMap =
+    missingCatalogIds.length > 0
+      ? await getCatalogItems<AlbumMeta>('album', missingCatalogIds)
+      : new Map<string, AlbumMeta>();
+
+  const items = await mapLimit(favs, PIPED_LOOKUP_CONCURRENCY, async (f) => {
+    const base = { id: idHelpers.prefixYt(f.albumId), addedAt: f.addedAt.getTime() };
+    const parsedRow = parseAlbumMeta(f.meta);
+    const meta = parsedRow ?? catalogMap.get(f.albumId);
+
+    if (meta) {
+      return {
+        id: base.id,
+        name: meta.title,
+        owner: meta.artist,
+        trackCount: meta.trackCount ?? null,
+        ...(meta.thumbnail ? { thumbnail: meta.thumbnail } : {}),
+        addedAt: base.addedAt,
+      };
+    }
+
+    // Fall back to Piped
+    try {
+      const playlist = await CachedPiped.playlist(f.albumId);
+      const normalized = normalizePlaylistToAlbum(playlist, f.albumId);
+      await rememberCatalogItem('album', f.albumId, normalized);
+      return {
+        id: base.id,
+        name: normalized.title,
+        owner: normalized.artist,
+        trackCount: normalized.trackCount ?? null,
+        ...(normalized.thumbnail ? { thumbnail: normalized.thumbnail } : {}),
+        addedAt: base.addedAt,
+      };
+    } catch {
+      return {
+        id: base.id,
+        name: 'Unavailable playlist',
+        owner: '',
+        trackCount: null,
+        addedAt: base.addedAt,
+      };
+    }
+  });
+
+  res.json({ items, meta: { total: items.length } });
 });
 
 // How many liked / playlisted songs are looked at to find artists. Their metadata comes

@@ -241,6 +241,10 @@ This document maps all backend test IDs to their specifications, assertions, and
 | `BE-ME-067`       | `DELETE /api/v1/me/history`                             | Leaves another user's play history and caller's favourites and playlists untouched.                     |
 | `BE-ME-068`       | `DELETE /api/v1/me/history`                             | Causes recently-played and most-played to return empty lists after deletion.                            |
 | `BE-ME-069`       | `DELETE /api/v1/me/history`                             | Returns 401 UNAUTHORIZED when no token is provided.                                                     |
+| `BE-ME-070`       | `GET /api/v1/me/saved-playlists`                        | OLAK album shows only in /library/albums, PL playlist shows only in /saved-playlists with metadata.     |
+| `BE-ME-071`       | `GET /api/v1/me/saved-playlists`                        | Orders playlists newest first and excludes another user's saved playlists.                              |
+| `BE-ME-072`       | `GET /api/v1/me/saved-playlists`                        | Falls back to placeholder playlist object when Piped is unreachable and row has no meta.                |
+| `BE-ME-073`       | `GET /api/v1/me/saved-playlists`                        | Returns 401 UNAUTHORIZED when no token is provided.                                                     |
 | `BE-ME-EXTRA-001` | `GET /api/v1/me/playlists/:id`                          | Returns 404 for missing playlist.                                                                       |
 | `BE-ME-EXTRA-002` | `PATCH /api/v1/me/playlists/:id`                        | Returns 404 when attempting to edit another user's playlist.                                            |
 | `BE-ME-EXTRA-003` | `DELETE /api/v1/me/playlists/:id`                       | Returns 200 idempotently when playlist is not found.                                                    |
