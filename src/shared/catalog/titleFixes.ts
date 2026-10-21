@@ -77,6 +77,20 @@ export const applyTitleFix = (
   return { title, artist };
 };
 
+/** Returns the known fix for a video ID, if any. */
+export const getTitleFix = (videoId: string): TitleFix | undefined => {
+  const id = rawId(videoId);
+  if (!id || id === 'unknown') return undefined;
+  return fixes.get(id);
+};
+
+/** True when a fix is already recorded for this video ID. */
+export const hasTitleFix = (videoId: string): boolean => {
+  const id = rawId(videoId);
+  if (!id || id === 'unknown') return false;
+  return fixes.has(id);
+};
+
 /** Remember fixes (from the backend, or from storage at start-up). Answered songs stop being noted. */
 export const addTitleFixes = (entries: Record<string, TitleFix>): void => {
   for (const [key, fix] of Object.entries(entries)) {
