@@ -130,6 +130,8 @@ export const playlistTracks = pgTable(
     trackRefId: text('track_ref_id').notNull(),
     matchedServerId: text('matched_server_id'),
     meta: jsonb('meta'),
+    // When the song joined the playlist, for the library's "Recently added".
+    addedAt: timestamp('added_at').defaultNow().notNull(),
   },
   (t) => ({
     playlistPositionIdx: index('playlist_tracks_playlist_position_idx').on(t.playlistId, t.position),

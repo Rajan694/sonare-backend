@@ -222,6 +222,11 @@ This document maps all backend test IDs to their specifications, assertions, and
 | `BE-ME-048`       | `DELETE /api/v1/me`                                     | Needs the password; removes the account and its data; the old token is refused at once.              |
 | `BE-ME-049`       | `DELETE /api/v1/me`                                     | The admin account cannot be deleted from the apps.                                                   |
 | `BE-ME-050`       | `PATCH/DELETE /api/v1/me`, `POST /auth/change-password` | An account deleted elsewhere gets 401, not a server error, while its user is still cached.           |
+| `BE-ME-051`       | `GET /api/v1/me/library/tracks`                         | Lists liked and playlist songs once, newest add first; another device's local file is left out.      |
+| `BE-ME-052`       | `GET /api/v1/me/library/tracks`                         | `filter=liked` leaves out songs that are only in playlists.                                          |
+| `BE-ME-053`       | `GET /api/v1/me/library/tracks`                         | Sorts by title, artist, album, duration and plays from stored details; unknown ones go last.         |
+| `BE-ME-054`       | `GET /api/v1/me/library/tracks`                         | Pages with `limit` and `cursor`; the last page has no nextCursor; a bad cursor is a 400.             |
+| `BE-ME-055`       | `GET /api/v1/me/library/tracks`                         | Leaves out other users' playlists.                                                                   |
 | `BE-ME-EXTRA-001` | `GET /api/v1/me/playlists/:id`                          | Returns 404 for missing playlist.                                                                    |
 | `BE-ME-EXTRA-002` | `PATCH /api/v1/me/playlists/:id`                        | Returns 404 when attempting to edit another user's playlist.                                         |
 | `BE-ME-EXTRA-003` | `DELETE /api/v1/me/playlists/:id`                       | Returns 200 idempotently when playlist is not found.                                                 |

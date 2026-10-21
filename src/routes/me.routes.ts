@@ -53,9 +53,16 @@ const refId = (ref: z.infer<typeof trackRef>): string => {
   return ref.kind === 'server' ? ref.id : ref.fingerprint;
 };
 
+const LIBRARY_SORTS = ['addedAt', 'title', 'artist', 'album', 'durationMs', 'playCount'] as const;
 const libraryQuery = z.object({
-  sort: z.enum(['addedAt', 'title', 'playCount']).default('addedAt'),
-  order: z.enum(['asc', 'desc']).default('desc'),
+  sort: z.enum(LIBRARY_SORTS).default('addedAt'),
+  // Unset: newest and most played first, the text and duration sorts A-Z / shortest first.
+  order: z.enum(['asc', 'desc']).optional(),
+  // Every song the user collected (liked or put in a playlist), or only the liked ones.
+  filter: z.enum(['all', 'liked']).default('all'),
+  // Unset: the whole library in one answer, as app versions before paging expect.
+  limit: queryInt(1, 500).optional(),
+  cursor: z.string().regex(/^\d+$/, 'Unknown cursor').optional(),
 });
 const recentlyPlayedQuery = z.object({ limit: queryInt(1, 100).default(10) });
 const mostPlayedQuery = z.object({
@@ -202,32 +209,116 @@ meRouter.delete('/', async (req, res) => {
 });
 
 // Library
-meRouter.get('/library/tracks', async (req, res) => {
-  const { sort, order } = parseQuery(libraryQuery, req);
-  const favs = await db.select().from(favouriteTracks).where(eq(favouriteTracks.userId, req.user!.id));
+interface LibraryEntry {
+  kind: string;
+  id: string;
+  /** The newest time the song was liked or put in a playlist. */
+  addedAt: number;
+  favourite: boolean;
+  /** Newest snapshot first: the liked row's, then the playlist rows'. */
+  rowMeta: unknown;
+  meta: TrackMeta | null;
+  playCount: number;
+}
 
-  const items = await hydrateTracks(
-    req.user!.id,
-    favs.map((f) => ({
-      trackRefKind: f.trackRefKind,
-      trackRefId: f.trackRefId,
-      addedAt: f.addedAt.getTime(),
-      favourite: true,
-      rowMeta: f.meta,
+const textKey = { title: 'title', artist: 'artist', album: 'album' } as const;
+
+/** Orders the whole library by what the database already knows, so only one page needs hydrating. */
+const sortLibrary = (entries: LibraryEntry[], sort: (typeof LIBRARY_SORTS)[number], descending: boolean) => {
+  const value = (e: LibraryEntry): string | number | null => {
+    if (sort === 'addedAt') return e.addedAt;
+    if (sort === 'playCount') return e.playCount;
+    if (sort === 'durationMs') return e.meta?.durationMs ?? null;
+    return e.meta?.[textKey[sort]]?.trim() || null;
+  };
+  return entries.sort((a, b) => {
+    const x = value(a);
+    const y = value(b);
+    // Songs whose detail is unknown go last either way; ties keep the newest first.
+    if (x === null || y === null) return x === y ? b.addedAt - a.addedAt : x === null ? 1 : -1;
+    const diff =
+      typeof x === 'number' && typeof y === 'number'
+        ? x - y
+        : String(x).localeCompare(String(y), undefined, { sensitivity: 'base' });
+    return (descending ? -diff : diff) || b.addedAt - a.addedAt;
+  });
+};
+
+// Liked songs plus the songs in the user's playlists, each once. A song only in another device's
+// playlist as a local file can't play anywhere else, so playlists contribute server songs only.
+meRouter.get('/library/tracks', async (req, res) => {
+  const userId = req.user!.id;
+  const { sort, order, filter, limit, cursor } = parseQuery(libraryQuery, req);
+  const descending = order ? order === 'desc' : sort === 'addedAt' || sort === 'playCount';
+
+  const [favs, listed, plays] = await Promise.all([
+    db.select().from(favouriteTracks).where(eq(favouriteTracks.userId, userId)),
+    filter === 'all'
+      ? db
+          .select({
+            trackRefKind: playlistTracks.trackRefKind,
+            trackRefId: playlistTracks.trackRefId,
+            addedAt: playlistTracks.addedAt,
+            meta: playlistTracks.meta,
+          })
+          .from(playlistTracks)
+          .innerJoin(playlists, eq(playlists.id, playlistTracks.playlistId))
+          .where(and(eq(playlists.userId, userId), eq(playlistTracks.trackRefKind, 'server')))
+          .orderBy(desc(playlistTracks.addedAt))
+      : Promise.resolve([]),
+    db
+      .select({ trackRefId: playHistory.trackRefId, count: sql<number>`count(*)::int` })
+      .from(playHistory)
+      .where(eq(playHistory.userId, userId))
+      .groupBy(playHistory.trackRefId),
+  ]);
+
+  const entries = new Map<string, LibraryEntry>();
+  const add = (kind: string, id: string, at: Date, meta: unknown, favourite: boolean) => {
+    const key = `${kind}:${id}`;
+    const known = entries.get(key);
+    if (!known) {
+      entries.set(key, { kind, id, addedAt: at.getTime(), favourite, rowMeta: meta, meta: null, playCount: 0 });
+      return;
+    }
+    known.addedAt = Math.max(known.addedAt, at.getTime());
+    known.favourite ||= favourite;
+    known.rowMeta ??= meta;
+  };
+  for (const f of favs) add(f.trackRefKind, f.trackRefId, f.addedAt, f.meta, true);
+  for (const p of listed) add(p.trackRefKind, p.trackRefId, p.addedAt, p.meta, false);
+
+  // Sort keys: the rows' own snapshots, then catalog_items in one query. Unknown songs sort last.
+  const all = [...entries.values()];
+  for (const e of all) e.meta = parseTrackMeta(e.rowMeta);
+  const unknown = all.filter((e) => e.kind === 'server' && !e.meta).map((e) => e.id);
+  if (unknown.length > 0) {
+    const catalog = await getCatalogItems<TrackMeta>('track', unknown);
+    for (const e of all) if (!e.meta && e.kind === 'server') e.meta = catalog.get(e.id) ?? null;
+  }
+  const playCounts = new Map(plays.map((p) => [p.trackRefId, p.count]));
+  for (const e of all) e.playCount = playCounts.get(e.id) ?? 0;
+
+  sortLibrary(all, sort, descending);
+  const start = cursor ? Number(cursor) : 0;
+  const page = limit === undefined ? all.slice(start) : all.slice(start, start + limit);
+
+  const hydrated = await hydrateTracks(
+    userId,
+    page.map((e) => ({
+      trackRefKind: e.kind,
+      trackRefId: e.id,
+      addedAt: e.addedAt,
+      favourite: e.favourite,
+      playCount: e.playCount,
+      rowMeta: e.meta ?? e.rowMeta,
     })),
   );
+  // hydrateTracks reads addedAt from favourites only; a playlist song's comes from its entry.
+  const items = hydrated.map((t, i) => ({ ...t, addedAt: page[i].addedAt, favourite: page[i].favourite }));
 
-  // Sort items
-  const isAsc = order === 'asc';
-  if (sort === 'title') {
-    items.sort((a, b) => (isAsc ? a.title.localeCompare(b.title) : b.title.localeCompare(a.title)));
-  } else if (sort === 'playCount') {
-    items.sort((a, b) => (isAsc ? a.playCount - b.playCount : b.playCount - a.playCount));
-  } else {
-    items.sort((a, b) => (isAsc ? a.addedAt - b.addedAt : b.addedAt - a.addedAt));
-  }
-
-  res.json({ items, meta: { total: items.length } });
+  const end = start + page.length;
+  res.json({ items, meta: { total: all.length, ...(end < all.length && { nextCursor: String(end) }) } });
 });
 
 meRouter.get('/library/albums', async (req, res) => {

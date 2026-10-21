@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import net from 'node:net';
+import crypto from 'node:crypto';
 import request from 'supertest';
 import { createApp } from '../../src/app.js';
 import { config } from '../../src/config.js';
@@ -741,6 +742,136 @@ describe('Me: profile & personal data', () => {
     } finally {
       config.PIPED_API_URL = original;
     }
+  });
+
+  // ---- Library: liked songs plus playlist songs ----
+
+  const songMeta = (title: string, artist: string, durationMs: number | null = 200_000, album?: string) => ({
+    title,
+    artist,
+    artistId: '',
+    durationMs,
+    ...(album && { album }),
+  });
+
+  const playlistWith = async (userId: string, songs: { id: string; meta?: unknown; at?: Date; kind?: string }[]) => {
+    const id = `sonare:${crypto.randomUUID()}`;
+    await db.insert(playlists).values({ id, userId, name: 'Mix', kind: 'online' });
+    await db.insert(playlistTracks).values(
+      songs.map((s, i) => ({
+        playlistId: id,
+        position: i,
+        trackRefKind: s.kind ?? 'server',
+        trackRefId: s.id,
+        meta: s.meta ?? null,
+        ...(s.at && { addedAt: s.at }),
+      })),
+    );
+    return id;
+  };
+
+  const library = (token: string, query = '') =>
+    request(app).get(`/api/v1/me/library/tracks${query}`).set('Authorization', `Bearer ${token}`);
+
+  it('BE-ME-051: GET /api/v1/me/library/tracks lists liked and playlist songs once, newest add first', async () => {
+    const { user, token } = await createUser();
+    await db.insert(favouriteTracks).values([
+      {
+        userId: user.id,
+        trackRefKind: 'server',
+        trackRefId: 'likedOnly',
+        addedAt: new Date(1000),
+        meta: songMeta('A', 'X'),
+      },
+      {
+        userId: user.id,
+        trackRefKind: 'server',
+        trackRefId: 'both',
+        addedAt: new Date(2000),
+        meta: songMeta('B', 'X'),
+      },
+    ]);
+    await playlistWith(user.id, [
+      { id: 'both', meta: songMeta('B', 'X'), at: new Date(5000) },
+      { id: 'listedOnly', meta: songMeta('C', 'Y'), at: new Date(3000) },
+      // Another device's file: it can't play from here, so the library leaves it out.
+      { id: 'fingerprint1', kind: 'local', at: new Date(9000) },
+    ]);
+
+    const res = await library(token);
+    expect(res.status).toBe(200);
+    expect(res.body.items.map((t: { id: string }) => t.id)).toEqual(['yt:both', 'yt:listedOnly', 'yt:likedOnly']);
+    expect(res.body.items.map((t: { favourite: boolean }) => t.favourite)).toEqual([true, false, true]);
+    expect(res.body.items[0].addedAt).toBe(5000);
+    expect(res.body.items[1]).toMatchObject({ title: 'C', addedAt: 3000 });
+    expect(res.body.meta).toEqual({ total: 3 });
+  });
+
+  it('BE-ME-052: GET /api/v1/me/library/tracks?filter=liked leaves out songs only in playlists', async () => {
+    const { user, token } = await createUser();
+    await db
+      .insert(favouriteTracks)
+      .values({ userId: user.id, trackRefKind: 'server', trackRefId: 'liked1', meta: songMeta('A', 'X') });
+    await playlistWith(user.id, [{ id: 'listed1', meta: songMeta('B', 'X') }]);
+
+    const res = await library(token, '?filter=liked');
+    expect(res.status).toBe(200);
+    expect(res.body.items.map((t: { id: string }) => t.id)).toEqual(['yt:liked1']);
+    expect(res.body.meta.total).toBe(1);
+  });
+
+  it('BE-ME-053: GET /api/v1/me/library/tracks sorts by stored details; unknown ones go last', async () => {
+    const { user, token } = await createUser();
+    await playlistWith(user.id, [
+      { id: 'song1', meta: songMeta('beta', 'Zed', 300_000, 'Moon') },
+      { id: 'song2', meta: songMeta('Alpha', 'amy', 100_000, 'sun') },
+      { id: 'song3', meta: songMeta('gamma', 'Bob', null) },
+    ]);
+    await db.insert(playHistory).values([
+      { userId: user.id, trackRefKind: 'server', trackRefId: 'song3', playedAt: new Date(), msPlayed: 40000 },
+      { userId: user.id, trackRefKind: 'server', trackRefId: 'song3', playedAt: new Date(), msPlayed: 40000 },
+      { userId: user.id, trackRefKind: 'server', trackRefId: 'song1', playedAt: new Date(), msPlayed: 40000 },
+    ]);
+    const ids = async (query: string) =>
+      (await library(token, query)).body.items.map((t: { id: string }) => t.id.slice(3));
+
+    expect(await ids('?sort=title')).toEqual(['song2', 'song1', 'song3']);
+    expect(await ids('?sort=title&order=desc')).toEqual(['song3', 'song1', 'song2']);
+    expect(await ids('?sort=artist')).toEqual(['song2', 'song3', 'song1']);
+    expect(await ids('?sort=album')).toEqual(['song1', 'song2', 'song3']);
+    expect(await ids('?sort=durationMs')).toEqual(['song2', 'song1', 'song3']);
+    expect(await ids('?sort=playCount')).toEqual(['song3', 'song1', 'song2']);
+    expect((await library(token, '?sort=playCount')).body.items[0].playCount).toBe(2);
+    expect((await library(token, '?sort=loudness')).status).toBe(400);
+  });
+
+  it('BE-ME-054: GET /api/v1/me/library/tracks pages with limit and cursor', async () => {
+    const { user, token } = await createUser();
+    await playlistWith(
+      user.id,
+      ['p1', 'p2', 'p3', 'p4', 'p5'].map((id, i) => ({ id, meta: songMeta(id, 'X'), at: new Date(10_000 - i) })),
+    );
+
+    const first = await library(token, '?limit=2');
+    expect(first.body.items.map((t: { id: string }) => t.id)).toEqual(['yt:p1', 'yt:p2']);
+    expect(first.body.meta).toEqual({ total: 5, nextCursor: '2' });
+    const second = await library(token, `?limit=2&cursor=${first.body.meta.nextCursor}`);
+    expect(second.body.items.map((t: { id: string }) => t.id)).toEqual(['yt:p3', 'yt:p4']);
+    const last = await library(token, '?limit=2&cursor=4');
+    expect(last.body.items.map((t: { id: string }) => t.id)).toEqual(['yt:p5']);
+    expect(last.body.meta).toEqual({ total: 5 });
+    expect((await library(token, '?cursor=abc')).status).toBe(400);
+  });
+
+  it("BE-ME-055: GET /api/v1/me/library/tracks leaves out other users' playlists", async () => {
+    const { token } = await createUser();
+    const { user: other } = await createUser();
+    await playlistWith(other.id, [{ id: 'theirs', meta: songMeta('T', 'X') }]);
+
+    const res = await library(token);
+    expect(res.status).toBe(200);
+    expect(res.body.items).toEqual([]);
+    expect(res.body.meta).toEqual({ total: 0 });
   });
 });
 
