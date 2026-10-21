@@ -10,6 +10,7 @@ import {
   normalizeStreamItemToAlbum,
   normalizeChannelTabAlbum,
   normalizeChannelToArtist,
+  normalizePlaylist,
   normalizePlaylistToAlbum,
 } from '../normalize/index.js';
 import { idHelpers } from '../ids.js';
@@ -428,14 +429,9 @@ catalogRouter.get('/artists/:id/albums', async (req, res) => {
 catalogRouter.get('/playlists/:id', async (req, res) => {
   const rawId = idHelpers.extractYtId(req.params.id);
   const playlist = await CachedPiped.playlist(rawId);
-  res.json({
-    id: idHelpers.prefixYt(rawId),
-    name: playlist.name,
-    kind: 'online',
-    trackCount: playlist.videos >= 0 ? playlist.videos : null,
-    downloadedCount: 0,
-    // No updatedAt: Piped doesn't say when a YouTube playlist last changed.
-  });
+  // The apps' own mapping (with the channel and cover). No updatedAt: Piped doesn't say when a
+  // YouTube playlist last changed.
+  res.json(normalizePlaylist(playlist, rawId));
 });
 
 catalogRouter.get('/playlists/:id/tracks', async (req, res) => {

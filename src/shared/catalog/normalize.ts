@@ -5,7 +5,7 @@
 // this file (scripts/sync-shared-catalog.mjs in the root repo), so both always agree.
 
 import type { Channel, ChannelTabItem, Playlist, StreamItem, Streams } from './pipedTypes.js';
-import type { Track, Album, Artist } from '../apiTypes.js';
+import type { Track, Album, Artist, Playlist as ApiPlaylist } from '../apiTypes.js';
 import { idHelpers } from './ids.js';
 import { directImageUrl, trackThumbUrl } from './images.js';
 import { applyTitleFix } from './titleFixes.js';
@@ -248,5 +248,32 @@ export const normalizePlaylistToAlbum = (
     source: 'server' as const,
     downloaded: false,
     thumbnail: images.album(ytid, playlist.thumbnailUrl),
+  };
+};
+
+export const normalizePlaylist = (
+  playlist: Playlist,
+  playlistId: string,
+): ApiPlaylist => {
+  const ytid = idHelpers.prefixYt(playlistId);
+  let uploader = playlist.uploader;
+  if (!uploader) {
+    const counts = new Map<string, number>();
+    for (const s of playlist.relatedStreams ?? []) {
+      if (!s.uploaderName) continue;
+      counts.set(s.uploaderName, (counts.get(s.uploaderName) ?? 0) + 1);
+    }
+    const top = [...counts.entries()].sort((a, b) => b[1] - a[1])[0];
+    if (top) uploader = top[0];
+  }
+  const thumb = playlist.thumbnailUrl || playlist.relatedStreams?.find((s) => s.thumbnail)?.thumbnail;
+  return {
+    id: ytid,
+    name: playlist.name,
+    kind: 'online',
+    trackCount: playlist.videos >= 0 ? playlist.videos : null,
+    downloadedCount: 0,
+    owner: stripArtist(uploader) || undefined,
+    thumbnail: images.album(ytid, thumb),
   };
 };
