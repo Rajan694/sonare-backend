@@ -137,6 +137,14 @@ const playerStateSchema = z.object({
   repeat: z.enum(['off', 'all', 'one']).optional(),
 });
 
+// Bulk unlike: `yt:…` or `local:…` ids, 1..500 at a time.
+const bulkUnlikeSchema = z.object({
+  ids: z
+    .array(trackId, { required_error: 'ids must be an array', invalid_type_error: 'ids must be an array' })
+    .min(1, 'Send at least one id')
+    .max(500, 'At most 500 ids at a time'),
+});
+
 // Protect all /me routes with requireAuth
 meRouter.use(requireAuth);
 
@@ -601,6 +609,19 @@ meRouter.delete('/favourites/tracks/:id', async (req, res) => {
     .where(and(eq(favouriteTracks.userId, req.user!.id), eq(favouriteTracks.trackRefId, trackRefId)));
 
   res.json({ ok: true });
+});
+
+// Bulk unlike: strip prefixes, delete all listed ids belonging to this user in one query.
+meRouter.delete('/favourites/tracks', async (req, res) => {
+  const { ids } = parseBody(bulkUnlikeSchema, req);
+  const rawIds = ids.map((id) => (id.startsWith('yt:') ? idHelpers.extractYtId(id) : id.replace(/^local:/, '')));
+
+  const result = await db
+    .delete(favouriteTracks)
+    .where(and(eq(favouriteTracks.userId, req.user!.id), inArray(favouriteTracks.trackRefId, rawIds)))
+    .returning({ trackRefId: favouriteTracks.trackRefId });
+
+  res.json({ ok: true, removed: result.length });
 });
 
 meRouter.put('/favourites/albums/:id', async (req, res) => {

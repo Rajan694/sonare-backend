@@ -227,6 +227,10 @@ This document maps all backend test IDs to their specifications, assertions, and
 | `BE-ME-053`       | `GET /api/v1/me/library/tracks`                         | Sorts by title, artist, album, duration and plays from stored details; unknown ones go last.         |
 | `BE-ME-054`       | `GET /api/v1/me/library/tracks`                         | Pages with `limit` and `cursor`; the last page has no nextCursor; a bad cursor is a 400.             |
 | `BE-ME-055`       | `GET /api/v1/me/library/tracks`                         | Leaves out other users' playlists.                                                                   |
+| `BE-ME-056`       | `DELETE /api/v1/me/favourites/tracks`                   | Removes exactly the listed ids and leaves the rest; `removed` count equals rows deleted.             |
+| `BE-ME-057`       | `DELETE /api/v1/me/favourites/tracks`                   | Does not touch another user's rows with the same raw id.                                             |
+| `BE-ME-058`       | `DELETE /api/v1/me/favourites/tracks`                   | Rejects an empty array and a 501-element array with 400 BAD_REQUEST.                                 |
+| `BE-ME-059`       | `DELETE /api/v1/me/favourites/tracks`                   | Returns 401 UNAUTHORIZED when no token is provided.                                                  |
 | `BE-ME-EXTRA-001` | `GET /api/v1/me/playlists/:id`                          | Returns 404 for missing playlist.                                                                    |
 | `BE-ME-EXTRA-002` | `PATCH /api/v1/me/playlists/:id`                        | Returns 404 when attempting to edit another user's playlist.                                         |
 | `BE-ME-EXTRA-003` | `DELETE /api/v1/me/playlists/:id`                       | Returns 200 idempotently when playlist is not found.                                                 |

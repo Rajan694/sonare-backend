@@ -1652,3 +1652,74 @@ describe('Me: request validation', () => {
     expect(res.body.error).toEqual({ code: 'BAD_REQUEST', message: 'Must be at least 1' });
   });
 });
+
+describe('Me: bulk unlike', () => {
+  const app = createApp();
+
+  it('BE-ME-056: DELETE /api/v1/me/favourites/tracks removes exactly the listed ids and leaves others', async () => {
+    const { user, token } = await createUser();
+    await db.insert(favouriteTracks).values([
+      { userId: user.id, trackRefKind: 'server', trackRefId: 'keepMe' },
+      { userId: user.id, trackRefKind: 'server', trackRefId: 'removeA' },
+      { userId: user.id, trackRefKind: 'local', trackRefId: 'removeB' },
+    ]);
+
+    const res = await request(app)
+      .delete('/api/v1/me/favourites/tracks')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ ids: ['yt:removeA', 'local:removeB'] });
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ ok: true, removed: 2 });
+
+    // Only 'keepMe' must survive.
+    const remaining = await db.select().from(favouriteTracks).where(eq(favouriteTracks.userId, user.id));
+    expect(remaining).toHaveLength(1);
+    expect(remaining[0].trackRefId).toBe('keepMe');
+  });
+
+  it("BE-ME-057: DELETE /api/v1/me/favourites/tracks does not touch another user's rows", async () => {
+    const { token } = await createUser();
+    const { user: other } = await createUser();
+    // Both users have the same raw id.
+    await db.insert(favouriteTracks).values({ userId: other.id, trackRefKind: 'server', trackRefId: 'sharedId' });
+
+    const res = await request(app)
+      .delete('/api/v1/me/favourites/tracks')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ ids: ['yt:sharedId'] });
+
+    expect(res.status).toBe(200);
+    // Called user has no rows to delete; other user's row is untouched.
+    expect(res.body).toEqual({ ok: true, removed: 0 });
+    const otherRows = await db.select().from(favouriteTracks).where(eq(favouriteTracks.userId, other.id));
+    expect(otherRows).toHaveLength(1);
+  });
+
+  it('BE-ME-058: DELETE /api/v1/me/favourites/tracks rejects empty array and 501-element array with 400', async () => {
+    const { token } = await createUser();
+
+    const emptyRes = await request(app)
+      .delete('/api/v1/me/favourites/tracks')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ ids: [] });
+    expect(emptyRes.status).toBe(400);
+    expect(emptyRes.body.error.code).toBe('BAD_REQUEST');
+
+    const tooMany = await request(app)
+      .delete('/api/v1/me/favourites/tracks')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ ids: Array.from({ length: 501 }, (_, i) => `yt:track${i}`) });
+    expect(tooMany.status).toBe(400);
+    expect(tooMany.body.error.code).toBe('BAD_REQUEST');
+  });
+
+  it('BE-ME-059: DELETE /api/v1/me/favourites/tracks requires a token, returning 401 without one', async () => {
+    const res = await request(app)
+      .delete('/api/v1/me/favourites/tracks')
+      .send({ ids: ['yt:anyTrack'] });
+
+    expect(res.status).toBe(401);
+    expect(res.body.error.code).toBe('UNAUTHORIZED');
+  });
+});
