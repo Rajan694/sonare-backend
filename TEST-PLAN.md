@@ -237,6 +237,10 @@ This document maps all backend test IDs to their specifications, assertions, and
 | `BE-ME-063`       | `GET /api/v1/me/not-played-lately`                      | Validates limit (default 20, 1..50; rejects 0, 51, non-numeric).                                        |
 | `BE-ME-064`       | `GET /api/v1/me/not-played-lately`                      | Returns 502 UPSTREAM_UNAVAILABLE when Piped is down and track has no stored details.                    |
 | `BE-ME-065`       | `GET /api/v1/me/not-played-lately`                      | Returns 401 UNAUTHORIZED when no token is provided.                                                     |
+| `BE-ME-066`       | `DELETE /api/v1/me/history`                             | Deletes all caller's play history and cached AI recommendation (`ai:ymal:<userId>`).                    |
+| `BE-ME-067`       | `DELETE /api/v1/me/history`                             | Leaves another user's play history and caller's favourites and playlists untouched.                     |
+| `BE-ME-068`       | `DELETE /api/v1/me/history`                             | Causes recently-played and most-played to return empty lists after deletion.                            |
+| `BE-ME-069`       | `DELETE /api/v1/me/history`                             | Returns 401 UNAUTHORIZED when no token is provided.                                                     |
 | `BE-ME-EXTRA-001` | `GET /api/v1/me/playlists/:id`                          | Returns 404 for missing playlist.                                                                       |
 | `BE-ME-EXTRA-002` | `PATCH /api/v1/me/playlists/:id`                        | Returns 404 when attempting to edit another user's playlist.                                            |
 | `BE-ME-EXTRA-003` | `DELETE /api/v1/me/playlists/:id`                       | Returns 200 idempotently when playlist is not found.                                                    |

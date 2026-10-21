@@ -24,6 +24,7 @@ import {
 } from '../../src/db/schema.js';
 import { eq } from 'drizzle-orm';
 import { MockAgent, getGlobalDispatcher, setGlobalDispatcher, type Dispatcher } from 'undici';
+import { isRedisAvailable, redis } from '../../src/services/cache.js';
 
 describe('Me: profile & personal data', () => {
   const app = createApp();
@@ -2023,6 +2024,108 @@ describe('Me: not played lately', () => {
 
   it('BE-ME-065: GET /api/v1/me/not-played-lately requires a token, returning 401 without one', async () => {
     const res = await request(app).get('/api/v1/me/not-played-lately');
+    expect(res.status).toBe(401);
+    expect(res.body.error.code).toBe('UNAUTHORIZED');
+  });
+
+  it('BE-ME-066: DELETE /api/v1/me/history deletes all play_history rows of the caller and returns removed count', async () => {
+    const { user, token } = await createUser();
+
+    await db.insert(playHistory).values([
+      { userId: user.id, trackRefKind: 'server', trackRefId: 'songH1', playedAt: new Date(), msPlayed: 30000 },
+      { userId: user.id, trackRefKind: 'server', trackRefId: 'songH2', playedAt: new Date(), msPlayed: 45000 },
+      { userId: user.id, trackRefKind: 'server', trackRefId: 'songH3', playedAt: new Date(), msPlayed: 20000 },
+    ]);
+
+    if (isRedisAvailable()) {
+      await redis.set(`ai:ymal:${user.id}`, JSON.stringify({ picks: [], basedOn: [], generatedAt: Date.now() }));
+    }
+
+    const res = await request(app).delete('/api/v1/me/history').set('Authorization', `Bearer ${token}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ ok: true, removed: 3 });
+
+    const remaining = await db.select().from(playHistory).where(eq(playHistory.userId, user.id));
+    expect(remaining).toHaveLength(0);
+
+    if (isRedisAvailable()) {
+      const cached = await redis.get(`ai:ymal:${user.id}`);
+      expect(cached).toBeNull();
+    }
+  });
+
+  it("BE-ME-067: DELETE /api/v1/me/history leaves another user's history and caller's favourites and playlists untouched", async () => {
+    const { user, token } = await createUser();
+    const { user: other } = await createUser();
+
+    await db.insert(playHistory).values([
+      { userId: user.id, trackRefKind: 'server', trackRefId: 'userSong', playedAt: new Date(), msPlayed: 30000 },
+      { userId: other.id, trackRefKind: 'server', trackRefId: 'otherSong', playedAt: new Date(), msPlayed: 30000 },
+    ]);
+
+    await db.insert(favouriteTracks).values({
+      userId: user.id,
+      trackRefKind: 'server',
+      trackRefId: 'favSong1',
+    });
+
+    await db.insert(playlists).values({
+      id: `sonare:${crypto.randomUUID()}`,
+      userId: user.id,
+      name: 'Untouched Playlist',
+      kind: 'online',
+    });
+
+    const res = await request(app).delete('/api/v1/me/history').set('Authorization', `Bearer ${token}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ ok: true, removed: 1 });
+
+    const userPlays = await db.select().from(playHistory).where(eq(playHistory.userId, user.id));
+    expect(userPlays).toHaveLength(0);
+
+    const otherPlays = await db.select().from(playHistory).where(eq(playHistory.userId, other.id));
+    expect(otherPlays).toHaveLength(1);
+
+    const userFavs = await db.select().from(favouriteTracks).where(eq(favouriteTracks.userId, user.id));
+    expect(userFavs).toHaveLength(1);
+
+    const userPls = await db.select().from(playlists).where(eq(playlists.userId, user.id));
+    expect(userPls).toHaveLength(1);
+  });
+
+  it('BE-ME-068: DELETE /api/v1/me/history causes recently-played and most-played to return empty lists', async () => {
+    const { user, token } = await createUser();
+
+    await db
+      .insert(playHistory)
+      .values([
+        {
+          userId: user.id,
+          trackRefKind: 'server',
+          trackRefId: 'playedTrack',
+          playedAt: new Date(),
+          msPlayed: 30000,
+          meta: songMeta('Track', 'Artist'),
+        },
+      ]);
+
+    const delRes = await request(app).delete('/api/v1/me/history').set('Authorization', `Bearer ${token}`);
+    expect(delRes.status).toBe(200);
+    expect(delRes.body).toEqual({ ok: true, removed: 1 });
+
+    const recentRes = await request(app).get('/api/v1/me/recently-played').set('Authorization', `Bearer ${token}`);
+    expect(recentRes.status).toBe(200);
+    expect(recentRes.body.items).toHaveLength(0);
+
+    const mostRes = await request(app).get('/api/v1/me/most-played').set('Authorization', `Bearer ${token}`);
+    expect(mostRes.status).toBe(200);
+    expect(mostRes.body.items).toHaveLength(0);
+  });
+
+  it('BE-ME-069: DELETE /api/v1/me/history requires a token, returning 401 without one', async () => {
+    const res = await request(app).delete('/api/v1/me/history');
     expect(res.status).toBe(401);
     expect(res.body.error.code).toBe('UNAUTHORIZED');
   });

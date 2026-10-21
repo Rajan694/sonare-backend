@@ -19,6 +19,7 @@ import { hydrateTracks } from '../db/hydrate.js';
 import { CachedPiped, PIPED_LOOKUP_CONCURRENCY } from '../services/cache.js';
 import { mapLimit } from '../mapLimit.js';
 import { prunePlayHistoryForUser } from '../services/playHistory.js';
+import { forgetYouMayLike } from '../services/ai/features.js';
 import { normalizeChannelToArtist, normalizePlaylistToAlbum, normalizeStreamToTrack } from '../normalize/index.js';
 import crypto from 'node:crypto';
 import { z } from 'zod';
@@ -788,6 +789,18 @@ meRouter.get('/not-played-lately', async (req, res) => {
     items,
     meta: { total: items.length },
   });
+});
+
+// Clear play history and cached AI "You may like" recommendation.
+meRouter.delete('/history', async (req, res) => {
+  const removed = await db
+    .delete(playHistory)
+    .where(eq(playHistory.userId, req.user!.id))
+    .returning({ id: playHistory.id });
+
+  await forgetYouMayLike(req.user!.id);
+
+  res.json({ ok: true, removed: removed.length });
 });
 
 // Placeholder: the apps call it, but followed artists' releases aren't tracked yet.
