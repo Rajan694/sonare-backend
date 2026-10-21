@@ -85,6 +85,8 @@ export interface Playlist {
   /** The user's own playlists only; YouTube playlists (GET /playlists/:id) have no date. */
   updatedAt?: number;
   thumbnail?: string;
+  /** YouTube playlists: the channel that made it. */
+  owner?: string;
 }
 
 /**
