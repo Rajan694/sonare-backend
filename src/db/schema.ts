@@ -14,6 +14,20 @@ import {
   customType,
 } from 'drizzle-orm/pg-core';
 
+/** Postgres integer[] — no native drizzle builder, so we use customType. */
+const intArray = customType<{ data: number[]; driverData: string }>({
+  dataType: () => 'integer[]',
+  toDriver: (v) => `{${v.join(',')}}`,
+  fromDriver: (v) => {
+    if (Array.isArray(v)) return v as number[];
+    // postgres driver returns the literal string '{1,2,...}'
+    return String(v)
+      .replace(/^\{|}$/g, '')
+      .split(',')
+      .map(Number);
+  },
+});
+
 export const users = pgTable('users', {
   id: uuid('id').defaultRandom().primaryKey(),
   email: text('email').notNull().unique(),
@@ -26,6 +40,8 @@ export const users = pgTable('users', {
   tokenVersion: integer('token_version').default(0).notNull(),
   lastLoginAt: timestamp('last_login_at'),
   passwordChangedAt: timestamp('password_changed_at'),
+  /** X-Sonare-Client sent with the register request (web | linux | mobile | null). */
+  signupClient: text('signup_client'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
 });
 
@@ -202,23 +218,48 @@ export const lyricsOverrides = pgTable(
 
 // --- Admin analytics (/admin on the web build).
 
-/** One row per API request, for the admin analytics. Pruned after 30 days. */
-export const requestLogs = pgTable(
-  'request_logs',
+/**
+ * One row per (local-timezone calendar day, actor, client). actor = user id when signed in,
+ * else the install id. kind = 'user' | 'guest'. install = install id seen paired with a
+ * signed-in actor that day (used to exclude guests who also signed in from guest counts).
+ */
+export const activityDaily = pgTable(
+  'activity_daily',
   {
-    id: bigserial('id', { mode: 'number' }).primaryKey(),
-    at: timestamp('at').defaultNow().notNull(),
-    method: text('method').notNull(),
-    /** The matched route pattern (`/api/v1/tracks/:id`), not the raw url. */
-    route: text('route').notNull(),
-    status: integer('status').notNull(),
-    durationMs: integer('duration_ms').notNull(),
-    userId: uuid('user_id'),
-    /** web | linux | mobile, from the apps' X-Sonare-Client header; null for anything else. */
-    client: text('client'),
+    day: date('day').notNull(),
+    actor: text('actor').notNull(),
+    kind: text('kind').notNull(),
+    client: text('client').notNull(),
+    install: text('install'),
   },
   (t) => ({
-    atIdx: index('request_logs_at_idx').on(t.at),
+    pk: primaryKey({ columns: [t.day, t.actor, t.client] }),
+    dayIdx: index('activity_daily_day_idx').on(t.day),
+  }),
+);
+
+/**
+ * Request counts, status classes, latency totals and a 9-bucket histogram per UTC hour,
+ * method and route. hist upper bounds (ms): 25, 50, 100, 250, 500, 1000, 2500, 5000, ∞.
+ */
+export const apiUsageHourly = pgTable(
+  'api_usage_hourly',
+  {
+    hour: timestamp('hour').notNull(),
+    method: text('method').notNull(),
+    route: text('route').notNull(),
+    count: integer('count').default(0).notNull(),
+    s2xx: integer('s2xx').default(0).notNull(),
+    s3xx: integer('s3xx').default(0).notNull(),
+    s4xx: integer('s4xx').default(0).notNull(),
+    s5xx: integer('s5xx').default(0).notNull(),
+    totalMs: bigint('total_ms', { mode: 'number' }).default(0).notNull(),
+    maxMs: integer('max_ms').default(0).notNull(),
+    hist: intArray('hist').default([0, 0, 0, 0, 0, 0, 0, 0, 0]).notNull(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.hour, t.method, t.route] }),
+    hourIdx: index('api_usage_hourly_hour_idx').on(t.hour),
   }),
 );
 

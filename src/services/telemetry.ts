@@ -1,32 +1,72 @@
 import type { Request, RequestHandler, Response } from 'express';
 import { and, eq, lt, or, sql } from 'drizzle-orm';
 import { db } from '../db/index.js';
-import { errorLogs, refreshTokens, requestLogs } from '../db/schema.js';
+import { activityDaily, apiUsageHourly, errorLogs, refreshTokens } from '../db/schema.js';
 import { logger } from '../logger.js';
+import { config } from '../config.js';
 import { pruneLyricsCache } from './cache.js';
 import { pruneCatalogItems } from './catalogMeta.js';
 import { prunePlayHistory } from './playHistory.js';
 
-// Request logs and error logs for the admin page. Both are buffered in memory and written in
+// Telemetry: request-level analytics and error logs. Both are buffered in memory and written in
 // batches, so logging never adds a query to the request it describes.
-//
-// Timestamps are written from JS, which drizzle stores as UTC in these `timestamp` columns.
-// (A column left to defaultNow() gets the database session's local time instead.)
 
 export const CLIENTS = ['web', 'linux', 'mobile'] as const;
 export type ClientName = (typeof CLIENTS)[number];
 export type ErrorSource = 'backend' | ClientName;
 
-/**
- * Request logs are kept by size, not age: the newest this many. A row is about 127 bytes with
- * its indexes (measured on Neon), so this is about 250 MB of the free plan's 0.5 GB.
- */
-export const REQUEST_LOG_MAX_ROWS = 2_100_000;
+// UUID v1–v5 and v7: 8-4-4-4-12 hex with the right version nibble. We accept any version,
+// matching the contract ("valid UUID, any version").
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-9a-f][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+export const isValidInstallId = (v: string | null | undefined): v is string => !!v && UUID_RE.test(v);
+
+const ACTIVITY_RETENTION_DAYS = 400;
+const API_USAGE_RETENTION_DAYS = 90;
 const ERROR_LOG_DAYS = 90;
 const FLUSH_MS = 5_000;
-const MAX_PENDING_REQUESTS = 5_000;
 const MAX_PENDING_ERRORS = 500;
 const REFRESH_TOKEN_DAYS = 90;
+
+// --- Activity in-memory buffer --------------------------------------------------
+
+// Key: `${day}\x00${actor}\x00${client}\x00${install}` where day is YYYY-MM-DD in ANALYTICS_TIME_ZONE.
+// We keep a Set of keys written in the current local day; cleared when the local day ticks over.
+// This means each actor costs at most one DB row per day per client.
+const activityWritten = new Set<string>();
+let activityWrittenDay = ''; // Local calendar date string (YYYY-MM-DD) in ANALYTICS_TIME_ZONE
+const MAX_PENDING_ACTIVITY = 5_000;
+
+interface PendingActivity {
+  day: string;
+  actor: string;
+  kind: 'user' | 'guest';
+  client: string;
+  install: string | null;
+}
+let pendingActivity: PendingActivity[] = [];
+
+// --- API usage in-memory buffer -------------------------------------------------
+
+// hist bucket upper bounds in ms: 25, 50, 100, 250, 500, 1000, 2500, 5000, ∞
+const HIST_BOUNDS = [25, 50, 100, 250, 500, 1000, 2500, 5000];
+
+interface UsageAccum {
+  count: number;
+  s2xx: number;
+  s3xx: number;
+  s4xx: number;
+  s5xx: number;
+  totalMs: number;
+  maxMs: number;
+  hist: number[]; // length 9
+}
+
+// Key: `${hourIso}\x00${method}\x00${route}`
+const pendingUsage = new Map<string, UsageAccum>();
+// Guard: if the Map grows past this, the database is falling behind, drop incoming rows.
+const MAX_PENDING_USAGE_KEYS = 5_000;
+
+// --- Error buffer (unchanged) ---------------------------------------------------
 
 export interface ErrorReport {
   source: ErrorSource;
@@ -42,9 +82,6 @@ export interface ErrorReport {
   context?: Record<string, unknown> | null;
 }
 
-let pendingRequests: (typeof requestLogs.$inferInsert)[] = [];
-// Keyed by what makes two errors "the same" (see the grouping in writeError), so a burst of
-// one error is a single write with a count.
 let pendingErrors = new Map<string, { report: ErrorReport; count: number; at: Date }>();
 
 const truncate = (s: string | null | undefined, max: number): string | null => {
@@ -83,6 +120,26 @@ const routeOf = (req: Request, res: Response): string => {
   return m ? pathname.slice(0, m.index) + routePath : routePath;
 };
 
+/** Local calendar date string (YYYY-MM-DD) in the configured analytics timezone. */
+const localDay = (d: Date): string => {
+  return d.toLocaleDateString('en-CA', { timeZone: config.ANALYTICS_TIME_ZONE }).replace(/\//g, '-');
+};
+
+/** UTC hour-start ISO string `YYYY-MM-DDTHH:00:00.000Z` for use as a Map key. */
+const utcHourKey = (d: Date): string => {
+  const h = new Date(d);
+  h.setUTCMinutes(0, 0, 0);
+  return h.toISOString();
+};
+
+/** Index into hist (0..8) for a given duration. */
+const histBucket = (ms: number): number => {
+  for (let i = 0; i < HIST_BOUNDS.length; i++) {
+    if (ms <= HIST_BOUNDS[i]) return i;
+  }
+  return 8;
+};
+
 /**
  * Logs every API request (except CORS preflights and the admin API itself), and records a
  * server error for any 5xx the error handler answered (it leaves the error in res.locals).
@@ -117,16 +174,55 @@ export const requestLogger = (): RequestHandler => {
       }
 
       if (req.method === 'OPTIONS' || req.originalUrl.startsWith('/api/v1/admin')) return;
-      if (pendingRequests.length >= MAX_PENDING_REQUESTS) return; // the database is falling behind
-      pendingRequests.push({
-        at: new Date(),
-        method: req.method,
-        route,
-        status: res.statusCode,
-        durationMs: Math.round((headersAt ?? performance.now()) - start),
-        userId: req.user?.id ?? null,
-        client: clientOf(req),
-      });
+
+      const now = new Date();
+      const durationMs = Math.round((headersAt ?? performance.now()) - start);
+      const status = res.statusCode;
+      const method = req.method;
+      const installId = req.get('x-sonare-install') ?? null;
+      const install = isValidInstallId(installId) ? installId : null;
+
+      // --- activity_daily ---
+      // actor = user id (signed in) or install id (guest with valid header)
+      const userId = req.user?.id ?? null;
+      const actor = userId ?? install;
+      if (actor) {
+        const day = localDay(now);
+        const client = clientOf(req) ?? 'other';
+        const kind: 'user' | 'guest' = userId ? 'user' : 'guest';
+
+        // Refresh the per-day set when the ANALYTICS_TIME_ZONE date ticks over.
+        if (day !== activityWrittenDay) {
+          activityWritten.clear();
+          activityWrittenDay = day;
+        }
+
+        const installKey = userId ? (install ?? '') : '';
+        const key = `${day}\x00${actor}\x00${client}\x00${installKey}`;
+        if (!activityWritten.has(key)) {
+          if (pendingActivity.length < MAX_PENDING_ACTIVITY) {
+            activityWritten.add(key);
+            pendingActivity.push({ day, actor, kind, client, install: userId ? install : null });
+          }
+        }
+      }
+
+      // --- api_usage_hourly ---
+      if (pendingUsage.size >= MAX_PENDING_USAGE_KEYS) return; // database falling behind
+      const hKey = `${utcHourKey(now)}\x00${method}\x00${route}`;
+      let acc = pendingUsage.get(hKey);
+      if (!acc) {
+        acc = { count: 0, s2xx: 0, s3xx: 0, s4xx: 0, s5xx: 0, totalMs: 0, maxMs: 0, hist: [0, 0, 0, 0, 0, 0, 0, 0, 0] };
+        pendingUsage.set(hKey, acc);
+      }
+      acc.count++;
+      if (status >= 500) acc.s5xx++;
+      else if (status >= 400) acc.s4xx++;
+      else if (status >= 300) acc.s3xx++;
+      else acc.s2xx++;
+      acc.totalMs += durationMs;
+      if (durationMs > acc.maxMs) acc.maxMs = durationMs;
+      acc.hist[histBucket(durationMs)]++;
     });
     next();
   };
@@ -189,15 +285,98 @@ const writeError = async ({ report: r, count, at }: { report: ErrorReport; count
 
 let flushing: Promise<void> | null = null;
 
+const CHUNK_SIZE = 500;
+
 const writePending = async (): Promise<void> => {
-  const requests = pendingRequests;
+  const activity = pendingActivity;
+  const usage = [...pendingUsage.entries()];
   const errors = [...pendingErrors.values()];
-  pendingRequests = [];
+  pendingActivity = [];
+  pendingUsage.clear();
   pendingErrors = new Map();
+
   try {
-    for (let i = 0; i < requests.length; i += 1_000) {
-      await db.insert(requestLogs).values(requests.slice(i, i + 1_000));
+    // Flush activity rows in chunks of 500:
+    // Deduplicate within the flush batch by (day, actor, client) so Postgres does not hit
+    // "ON CONFLICT DO UPDATE command cannot affect row a second time", preserving non-null install.
+    if (activity.length > 0) {
+      const dedupedActivity = new Map<string, PendingActivity>();
+      for (const row of activity) {
+        const pk = `${row.day}\x00${row.actor}\x00${row.client}`;
+        const existing = dedupedActivity.get(pk);
+        if (!existing) {
+          dedupedActivity.set(pk, { ...row });
+        } else if (!existing.install && row.install) {
+          existing.install = row.install;
+        }
+      }
+      const activityRows = [...dedupedActivity.values()];
+
+      for (let i = 0; i < activityRows.length; i += CHUNK_SIZE) {
+        const chunk = activityRows.slice(i, i + CHUNK_SIZE);
+        await db
+          .insert(activityDaily)
+          .values(chunk)
+          .onConflictDoUpdate({
+            target: [activityDaily.day, activityDaily.actor, activityDaily.client],
+            set: {
+              install: sql`COALESCE(${activityDaily.install}, excluded.install)`,
+            },
+          });
+      }
     }
+
+    // Flush api usage: upsert in chunks of 500, adding counts to whatever is already in the DB.
+    if (usage.length > 0) {
+      const usageRows = usage.map(([hKey, acc]) => {
+        const [hourIso, method, route] = hKey.split('\x00');
+        return {
+          hour: new Date(hourIso),
+          method,
+          route,
+          count: acc.count,
+          s2xx: acc.s2xx,
+          s3xx: acc.s3xx,
+          s4xx: acc.s4xx,
+          s5xx: acc.s5xx,
+          totalMs: acc.totalMs,
+          maxMs: acc.maxMs,
+          hist: acc.hist,
+        };
+      });
+
+      for (let i = 0; i < usageRows.length; i += CHUNK_SIZE) {
+        const chunk = usageRows.slice(i, i + CHUNK_SIZE);
+        await db
+          .insert(apiUsageHourly)
+          .values(chunk)
+          .onConflictDoUpdate({
+            target: [apiUsageHourly.hour, apiUsageHourly.method, apiUsageHourly.route],
+            set: {
+              count: sql`${apiUsageHourly.count}   + excluded.count`,
+              s2xx: sql`${apiUsageHourly.s2xx}    + excluded.s2xx`,
+              s3xx: sql`${apiUsageHourly.s3xx}    + excluded.s3xx`,
+              s4xx: sql`${apiUsageHourly.s4xx}    + excluded.s4xx`,
+              s5xx: sql`${apiUsageHourly.s5xx}    + excluded.s5xx`,
+              totalMs: sql`${apiUsageHourly.totalMs} + excluded.total_ms`,
+              maxMs: sql`GREATEST(${apiUsageHourly.maxMs}, excluded.max_ms)`,
+              // Element-wise array addition for the histogram.
+              hist: sql`ARRAY[
+                ${apiUsageHourly.hist}[1] + excluded.hist[1],
+                ${apiUsageHourly.hist}[2] + excluded.hist[2],
+                ${apiUsageHourly.hist}[3] + excluded.hist[3],
+                ${apiUsageHourly.hist}[4] + excluded.hist[4],
+                ${apiUsageHourly.hist}[5] + excluded.hist[5],
+                ${apiUsageHourly.hist}[6] + excluded.hist[6],
+                ${apiUsageHourly.hist}[7] + excluded.hist[7],
+                ${apiUsageHourly.hist}[8] + excluded.hist[8],
+                ${apiUsageHourly.hist}[9] + excluded.hist[9]
+              ]`,
+            },
+          });
+      }
+    }
+
     for (const e of errors) await writeError(e);
   } catch (err) {
     // Not recorded as an error log: that write would most likely fail the same way.
@@ -215,18 +394,23 @@ export const flushTelemetry = (): Promise<void> => {
   return flushing;
 };
 
-/** Deletes all but the newest `maxRows` request logs. Ids only grow, so the primary key finds them. */
-export const pruneRequestLogs = async (maxRows = REQUEST_LOG_MAX_ROWS): Promise<void> => {
-  await db.execute(sql`
-    DELETE FROM request_logs
-    WHERE id <= (SELECT id FROM request_logs ORDER BY id DESC OFFSET ${maxRows} LIMIT 1)
-  `);
+export const _resetTelemetryStateForTesting = (): void => {
+  activityWritten.clear();
+  activityWrittenDay = '';
+  pendingActivity = [];
+  pendingUsage.clear();
+  pendingErrors = new Map();
 };
 
 const prune = async () => {
   try {
     const utcNow = sql`(now() AT TIME ZONE 'UTC')`;
-    await pruneRequestLogs();
+    await db
+      .delete(activityDaily)
+      .where(lt(activityDaily.day, sql`(${utcNow} - make_interval(days => ${ACTIVITY_RETENTION_DAYS}))::date`));
+    await db
+      .delete(apiUsageHourly)
+      .where(lt(apiUsageHourly.hour, sql`${utcNow} - make_interval(days => ${API_USAGE_RETENTION_DAYS})`));
     await db
       .delete(errorLogs)
       .where(lt(errorLogs.lastSeenAt, sql`${utcNow} - make_interval(days => ${ERROR_LOG_DAYS})`));

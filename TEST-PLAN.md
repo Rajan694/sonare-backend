@@ -532,47 +532,64 @@ This document maps all backend test IDs to their specifications, assertions, and
 | `BE-TELEM-COV-001` | Handles long error message truncation.            |
 | `BE-TELEM-COV-002` | Idempotent telemetry worker startup.              |
 
+### Analytics Storage & Recording
+
+| Test ID      | Description                                                                                  |
+| :----------- | :------------------------------------------------------------------------------------------- |
+| `BE-ANL-001` | Signed-in request writes one user row per day per client; two requests still write one.      |
+| `BE-ANL-002` | Guest request with a valid install header writes a guest row.                                |
+| `BE-ANL-003` | Invalid install header writes no activity row.                                               |
+| `BE-ANL-004` | Signed-in request with an install id stores it in the install column.                        |
+| `BE-ANL-005` | API usage counts, status classes, max latency and histogram are recorded after flush.        |
+| `BE-ANL-006` | OPTIONS and admin requests are not counted in api usage or activity.                         |
+| `BE-ANL-007` | POST /api/v1/auth/register stores signup_client from X-Sonare-Client header.                 |
+| `BE-ANL-008` | Retention prune drops activity_daily older than 400 days and api_usage older than 90.        |
+| `BE-ANL-009` | Migration 0017 backfill logic correctly transforms request_logs rows.                        |
+| `BE-ANL-010` | Fifty requests from one signed-in user with an install id yield one row with install stored. |
+| `BE-ANL-011` | Flush of >500 keys issues one multi-row statement per chunk of 500.                          |
+| `BE-ANL-012` | In-memory activity deduplication Set resets on new local day in ANALYTICS_TIME_ZONE.         |
+
 ### Database & Schema
 
-| Test ID            | Description                                   |
-| :----------------- | :-------------------------------------------- |
-| `BE-DB-001`        | Users table insert and query.                 |
-| `BE-DB-002`        | Refresh tokens table cascading delete.        |
-| `BE-DB-003`        | Favourite tracks table operations.            |
-| `BE-DB-004`        | Favourite albums table operations.            |
-| `BE-DB-005`        | Artist follows table operations.              |
-| `BE-DB-006`        | Play history recording and count aggregation. |
-| `BE-DB-007`        | Playlist and playlist_tracks ordering.        |
-| `BE-DB-008`        | User settings persistence.                    |
-| `BE-DB-009`        | Player state persistence.                     |
-| `BE-DB-010`        | Lyrics overrides storage.                     |
-| `BE-DB-011`        | Admin row in users: role and token version.   |
-| `BE-DB-012`        | Error logs table insert.                      |
-| `BE-DB-013`        | Request logs table insert.                    |
-| `BE-DB-015`        | getUserTrackDataMap batching.                 |
-| `BE-DB-016`        | hydrateTracks formatting.                     |
-| `BE-DB-INT-001`    | Enforces email unique constraint.             |
-| `BE-DB-INT-002`    | Verifies user deletion cascade.               |
-| `BE-DB-VERIFY-001` | Verifies database connection check.           |
-| `BE-SCH-001`       | Users schema definition.                      |
-| `BE-SCH-002`       | RefreshTokens schema definition.              |
-| `BE-SCH-003`       | FavouriteTracks schema definition.            |
-| `BE-SCH-004`       | FavouriteAlbums schema definition.            |
-| `BE-SCH-005`       | ArtistFollows schema definition.              |
-| `BE-SCH-006`       | PlayHistory schema definition.                |
-| `BE-SCH-007`       | Playlists schema definition.                  |
-| `BE-SCH-008`       | PlaylistTracks schema definition.             |
-| `BE-SCH-009`       | UserSettings schema definition.               |
-| `BE-SCH-010`       | PlayerState schema definition.                |
-| `BE-SCH-011`       | LyricsOverrides schema definition.            |
-| `BE-SCH-012`       | Users schema admin columns.                   |
-| `BE-SCH-014`       | RequestLogs schema definition.                |
-| `BE-SCH-015`       | ErrorLogs schema definition.                  |
-| `BE-HYDR-001`      | Empty tracks hydration.                       |
-| `BE-HYDR-002`      | Local track hydration.                        |
-| `BE-HYDR-003`      | Guest track fields default values.            |
-| `BE-HYDR-004`      | Empty map handling.                           |
-| `BE-HYDR-005`      | Undefined user map handling.                  |
+| Test ID            | Description                                          |
+| :----------------- | :--------------------------------------------------- |
+| `BE-DB-001`        | Users table insert and query.                        |
+| `BE-DB-002`        | Refresh tokens table cascading delete.               |
+| `BE-DB-003`        | Favourite tracks table operations.                   |
+| `BE-DB-004`        | Favourite albums table operations.                   |
+| `BE-DB-005`        | Artist follows table operations.                     |
+| `BE-DB-006`        | Play history recording and count aggregation.        |
+| `BE-DB-007`        | Playlist and playlist_tracks ordering.               |
+| `BE-DB-008`        | User settings persistence.                           |
+| `BE-DB-009`        | Player state persistence.                            |
+| `BE-DB-010`        | Lyrics overrides storage.                            |
+| `BE-DB-011`        | Admin row in users: role and token version.          |
+| `BE-DB-012`        | Error logs table insert.                             |
+| `BE-DB-013`        | Activity daily and API usage hourly table inserts.   |
+| `BE-DB-015`        | getUserTrackDataMap batching.                        |
+| `BE-DB-016`        | hydrateTracks formatting.                            |
+| `BE-DB-INT-001`    | Enforces email unique constraint.                    |
+| `BE-DB-INT-002`    | Verifies user deletion cascade.                      |
+| `BE-DB-VERIFY-001` | Verifies database connection check.                  |
+| `BE-SCH-001`       | Users schema definition.                             |
+| `BE-SCH-002`       | RefreshTokens schema definition.                     |
+| `BE-SCH-003`       | FavouriteTracks schema definition.                   |
+| `BE-SCH-004`       | FavouriteAlbums schema definition.                   |
+| `BE-SCH-005`       | ArtistFollows schema definition.                     |
+| `BE-SCH-006`       | PlayHistory schema definition.                       |
+| `BE-SCH-007`       | Playlists schema definition.                         |
+| `BE-SCH-008`       | PlaylistTracks schema definition.                    |
+| `BE-SCH-009`       | UserSettings schema definition.                      |
+| `BE-SCH-010`       | PlayerState schema definition.                       |
+| `BE-SCH-011`       | LyricsOverrides schema definition.                   |
+| `BE-SCH-012`       | Users schema admin columns.                          |
+| `BE-SCH-014`       | ActivityDaily and ApiUsageHourly schema definitions. |
+| `BE-SCH-015`       | ErrorLogs schema definition.                         |
+| `BE-HYDR-001`      | Empty tracks hydration.                              |
+| `BE-HYDR-002`      | Local track hydration.                               |
+| `BE-HYDR-003`      | Guest track fields default values.                   |
+| `BE-HYDR-004`      | Empty map handling.                                  |
+| `BE-HYDR-005`      | Undefined user map handling.                         |
 
 ### Admin Auth
 
@@ -712,4 +729,4 @@ with the first problem as the message, and nothing is written.
 | `BE-CAP-001` | `test/integration/storageCaps.test.ts` | prunePlayHistory keeps each user’s newest plays only                                          |
 | `BE-CAP-002` | `test/integration/storageCaps.test.ts` | a sync that goes past 1000 plays drops that user’s oldest                                     |
 | `BE-CAP-003` | `test/integration/storageCaps.test.ts` | pruneCatalogItems keeps the most recently written rows                                        |
-| `BE-CAP-004` | `test/integration/storageCaps.test.ts` | request logs are kept by count (the newest 2.1 million), not by age                           |
+| `BE-CAP-004` | `test/integration/storageCaps.test.ts` | activity_daily retention is 400 days and api_usage_hourly is 90 days                          |

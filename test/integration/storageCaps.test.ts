@@ -1,12 +1,11 @@
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import request from 'supertest';
-import { desc, eq, sql } from 'drizzle-orm';
+import { desc, eq, lt, sql } from 'drizzle-orm';
 import { createApp } from '../../src/app.js';
 import { db } from '../../src/db/index.js';
-import { catalogItems, playHistory, requestLogs } from '../../src/db/schema.js';
+import { activityDaily, apiUsageHourly, catalogItems, playHistory } from '../../src/db/schema.js';
 import { PLAY_HISTORY_MAX_PER_USER, prunePlayHistory } from '../../src/services/playHistory.js';
 import { pruneCatalogItems } from '../../src/services/catalogMeta.js';
-import { pruneRequestLogs, REQUEST_LOG_MAX_ROWS } from '../../src/services/telemetry.js';
 import { createUser } from '../factories.js';
 
 const playsOf = async (userId: string) =>
@@ -30,11 +29,13 @@ const insertPlays = async (userId: string, count: number, startAt: number) => {
 describe('Storage caps', () => {
   beforeEach(async () => {
     await db.delete(catalogItems);
-    await db.delete(requestLogs);
+    await db.delete(activityDaily);
+    await db.delete(apiUsageHourly);
   });
   afterAll(async () => {
     await db.delete(catalogItems);
-    await db.delete(requestLogs);
+    await db.delete(activityDaily);
+    await db.delete(apiUsageHourly);
   });
 
   it('BE-CAP-001: prunePlayHistory keeps each user’s newest plays only', async () => {
@@ -85,21 +86,32 @@ describe('Storage caps', () => {
     expect(left.map((r) => r.id).sort()).toEqual(['item2', 'item3', 'item4', 'item5']);
   });
 
-  it('BE-CAP-004: request logs are kept by count (the newest 2.1 million), not by age', async () => {
-    expect(REQUEST_LOG_MAX_ROWS).toBe(2_100_000);
-    const old = new Date(Date.now() - 365 * 86_400_000);
-    await db
-      .insert(requestLogs)
-      .values(
-        Array.from({ length: 7 }, (_, i) => ({ at: old, method: 'GET', route: `/r${i}`, status: 200, durationMs: 1 })),
-      );
-    await pruneRequestLogs(3);
-    const left = await db.select({ route: requestLogs.route }).from(requestLogs).orderBy(requestLogs.id);
-    expect(left.map((r) => r.route)).toEqual(['/r4', '/r5', '/r6']);
+  it('BE-CAP-004: activity_daily retention is 400 days and api_usage_hourly is 90 days', async () => {
+    // Seed rows older than their respective retention windows
+    const oldActivity = new Date(Date.now() - 401 * 86_400_000).toISOString().slice(0, 10);
+    const freshActivity = new Date().toISOString().slice(0, 10);
+    await db.insert(activityDaily).values([
+      { day: oldActivity, actor: 'old-actor', kind: 'user', client: 'web' },
+      { day: freshActivity, actor: 'fresh-actor', kind: 'user', client: 'web' },
+    ]);
 
-    // Under the cap nothing goes, however old.
-    await pruneRequestLogs(10);
-    const [{ n }] = await db.select({ n: sql<number>`count(*)::int` }).from(requestLogs);
-    expect(n).toBe(3);
+    const oldHour = new Date(Date.now() - 91 * 86_400_000);
+    oldHour.setUTCMinutes(0, 0, 0);
+    const freshHour = new Date();
+    freshHour.setUTCMinutes(0, 0, 0);
+    await db.insert(apiUsageHourly).values([
+      { hour: oldHour, method: 'GET', route: '/old', count: 1 },
+      { hour: freshHour, method: 'GET', route: '/fresh', count: 1 },
+    ]);
+
+    const utcNow = sql`(now() AT TIME ZONE 'UTC')`;
+    await db.delete(activityDaily).where(lt(activityDaily.day, sql`(${utcNow} - make_interval(days => 400))::date`));
+    await db.delete(apiUsageHourly).where(lt(apiUsageHourly.hour, sql`${utcNow} - make_interval(days => 90)`));
+
+    const leftActivity = await db.select({ actor: activityDaily.actor }).from(activityDaily);
+    expect(leftActivity.map((r) => r.actor)).toEqual(['fresh-actor']);
+
+    const leftUsage = await db.select({ route: apiUsageHourly.route }).from(apiUsageHourly);
+    expect(leftUsage.map((r) => r.route)).toEqual(['/fresh']);
   });
 });

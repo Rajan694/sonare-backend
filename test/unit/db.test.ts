@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { db, verifyDatabase } from '../../src/db/index.js';
 import { hashToken } from '../../src/middleware/auth.js';
 import {
+  activityDaily,
+  apiUsageHourly,
   artistFollows,
   errorLogs,
   favouriteAlbums,
@@ -12,7 +14,6 @@ import {
   playlistTracks,
   playlists,
   refreshTokens,
-  requestLogs,
   userSettings,
   users,
 } from '../../src/db/schema.js';
@@ -195,21 +196,32 @@ describe('db: models & helpers', () => {
     expect(found.message).toBe('Database connection timeout test');
   });
 
-  it('BE-DB-013: inserts and queries request logs table', async () => {
-    const [reqLog] = await db
-      .insert(requestLogs)
-      .values({
-        method: 'GET',
-        route: '/api/v1/healthz',
-        status: 200,
-        durationMs: 12,
-        client: 'web',
-      })
-      .returning();
+  it('BE-DB-013: inserts and queries activity_daily and api_usage_hourly tables', async () => {
+    const today = new Date().toISOString().slice(0, 10);
+    await db.insert(activityDaily).values({
+      day: today,
+      actor: 'test-actor-1',
+      kind: 'user',
+      client: 'web',
+    });
 
-    const [found] = await db.select().from(requestLogs).where(eq(requestLogs.id, reqLog.id));
-    expect(found.route).toBe('/api/v1/healthz');
-    expect(found.status).toBe(200);
+    const [foundAct] = await db.select().from(activityDaily).where(eq(activityDaily.actor, 'test-actor-1'));
+    expect(foundAct.day).toBe(today);
+    expect(foundAct.client).toBe('web');
+
+    const hour = new Date();
+    hour.setUTCMinutes(0, 0, 0);
+    await db.insert(apiUsageHourly).values({
+      hour,
+      method: 'GET',
+      route: '/api/v1/healthz',
+      count: 1,
+      s2xx: 1,
+    });
+
+    const [foundUsage] = await db.select().from(apiUsageHourly).where(eq(apiUsageHourly.route, '/api/v1/healthz'));
+    expect(foundUsage.method).toBe('GET');
+    expect(foundUsage.count).toBe(1);
   });
 
   it('BE-DB-015: getUserTrackDataMap batches multiple track lookups accurately', async () => {
@@ -407,12 +419,24 @@ describe('db: schema tables & columns', () => {
     expect(users.passwordChangedAt).toBeDefined();
   });
 
-  it('BE-SCH-014: requestLogs schema table has status, durationMs and client', () => {
-    expect(requestLogs.id).toBeDefined();
-    expect(requestLogs.method).toBeDefined();
-    expect(requestLogs.route).toBeDefined();
-    expect(requestLogs.status).toBeDefined();
-    expect(requestLogs.durationMs).toBeDefined();
+  it('BE-SCH-014: activityDaily and apiUsageHourly schema tables have required columns', () => {
+    expect(activityDaily.day).toBeDefined();
+    expect(activityDaily.actor).toBeDefined();
+    expect(activityDaily.kind).toBeDefined();
+    expect(activityDaily.client).toBeDefined();
+    expect(activityDaily.install).toBeDefined();
+
+    expect(apiUsageHourly.hour).toBeDefined();
+    expect(apiUsageHourly.method).toBeDefined();
+    expect(apiUsageHourly.route).toBeDefined();
+    expect(apiUsageHourly.count).toBeDefined();
+    expect(apiUsageHourly.s2xx).toBeDefined();
+    expect(apiUsageHourly.s3xx).toBeDefined();
+    expect(apiUsageHourly.s4xx).toBeDefined();
+    expect(apiUsageHourly.s5xx).toBeDefined();
+    expect(apiUsageHourly.totalMs).toBeDefined();
+    expect(apiUsageHourly.maxMs).toBeDefined();
+    expect(apiUsageHourly.hist).toBeDefined();
   });
 
   it('BE-SCH-015: errorLogs schema table has level, stack, and context jsonb', () => {

@@ -305,10 +305,10 @@ adminRouter.get('/analytics/overview', async (req, res) => {
       (SELECT count(*)::int FROM users WHERE role = 'user') AS users,
       (SELECT count(*)::int FROM users
         WHERE role = 'user' AND created_at AT TIME ZONE current_setting('TimeZone') >= now() - make_interval(days => ${days})) AS new_users,
-      (SELECT count(DISTINCT user_id)::int FROM request_logs
-        WHERE at >= (now() AT TIME ZONE 'UTC') - make_interval(days => ${days})) AS active_users,
-      (SELECT count(*)::int FROM request_logs
-        WHERE at >= (now() AT TIME ZONE 'UTC') - make_interval(days => ${days})) AS requests,
+      (SELECT count(DISTINCT actor)::int FROM activity_daily
+        WHERE kind = 'user' AND day >= ((now() AT TIME ZONE 'UTC') - make_interval(days => ${days}))::date) AS active_users,
+      (SELECT coalesce(sum(count), 0)::int FROM api_usage_hourly
+        WHERE hour >= (now() AT TIME ZONE 'UTC') - make_interval(days => ${days})) AS requests,
       (SELECT count(*)::int FROM play_history
         WHERE played_at >= (now() AT TIME ZONE 'UTC') - make_interval(days => ${days})) AS plays,
       (SELECT coalesce(sum(ms_played), 0)::float8 FROM play_history
@@ -321,23 +321,27 @@ adminRouter.get('/analytics/overview', async (req, res) => {
 
   const daily = await sql`
     WITH days AS (
-      SELECT generate_series(
-        date_trunc('day', now() AT TIME ZONE ${tz}) - make_interval(days => ${days - 1}),
-        date_trunc('day', now() AT TIME ZONE ${tz}),
-        interval '1 day'
-      ) AS day
+      SELECT (date_trunc('day', now() AT TIME ZONE ${tz}) - make_interval(days => ${days - 1}) + interval '1 day' * i)::date AS day
+      FROM generate_series(0, ${days - 1}) AS i
     ),
     req AS (
-      SELECT date_trunc('day', (at AT TIME ZONE 'UTC') AT TIME ZONE ${tz}) AS day,
-             count(*)::int AS requests,
-             count(*) FILTER (WHERE status >= 500)::int AS server_errors,
-             count(DISTINCT user_id)::int AS active_users
-      FROM request_logs
-      WHERE at >= (now() AT TIME ZONE 'UTC') - make_interval(days => ${days + 1})
+      SELECT ((hour AT TIME ZONE 'UTC') AT TIME ZONE ${tz})::date AS day,
+             sum(count)::int AS requests,
+             sum(s5xx)::int AS server_errors
+      FROM api_usage_hourly
+      WHERE hour >= (now() AT TIME ZONE 'UTC') - make_interval(days => ${days + 1})
+      GROUP BY 1
+    ),
+    act AS (
+      SELECT day,
+             count(DISTINCT actor)::int AS active_users
+      FROM activity_daily
+      WHERE kind = 'user'
+        AND day >= ((now() AT TIME ZONE 'UTC') - make_interval(days => ${days + 1}))::date
       GROUP BY 1
     ),
     signups AS (
-      SELECT date_trunc('day', (created_at AT TIME ZONE current_setting('TimeZone')) AT TIME ZONE ${tz}) AS day,
+      SELECT ((created_at AT TIME ZONE current_setting('TimeZone')) AT TIME ZONE ${tz})::date AS day,
              count(*)::int AS signups
       FROM users
       WHERE role = 'user'
@@ -345,7 +349,7 @@ adminRouter.get('/analytics/overview', async (req, res) => {
       GROUP BY 1
     ),
     plays AS (
-      SELECT date_trunc('day', (played_at AT TIME ZONE 'UTC') AT TIME ZONE ${tz}) AS day,
+      SELECT ((played_at AT TIME ZONE 'UTC') AT TIME ZONE ${tz})::date AS day,
              count(*)::int AS plays
       FROM play_history
       WHERE played_at >= (now() AT TIME ZONE 'UTC') - make_interval(days => ${days + 1})
@@ -354,24 +358,26 @@ adminRouter.get('/analytics/overview', async (req, res) => {
     SELECT to_char(days.day, 'YYYY-MM-DD') AS day,
            coalesce(req.requests, 0) AS requests,
            coalesce(req.server_errors, 0) AS server_errors,
-           coalesce(req.active_users, 0) AS active_users,
+           coalesce(act.active_users, 0) AS active_users,
            coalesce(signups.signups, 0) AS signups,
            coalesce(plays.plays, 0) AS plays
     FROM days
     LEFT JOIN req USING (day)
+    LEFT JOIN act USING (day)
     LEFT JOIN signups USING (day)
     LEFT JOIN plays USING (day)
     ORDER BY days.day
   `;
 
   const clients = await sql`
-    SELECT coalesce(client, 'other') AS client,
-           count(*)::int AS requests,
-           count(DISTINCT user_id)::int AS users
-    FROM request_logs
-    WHERE at >= (now() AT TIME ZONE 'UTC') - make_interval(days => ${days})
+    SELECT client,
+           count(DISTINCT actor)::int AS users,
+           0::int AS requests
+    FROM activity_daily
+    WHERE kind = 'user'
+      AND day >= ((now() AT TIME ZONE 'UTC') - make_interval(days => ${days}))::date
     GROUP BY 1
-    ORDER BY 2 DESC
+    ORDER BY users DESC
   `;
 
   res.json({
@@ -409,13 +415,13 @@ adminRouter.get('/analytics/requests', async (req, res) => {
   const step = unit === 'hour' ? '1 hour' : '1 day';
 
   const [summary] = await sql`
-    SELECT count(*)::int AS total,
-           count(*) FILTER (WHERE status >= 500)::int AS server_errors,
-           count(*) FILTER (WHERE status >= 400 AND status < 500)::int AS client_errors,
-           coalesce(percentile_cont(0.5) WITHIN GROUP (ORDER BY duration_ms), 0)::float8 AS p50,
-           coalesce(percentile_cont(0.95) WITHIN GROUP (ORDER BY duration_ms), 0)::float8 AS p95
-    FROM request_logs
-    WHERE at >= (now() AT TIME ZONE 'UTC') - make_interval(hours => ${hours})
+    SELECT coalesce(sum(count), 0)::int AS total,
+           coalesce(sum(s5xx), 0)::int AS server_errors,
+           coalesce(sum(s4xx), 0)::int AS client_errors,
+           0::float8 AS p50,
+           0::float8 AS p95
+    FROM api_usage_hourly
+    WHERE hour >= (now() AT TIME ZONE 'UTC') - make_interval(hours => ${hours})
   `;
 
   const series = await sql`
@@ -427,12 +433,12 @@ adminRouter.get('/analytics/requests', async (req, res) => {
       ) AS bucket
     ),
     req AS (
-      SELECT date_trunc(${unit}, (at AT TIME ZONE 'UTC') AT TIME ZONE ${tz}) AS bucket,
-             count(*)::int AS requests,
-             count(*) FILTER (WHERE status >= 500)::int AS server_errors,
-             coalesce(percentile_cont(0.95) WITHIN GROUP (ORDER BY duration_ms), 0)::float8 AS p95
-      FROM request_logs
-      WHERE at >= (now() AT TIME ZONE 'UTC') - make_interval(hours => ${hours + 24})
+      SELECT date_trunc(${unit}, (hour AT TIME ZONE 'UTC') AT TIME ZONE ${tz}) AS bucket,
+             sum(count)::int AS requests,
+             sum(s5xx)::int AS server_errors,
+             0::float8 AS p95
+      FROM api_usage_hourly
+      WHERE hour >= (now() AT TIME ZONE 'UTC') - make_interval(hours => ${hours + 24})
       GROUP BY 1
     )
     SELECT to_char(buckets.bucket, 'YYYY-MM-DD"T"HH24:MI') AS at,
@@ -445,25 +451,27 @@ adminRouter.get('/analytics/requests', async (req, res) => {
 
   const routes = await sql`
     SELECT method, route,
-           count(*)::int AS count,
-           count(*) FILTER (WHERE status >= 500)::int AS server_errors,
-           count(*) FILTER (WHERE status >= 400 AND status < 500)::int AS client_errors,
-           percentile_cont(0.5) WITHIN GROUP (ORDER BY duration_ms)::float8 AS p50,
-           percentile_cont(0.95) WITHIN GROUP (ORDER BY duration_ms)::float8 AS p95,
-           max(duration_ms)::int AS max
-    FROM request_logs
-    WHERE at >= (now() AT TIME ZONE 'UTC') - make_interval(hours => ${hours})
+           sum(count)::int AS count,
+           sum(s5xx)::int AS server_errors,
+           sum(s4xx)::int AS client_errors,
+           0::float8 AS p50,
+           0::float8 AS p95,
+           max(max_ms)::int AS max
+    FROM api_usage_hourly
+    WHERE hour >= (now() AT TIME ZONE 'UTC') - make_interval(hours => ${hours})
     GROUP BY method, route
     ORDER BY count DESC
     LIMIT 100
   `;
 
   const statuses = await sql`
-    SELECT status, count(*)::int AS count
-    FROM request_logs
-    WHERE at >= (now() AT TIME ZONE 'UTC') - make_interval(hours => ${hours})
-    GROUP BY status
-    ORDER BY status
+    SELECT '2xx' AS status_class, coalesce(sum(s2xx), 0)::int AS count FROM api_usage_hourly WHERE hour >= (now() AT TIME ZONE 'UTC') - make_interval(hours => ${hours})
+    UNION ALL
+    SELECT '3xx', coalesce(sum(s3xx), 0)::int FROM api_usage_hourly WHERE hour >= (now() AT TIME ZONE 'UTC') - make_interval(hours => ${hours})
+    UNION ALL
+    SELECT '4xx', coalesce(sum(s4xx), 0)::int FROM api_usage_hourly WHERE hour >= (now() AT TIME ZONE 'UTC') - make_interval(hours => ${hours})
+    UNION ALL
+    SELECT '5xx', coalesce(sum(s5xx), 0)::int FROM api_usage_hourly WHERE hour >= (now() AT TIME ZONE 'UTC') - make_interval(hours => ${hours})
   `;
 
   res.json({
@@ -492,7 +500,7 @@ adminRouter.get('/analytics/requests', async (req, res) => {
       p95: Math.round(r.p95),
       max: r.max,
     })),
-    statuses: statuses.map((s) => ({ status: s.status, count: s.count })),
+    statuses: statuses.map((s) => ({ status: s.status_class, count: s.count })),
   });
 });
 
