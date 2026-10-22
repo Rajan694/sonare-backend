@@ -11,7 +11,7 @@ import { prunePlayHistory } from './playHistory.js';
 // Telemetry: request-level analytics and error logs. Both are buffered in memory and written in
 // batches, so logging never adds a query to the request it describes.
 
-export const CLIENTS = ['web', 'linux', 'mobile'] as const;
+export const CLIENTS = ['web', 'linux', 'windows', 'mobile'] as const;
 export type ClientName = (typeof CLIENTS)[number];
 export type ErrorSource = 'backend' | ClientName;
 
@@ -138,6 +138,53 @@ const histBucket = (ms: number): number => {
     if (ms <= HIST_BOUNDS[i]) return i;
   }
   return 8;
+};
+
+/**
+ * Estimates a percentile (e.g. 50 for p50, 95 for p95) in milliseconds from a 9-bucket duration histogram.
+ * Uses linear interpolation inside the bucket where the cumulative count passes the target count.
+ * hist bucket upper bounds: 25, 50, 100, 250, 500, 1000, 2500, 5000, maxMs.
+ */
+export const percentileFromHist = (
+  hist: Array<number | string> | null | undefined,
+  percentile: number,
+  maxMs?: number,
+): number => {
+  if (!hist || hist.length === 0) return 0;
+  let total = 0;
+  for (let i = 0; i < hist.length; i++) {
+    total += Number(hist[i]) || 0;
+  }
+  if (total <= 0) return 0;
+
+  const target = (percentile / 100) * total;
+  const upperLast = maxMs && maxMs > 5000 ? maxMs : 10000;
+  const ranges: Array<[number, number]> = [
+    [0, 25],
+    [25, 50],
+    [50, 100],
+    [100, 250],
+    [250, 500],
+    [500, 1000],
+    [1000, 2500],
+    [2500, 5000],
+    [5000, upperLast],
+  ];
+
+  let cumulative = 0;
+  for (let i = 0; i < ranges.length; i++) {
+    const count = Number(hist[i]) || 0;
+    if (count <= 0) continue;
+    const prev = cumulative;
+    cumulative += count;
+    if (target <= cumulative) {
+      const [lower, upper] = ranges[i];
+      const fraction = (target - prev) / count;
+      return Math.round(lower + fraction * (upper - lower));
+    }
+  }
+
+  return Math.round(ranges[ranges.length - 1][1]);
 };
 
 /**

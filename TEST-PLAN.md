@@ -531,6 +531,7 @@ This document maps all backend test IDs to their specifications, assertions, and
 | `BE-TELEM-003`     | Flushes error buffer to PostgreSQL.               |
 | `BE-TELEM-COV-001` | Handles long error message truncation.            |
 | `BE-TELEM-COV-002` | Idempotent telemetry worker startup.              |
+| `BE-TELEM-004`     | Percentile estimation from duration histogram.    |
 
 ### Analytics Storage & Recording
 
@@ -548,6 +549,10 @@ This document maps all backend test IDs to their specifications, assertions, and
 | `BE-ANL-010` | Fifty requests from one signed-in user with an install id yield one row with install stored. |
 | `BE-ANL-011` | Flush of >500 keys issues one multi-row statement per chunk of 500.                          |
 | `BE-ANL-012` | In-memory activity deduplication Set resets on new local day in ANALYTICS_TIME_ZONE.         |
+| `BE-ANL-013` | GET /analytics/overview returns totals, active DAU/WAU/MAU, and daily series.                |
+| `BE-ANL-014` | GET /analytics/overview groups signups by client.                                            |
+| `BE-ANL-015` | GET /analytics/requests returns histogram-derived p50/p95, routes avg, and statusClasses.    |
+| `BE-ANL-016` | Client errors endpoint and admin filter accept windows source.                               |
 
 ### Database & Schema
 
