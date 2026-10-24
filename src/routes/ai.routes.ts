@@ -12,7 +12,7 @@ import {
   generateSearchPlan,
   generateYouMayLike,
 } from '../services/ai/features.js';
-import { lookupTitleFixes } from '../services/ai/titles.js';
+import { lookupTitleFixes, titleFixesNow } from '../services/ai/titles.js';
 
 // The apps' AI features (forReference/ai-briefs/CONTRACT.md in the root repo). The apps hide them
 // while /app-config says `ai: false` or a call answers 503 AI_UNAVAILABLE.
@@ -23,6 +23,7 @@ const ymalLimiter = createRateLimiter({ name: 'ai-ymal', max: 20, windowMs: 3600
 const searchLimiter = createRateLimiter({ name: 'ai-search', max: 30, windowMs: 3600_000 });
 const playlistLimiter = createRateLimiter({ name: 'ai-playlist', max: 10, windowMs: 3600_000 });
 const titlesLimiter = createRateLimiter({ name: 'ai-titles', max: 120, windowMs: 10 * 60_000 });
+const titlesNowLimiter = createRateLimiter({ name: 'ai-titles-now', max: 20, windowMs: 10 * 60_000 });
 
 const rateLimited = (res: Response, retryAfterSec: number) => {
   res.setHeader('Retry-After', String(retryAfterSec));
@@ -95,11 +96,20 @@ const titlesBody = z.object({
     )
     .min(1, 'Send at least one song')
     .max(50, 'At most 50 songs at a time'),
+  wait: z.boolean().optional(),
 });
 
 // Signed-in or not (guests see titles too). Answers what is known; never a 503.
 aiRouter.post('/ai/titles', async (req, res) => {
-  const { items } = parseBody(titlesBody, req);
+  const { items, wait } = parseBody(titlesBody, req);
+
+  if (wait && aiAvailable()) {
+    const key = req.user?.id ?? req.ip ?? 'unknown';
+    const limit = await titlesNowLimiter.hit(key);
+    if (!limit.allowed) return rateLimited(res, limit.retryAfterSec);
+    return res.json({ fixes: await titleFixesNow(items) });
+  }
+
   const limit = await titlesLimiter.hit(req.ip ?? 'unknown');
   if (!limit.allowed) return rateLimited(res, limit.retryAfterSec);
   res.json({ fixes: await lookupTitleFixes(items) });

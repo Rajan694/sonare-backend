@@ -274,4 +274,106 @@ describe('AI routes', () => {
     expect(typeof p.latencyMs).toBe('number');
     expect(p.lastOkAt).toBeInstanceOf(Date);
   });
+
+  it('BE-AI-033: /ai/titles with wait: true resolves missing fixes immediately, stores them, and returns them', async () => {
+    await twoProviders();
+    await redis.set('ai:title:wait00001', JSON.stringify({ title: 'Known Track', artist: 'Known Singer' }));
+    const calls = stubProviders({
+      [FIRST_URL]: [
+        replyJson({
+          fixes: [{ id: 'wait00002', title: 'Resolved Song', artist: 'Resolved Singer' }],
+        }),
+      ],
+      [SECOND_URL]: [replyJson({ fixes: [] })],
+    });
+
+    const items = [
+      { id: 'wait00001', title: 'Known Track | Official Video', artist: 'Music Label' },
+      { id: 'wait00002', title: 'Resolved Song | 4K Audio', artist: 'Some Channel' },
+    ];
+
+    const res = await request(app).post('/api/v1/ai/titles').send({ items, wait: true });
+    expect(res.status).toBe(200);
+    expect(res.body.fixes).toEqual({
+      wait00001: { title: 'Known Track', artist: 'Known Singer' },
+      wait00002: { title: 'Resolved Song', artist: 'Resolved Singer' },
+    });
+
+    // Check Redis storage
+    const stored = JSON.parse((await redis.get('ai:title:wait00002'))!);
+    expect(stored).toEqual({ title: 'Resolved Song', artist: 'Resolved Singer' });
+
+    // Cleaned up from queue
+    expect(await runTitleBatch()).toBe(0);
+    expect(calls).toHaveLength(1);
+  });
+
+  it('BE-AI-034: /ai/titles with wait: true falls back to known fixes without 503 when AI is unavailable', async () => {
+    // No AI providers configured
+    await redis.set('ai:title:wait00003', JSON.stringify({ title: 'Pre-existing Title', artist: 'Singer' }));
+
+    const res = await request(app)
+      .post('/api/v1/ai/titles')
+      .send({
+        items: [
+          { id: 'wait00003', title: 'Pre-existing Title | Label', artist: 'Label' },
+          { id: 'wait00004', title: 'Unknown Track | Label', artist: 'Label' },
+        ],
+        wait: true,
+      });
+
+    expect(res.status).toBe(200);
+    expect(res.body.fixes).toEqual({
+      wait00003: { title: 'Pre-existing Title', artist: 'Singer' },
+    });
+  });
+
+  it('BE-AI-035: /ai/titles with wait: true limits calls to 20 per 10 minutes per user or IP', async () => {
+    await twoProviders();
+    stubProviders({
+      [FIRST_URL]: [replyJson({ fixes: [] })],
+      [SECOND_URL]: [replyJson({ fixes: [] })],
+    });
+    const { token } = await createUser();
+
+    const sendUser = () =>
+      request(app)
+        .post('/api/v1/ai/titles')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ items: [{ id: 'ratelimit01', title: 'Song', artist: 'Artist' }], wait: true });
+
+    for (let n = 0; n < 20; n++) {
+      expect((await sendUser()).status).toBe(200);
+    }
+    const limitedUser = await sendUser();
+    expect(limitedUser.status).toBe(429);
+    expect(limitedUser.body.error.code).toBe('RATE_LIMITED');
+    expect(Number(limitedUser.headers['retry-after'])).toBeGreaterThan(0);
+  });
+
+  it('BE-AI-036: prompt includes long format rules (kathas, bhajans, episodes, series name, 60 chars)', async () => {
+    await twoProviders();
+    const calls = stubProviders({
+      [FIRST_URL]: [
+        replyJson({ fixes: [{ id: 'katha00001', title: 'Shri Ram Katha · Day 3', artist: 'Morari Bapu' }] }),
+      ],
+      [SECOND_URL]: [replyJson({ fixes: [] })],
+    });
+
+    await request(app)
+      .post('/api/v1/ai/titles')
+      .send({
+        items: [
+          { id: 'katha00001', title: 'Shri Ram Katha Day 3 | Morari Bapu | Live 2024', artist: 'Official Channel' },
+        ],
+        wait: true,
+      });
+
+    expect(calls).toHaveLength(1);
+    const content = calls[0].body.messages[1].content as string;
+    expect(content).toContain('long formats');
+    expect(content).toContain('kathas, bhajans');
+    expect(content).toContain('Shri Ram Katha · Day 3');
+    expect(content).toContain('60 characters');
+  });
 });

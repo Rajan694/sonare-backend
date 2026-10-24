@@ -11,7 +11,7 @@ import {
   userSettings,
   playerState,
 } from '../db/schema.js';
-import { eq, and, desc, sql, gte, inArray } from 'drizzle-orm';
+import { eq, and, desc, asc, sql, gte, inArray, like, notLike } from 'drizzle-orm';
 import { forgetAuthUser, requireAuth } from '../middleware/auth.js';
 import bcrypt from 'bcrypt';
 import { idHelpers } from '../ids.js';
@@ -19,6 +19,7 @@ import { hydrateTracks } from '../db/hydrate.js';
 import { CachedPiped, PIPED_LOOKUP_CONCURRENCY } from '../services/cache.js';
 import { mapLimit } from '../mapLimit.js';
 import { prunePlayHistoryForUser } from '../services/playHistory.js';
+import { forgetYouMayLike } from '../services/ai/features.js';
 import { normalizeChannelToArtist, normalizePlaylistToAlbum, normalizeStreamToTrack } from '../normalize/index.js';
 import crypto from 'node:crypto';
 import { z } from 'zod';
@@ -53,15 +54,23 @@ const refId = (ref: z.infer<typeof trackRef>): string => {
   return ref.kind === 'server' ? ref.id : ref.fingerprint;
 };
 
+const LIBRARY_SORTS = ['addedAt', 'title', 'artist', 'album', 'durationMs', 'playCount'] as const;
 const libraryQuery = z.object({
-  sort: z.enum(['addedAt', 'title', 'playCount']).default('addedAt'),
-  order: z.enum(['asc', 'desc']).default('desc'),
+  sort: z.enum(LIBRARY_SORTS).default('addedAt'),
+  // Unset: newest and most played first, the text and duration sorts A-Z / shortest first.
+  order: z.enum(['asc', 'desc']).optional(),
+  // Every song the user collected (liked or put in a playlist), or only the liked ones.
+  filter: z.enum(['all', 'liked']).default('all'),
+  // Unset: the whole library in one answer, as app versions before paging expect.
+  limit: queryInt(1, 500).optional(),
+  cursor: z.string().regex(/^\d+$/, 'Unknown cursor').optional(),
 });
 const recentlyPlayedQuery = z.object({ limit: queryInt(1, 100).default(10) });
 const mostPlayedQuery = z.object({
   limit: queryInt(1, 100).default(20),
   window: z.enum(['30d', '365d']).optional(),
 });
+const notPlayedLatelyQuery = z.object({ limit: queryInt(1, 50).default(20) });
 
 const playlistName = z
   .string({ required_error: 'Missing playlist name', invalid_type_error: 'Playlist name must be text' })
@@ -128,6 +137,14 @@ const playerStateSchema = z.object({
   index: z.number().int().min(0).optional(),
   shuffle: z.boolean().optional(),
   repeat: z.enum(['off', 'all', 'one']).optional(),
+});
+
+// Bulk unlike: `yt:…` or `local:…` ids, 1..500 at a time.
+const bulkUnlikeSchema = z.object({
+  ids: z
+    .array(trackId, { required_error: 'ids must be an array', invalid_type_error: 'ids must be an array' })
+    .min(1, 'Send at least one id')
+    .max(500, 'At most 500 ids at a time'),
 });
 
 // Protect all /me routes with requireAuth
@@ -202,36 +219,127 @@ meRouter.delete('/', async (req, res) => {
 });
 
 // Library
-meRouter.get('/library/tracks', async (req, res) => {
-  const { sort, order } = parseQuery(libraryQuery, req);
-  const favs = await db.select().from(favouriteTracks).where(eq(favouriteTracks.userId, req.user!.id));
+interface LibraryEntry {
+  kind: string;
+  id: string;
+  /** The newest time the song was liked or put in a playlist. */
+  addedAt: number;
+  favourite: boolean;
+  /** Newest snapshot first: the liked row's, then the playlist rows'. */
+  rowMeta: unknown;
+  meta: TrackMeta | null;
+  playCount: number;
+}
 
-  const items = await hydrateTracks(
-    req.user!.id,
-    favs.map((f) => ({
-      trackRefKind: f.trackRefKind,
-      trackRefId: f.trackRefId,
-      addedAt: f.addedAt.getTime(),
-      favourite: true,
-      rowMeta: f.meta,
+const textKey = { title: 'title', artist: 'artist', album: 'album' } as const;
+
+/** Orders the whole library by what the database already knows, so only one page needs hydrating. */
+const sortLibrary = (entries: LibraryEntry[], sort: (typeof LIBRARY_SORTS)[number], descending: boolean) => {
+  const value = (e: LibraryEntry): string | number | null => {
+    if (sort === 'addedAt') return e.addedAt;
+    if (sort === 'playCount') return e.playCount;
+    if (sort === 'durationMs') return e.meta?.durationMs ?? null;
+    return e.meta?.[textKey[sort]]?.trim() || null;
+  };
+  return entries.sort((a, b) => {
+    const x = value(a);
+    const y = value(b);
+    // Songs whose detail is unknown go last either way; ties keep the newest first.
+    if (x === null || y === null) return x === y ? b.addedAt - a.addedAt : x === null ? 1 : -1;
+    const diff =
+      typeof x === 'number' && typeof y === 'number'
+        ? x - y
+        : String(x).localeCompare(String(y), undefined, { sensitivity: 'base' });
+    return (descending ? -diff : diff) || b.addedAt - a.addedAt;
+  });
+};
+
+// Liked songs plus the songs in the user's playlists, each once. A song only in another device's
+// playlist as a local file can't play anywhere else, so playlists contribute server songs only.
+meRouter.get('/library/tracks', async (req, res) => {
+  const userId = req.user!.id;
+  const { sort, order, filter, limit, cursor } = parseQuery(libraryQuery, req);
+  const descending = order ? order === 'desc' : sort === 'addedAt' || sort === 'playCount';
+
+  const [favs, listed, plays] = await Promise.all([
+    db.select().from(favouriteTracks).where(eq(favouriteTracks.userId, userId)),
+    filter === 'all'
+      ? db
+          .select({
+            trackRefKind: playlistTracks.trackRefKind,
+            trackRefId: playlistTracks.trackRefId,
+            addedAt: playlistTracks.addedAt,
+            meta: playlistTracks.meta,
+          })
+          .from(playlistTracks)
+          .innerJoin(playlists, eq(playlists.id, playlistTracks.playlistId))
+          .where(and(eq(playlists.userId, userId), eq(playlistTracks.trackRefKind, 'server')))
+          .orderBy(desc(playlistTracks.addedAt))
+      : Promise.resolve([]),
+    db
+      .select({ trackRefId: playHistory.trackRefId, count: sql<number>`count(*)::int` })
+      .from(playHistory)
+      .where(eq(playHistory.userId, userId))
+      .groupBy(playHistory.trackRefId),
+  ]);
+
+  const entries = new Map<string, LibraryEntry>();
+  const add = (kind: string, id: string, at: Date, meta: unknown, favourite: boolean) => {
+    const key = `${kind}:${id}`;
+    const known = entries.get(key);
+    if (!known) {
+      entries.set(key, { kind, id, addedAt: at.getTime(), favourite, rowMeta: meta, meta: null, playCount: 0 });
+      return;
+    }
+    known.addedAt = Math.max(known.addedAt, at.getTime());
+    known.favourite ||= favourite;
+    known.rowMeta ??= meta;
+  };
+  for (const f of favs) add(f.trackRefKind, f.trackRefId, f.addedAt, f.meta, true);
+  for (const p of listed) add(p.trackRefKind, p.trackRefId, p.addedAt, p.meta, false);
+
+  // Sort keys: the rows' own snapshots, then catalog_items in one query. Unknown songs sort last.
+  const all = [...entries.values()];
+  for (const e of all) e.meta = parseTrackMeta(e.rowMeta);
+  const unknown = all.filter((e) => e.kind === 'server' && !e.meta).map((e) => e.id);
+  if (unknown.length > 0) {
+    const catalog = await getCatalogItems<TrackMeta>('track', unknown);
+    for (const e of all) if (!e.meta && e.kind === 'server') e.meta = catalog.get(e.id) ?? null;
+  }
+  const playCounts = new Map(plays.map((p) => [p.trackRefId, p.count]));
+  for (const e of all) e.playCount = playCounts.get(e.id) ?? 0;
+
+  sortLibrary(all, sort, descending);
+  const start = cursor ? Number(cursor) : 0;
+  const page = limit === undefined ? all.slice(start) : all.slice(start, start + limit);
+
+  const hydrated = await hydrateTracks(
+    userId,
+    page.map((e) => ({
+      trackRefKind: e.kind,
+      trackRefId: e.id,
+      addedAt: e.addedAt,
+      favourite: e.favourite,
+      playCount: e.playCount,
+      rowMeta: e.meta ?? e.rowMeta,
     })),
   );
+  // hydrateTracks reads addedAt from favourites only; a playlist song's comes from its entry.
+  const items = hydrated.map((t, i) => ({ ...t, addedAt: page[i].addedAt, favourite: page[i].favourite }));
 
-  // Sort items
-  const isAsc = order === 'asc';
-  if (sort === 'title') {
-    items.sort((a, b) => (isAsc ? a.title.localeCompare(b.title) : b.title.localeCompare(a.title)));
-  } else if (sort === 'playCount') {
-    items.sort((a, b) => (isAsc ? a.playCount - b.playCount : b.playCount - a.playCount));
-  } else {
-    items.sort((a, b) => (isAsc ? a.addedAt - b.addedAt : b.addedAt - a.addedAt));
-  }
-
-  res.json({ items, meta: { total: items.length } });
+  const end = start + page.length;
+  res.json({ items, meta: { total: all.length, ...(end < all.length && { nextCursor: String(end) }) } });
 });
 
+// Saved albums and saved YouTube playlists share favourite_albums; albums are the OLAK5uy_ ids.
+// The underscore is escaped: in LIKE it would match any character.
+const ALBUM_ID_PATTERN = 'OLAK5uy\\_%';
+
 meRouter.get('/library/albums', async (req, res) => {
-  const favs = await db.select().from(favouriteAlbums).where(eq(favouriteAlbums.userId, req.user!.id));
+  const favs = await db
+    .select()
+    .from(favouriteAlbums)
+    .where(and(eq(favouriteAlbums.userId, req.user!.id), like(favouriteAlbums.albumId, ALBUM_ID_PATTERN)));
 
   // 1. Check row meta; missing ones fetch from catalog_items in ONE batch query
   const missingCatalogIds = favs.filter((f) => !parseAlbumMeta(f.meta)).map((f) => f.albumId);
@@ -284,6 +392,65 @@ meRouter.get('/library/albums', async (req, res) => {
     }
   });
   res.json({ items, meta: { total: favs.length } });
+});
+
+// Saved YouTube playlists (favourite_albums rows whose id does NOT start with OLAK5uy_).
+meRouter.get('/saved-playlists', async (req, res) => {
+  const favs = await db
+    .select()
+    .from(favouriteAlbums)
+    .where(and(eq(favouriteAlbums.userId, req.user!.id), notLike(favouriteAlbums.albumId, ALBUM_ID_PATTERN)))
+    .orderBy(desc(favouriteAlbums.addedAt));
+
+  // 1. Check row meta; missing ones fetch from catalog_items in ONE batch query
+  const missingCatalogIds = favs.filter((f) => !parseAlbumMeta(f.meta)).map((f) => f.albumId);
+
+  const catalogMap =
+    missingCatalogIds.length > 0
+      ? await getCatalogItems<AlbumMeta>('album', missingCatalogIds)
+      : new Map<string, AlbumMeta>();
+
+  const items = await mapLimit(favs, PIPED_LOOKUP_CONCURRENCY, async (f) => {
+    const base = { id: idHelpers.prefixYt(f.albumId), addedAt: f.addedAt.getTime() };
+    const parsedRow = parseAlbumMeta(f.meta);
+    const meta = parsedRow ?? catalogMap.get(f.albumId);
+
+    if (meta) {
+      return {
+        id: base.id,
+        name: meta.title,
+        owner: meta.artist,
+        trackCount: meta.trackCount ?? null,
+        ...(meta.thumbnail ? { thumbnail: meta.thumbnail } : {}),
+        addedAt: base.addedAt,
+      };
+    }
+
+    // Fall back to Piped
+    try {
+      const playlist = await CachedPiped.playlist(f.albumId);
+      const normalized = normalizePlaylistToAlbum(playlist, f.albumId);
+      await rememberCatalogItem('album', f.albumId, normalized);
+      return {
+        id: base.id,
+        name: normalized.title,
+        owner: normalized.artist,
+        trackCount: normalized.trackCount ?? null,
+        ...(normalized.thumbnail ? { thumbnail: normalized.thumbnail } : {}),
+        addedAt: base.addedAt,
+      };
+    } catch {
+      return {
+        id: base.id,
+        name: 'Unavailable playlist',
+        owner: '',
+        trackCount: null,
+        addedAt: base.addedAt,
+      };
+    }
+  });
+
+  res.json({ items, meta: { total: items.length } });
 });
 
 // How many liked / playlisted songs are looked at to find artists. Their metadata comes
@@ -512,6 +679,19 @@ meRouter.delete('/favourites/tracks/:id', async (req, res) => {
   res.json({ ok: true });
 });
 
+// Bulk unlike: strip prefixes, delete all listed ids belonging to this user in one query.
+meRouter.delete('/favourites/tracks', async (req, res) => {
+  const { ids } = parseBody(bulkUnlikeSchema, req);
+  const rawIds = ids.map((id) => (id.startsWith('yt:') ? idHelpers.extractYtId(id) : id.replace(/^local:/, '')));
+
+  const result = await db
+    .delete(favouriteTracks)
+    .where(and(eq(favouriteTracks.userId, req.user!.id), inArray(favouriteTracks.trackRefId, rawIds)))
+    .returning({ trackRefId: favouriteTracks.trackRefId });
+
+  res.json({ ok: true, removed: result.length });
+});
+
 meRouter.put('/favourites/albums/:id', async (req, res) => {
   const albumId = idHelpers.extractYtId(req.params.id);
   const parsedMeta = parseAlbumMeta(req.body?.meta);
@@ -634,6 +814,59 @@ meRouter.get('/most-played', async (req, res) => {
     items,
     meta: { total: items.length },
   });
+});
+
+// Songs played at least twice whose newest play is more than 30 days old.
+// Note: history is capped at the newest 1000 plays per user (services/playHistory.ts),
+// so "a while" only reaches back that far.
+meRouter.get('/not-played-lately', async (req, res) => {
+  const { limit } = parseQuery(notPlayedLatelyQuery, req);
+  const before = new Date(Date.now() - 30 * 24 * 3600 * 1000);
+
+  const plays = await db
+    .select({
+      trackRefKind: playHistory.trackRefKind,
+      trackRefId: playHistory.trackRefId,
+      count: sql<number>`count(*)::int`,
+      lastPlayedAt: sql<Date>`max(${playHistory.playedAt})`,
+      // The newest snapshot an app sent with a play, if any.
+      meta: sql<unknown>`(array_agg(${playHistory.meta} order by ${playHistory.playedAt} desc) filter (where ${playHistory.meta} is not null))[1]`,
+    })
+    .from(playHistory)
+    .where(eq(playHistory.userId, req.user!.id))
+    .groupBy(playHistory.trackRefKind, playHistory.trackRefId)
+    .having(sql`count(*) >= 2 and max(${playHistory.playedAt}) < ${sql.param(before, playHistory.playedAt)}`)
+    .orderBy(desc(sql`count(*)`), asc(sql`max(${playHistory.playedAt})`))
+    .limit(limit);
+
+  const items = await hydrateTracks(
+    req.user!.id,
+    plays.map((p) => ({
+      trackRefKind: p.trackRefKind,
+      trackRefId: p.trackRefId,
+      playCount: p.count,
+      lastPlayedAt: p.lastPlayedAt ? new Date(p.lastPlayedAt).getTime() : undefined,
+      rowMeta: p.meta,
+    })),
+    { failIfPipedDown: true },
+  );
+
+  res.json({
+    items,
+    meta: { total: items.length },
+  });
+});
+
+// Clear play history and cached AI "You may like" recommendation.
+meRouter.delete('/history', async (req, res) => {
+  const removed = await db
+    .delete(playHistory)
+    .where(eq(playHistory.userId, req.user!.id))
+    .returning({ id: playHistory.id });
+
+  await forgetYouMayLike(req.user!.id);
+
+  res.json({ ok: true, removed: removed.length });
 });
 
 // Placeholder: the apps call it, but followed artists' releases aren't tracked yet.

@@ -11,6 +11,7 @@ import { jpegImageUrl } from '../shared/catalog/images.js';
 export {
   normalizeChannelTabAlbum,
   normalizeChannelToArtist,
+  normalizePlaylist,
   normalizePlaylistToAlbum,
   normalizeStreamItemToAlbum,
   normalizeStreamItemToArtist,

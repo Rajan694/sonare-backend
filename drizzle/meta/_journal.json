@@ -113,6 +113,20 @@
       "when": 1792097927138,
       "tag": "0015_ai_providers_usage",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1792598537936,
+      "tag": "0016_playlist_tracks_added_at",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1792651091690,
+      "tag": "0017_analytics_tables",
+      "breakpoints": true
     }
   ]
 }

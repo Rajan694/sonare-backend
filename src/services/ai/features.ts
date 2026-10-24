@@ -140,6 +140,16 @@ const generating = new Map<string, Promise<AiYouMayLike>>();
 
 export const cachedYouMayLike = (userId: string) => cacheGet<AiYouMayLike>(ymalKey(userId));
 
+/** Clears the cached "You may like" recommendation for a user (e.g. after play history is cleared). Never throws. */
+export const forgetYouMayLike = async (userId: string): Promise<void> => {
+  if (!isRedisAvailable()) return;
+  try {
+    await redis.del(ymalKey(userId));
+  } catch (err) {
+    logger.warn({ err }, 'AI: could not delete cached you-may-like');
+  }
+};
+
 /** Asks the AI (the route checks the cache and the rate limit first). One generation per user at a time. */
 export const generateYouMayLike = (userId: string): Promise<AiYouMayLike> => {
   const running = generating.get(userId);

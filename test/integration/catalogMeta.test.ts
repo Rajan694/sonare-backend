@@ -804,7 +804,7 @@ describe('Catalog metadata (Phase B2)', () => {
 
   it('BE-META-030: PIPED DOWN: GET /library/albums and GET /library/artists succeed with row meta when Piped is offline', async () => {
     const { user, token } = await createUser();
-    const albumId = 'offlineAlbum888';
+    const albumId = 'OLAK5uy_offlineAlbum888';
     const artistId = 'offlineArtist888';
 
     // Add favourite album with row meta

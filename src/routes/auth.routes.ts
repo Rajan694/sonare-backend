@@ -22,6 +22,7 @@ import {
   RESET_TOKEN_TTL_MS,
   VERIFY_TOKEN_TTL_MS,
 } from '../services/emailTokens.js';
+import { clientOf } from '../services/telemetry.js';
 
 export const authRouter = Router();
 
@@ -135,9 +136,10 @@ authRouter.post('/register', async (req, res) => {
   }
 
   const passwordHash = await bcrypt.hash(body.password, BCRYPT_COST);
+  const signupClient = clientOf(req);
   const [user] = await db
     .insert(users)
-    .values({ email: body.email, passwordHash, displayName: body.displayName })
+    .values({ email: body.email, passwordHash, displayName: body.displayName, signupClient })
     .returning();
 
   // The account exists either way; Settings → "Resend" says what went wrong with the mail.

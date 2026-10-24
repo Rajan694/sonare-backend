@@ -51,6 +51,8 @@ const envSchema = z.object({
   GEMINI_API_KEY: optionalSecret,
   GEMINI_BASE_URL: z.string().url().default('https://generativelanguage.googleapis.com/v1beta/openai/chat/completions'),
   GEMINI_MODEL: z.string().default('gemini-3.1-flash-lite'),
+  // Calendar timezone for bucketing activity rows (activity_daily.day).
+  ANALYTICS_TIME_ZONE: z.string().default('Asia/Kolkata'),
 });
 
 export type Config = z.infer<typeof envSchema>;

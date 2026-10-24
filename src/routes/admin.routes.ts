@@ -12,6 +12,7 @@ import { createRateLimiter } from '../middleware/rateLimit.js';
 import { Piped } from '../upstream/piped.js';
 import { parseBody } from '../validation.js';
 import { adminAiRouter, aiUsageHandler } from './adminAi.routes.js';
+import { percentileFromHist } from '../services/telemetry.js';
 import {
   pipedApiUrl,
   setPipedApiUrl,
@@ -298,80 +299,178 @@ const health = async () => {
 
 adminRouter.get('/analytics/overview', async (req, res) => {
   const days = intQuery(req, 'days', 30, 1, 90);
-  const tz = timeZone(req);
+  // Activity days are ANALYTICS_TIME_ZONE dates, so compute every activity window
+  // and the overview's daily series in ANALYTICS_TIME_ZONE so day boundaries align everywhere.
+  const tz = config.ANALYTICS_TIME_ZONE;
 
   const [totals] = await sql`
     SELECT
       (SELECT count(*)::int FROM users WHERE role = 'user') AS users,
       (SELECT count(*)::int FROM users
-        WHERE role = 'user' AND created_at AT TIME ZONE current_setting('TimeZone') >= now() - make_interval(days => ${days})) AS new_users,
-      (SELECT count(DISTINCT user_id)::int FROM request_logs
-        WHERE at >= (now() AT TIME ZONE 'UTC') - make_interval(days => ${days})) AS active_users,
-      (SELECT count(*)::int FROM request_logs
-        WHERE at >= (now() AT TIME ZONE 'UTC') - make_interval(days => ${days})) AS requests,
+        WHERE role = 'user'
+          AND ((created_at AT TIME ZONE current_setting('TimeZone')) AT TIME ZONE ${tz})::date >= ((now() AT TIME ZONE ${tz}) - make_interval(days => ${days - 1}))::date) AS new_users,
+      (SELECT count(DISTINCT actor)::int FROM activity_daily
+        WHERE kind = 'user'
+          AND day >= ((now() AT TIME ZONE ${tz}) - make_interval(days => ${days - 1}))::date) AS active_users,
+      (SELECT count(DISTINCT a.actor)::int FROM activity_daily a
+        WHERE a.kind = 'guest'
+          AND a.day >= ((now() AT TIME ZONE ${tz}) - make_interval(days => ${days - 1}))::date
+          AND NOT EXISTS (
+            SELECT 1 FROM activity_daily u
+            WHERE u.kind = 'user'
+              AND u.day >= ((now() AT TIME ZONE ${tz}) - make_interval(days => ${days - 1}))::date
+              AND u.install = a.actor
+          )) AS active_guests,
+      (SELECT coalesce(sum(count), 0)::int FROM api_usage_hourly
+        WHERE ((hour AT TIME ZONE 'UTC') AT TIME ZONE ${tz})::date >= ((now() AT TIME ZONE ${tz}) - make_interval(days => ${days - 1}))::date) AS requests,
       (SELECT count(*)::int FROM play_history
-        WHERE played_at >= (now() AT TIME ZONE 'UTC') - make_interval(days => ${days})) AS plays,
+        WHERE ((played_at AT TIME ZONE 'UTC') AT TIME ZONE ${tz})::date >= ((now() AT TIME ZONE ${tz}) - make_interval(days => ${days - 1}))::date) AS plays,
       (SELECT coalesce(sum(ms_played), 0)::float8 FROM play_history
-        WHERE played_at >= (now() AT TIME ZONE 'UTC') - make_interval(days => ${days})) AS ms_played,
+        WHERE ((played_at AT TIME ZONE 'UTC') AT TIME ZONE ${tz})::date >= ((now() AT TIME ZONE ${tz}) - make_interval(days => ${days - 1}))::date) AS ms_played,
       (SELECT count(*)::int FROM playlists) AS playlists,
       (SELECT count(*)::int FROM favourite_tracks) AS favourite_tracks,
       (SELECT count(*)::int FROM error_logs
-        WHERE last_seen_at >= (now() AT TIME ZONE 'UTC') - make_interval(days => ${days})) AS error_groups
+        WHERE ((last_seen_at AT TIME ZONE 'UTC') AT TIME ZONE ${tz})::date >= ((now() AT TIME ZONE ${tz}) - make_interval(days => ${days - 1}))::date) AS error_groups
+  `;
+
+  const [activeStats] = await sql`
+    SELECT
+      -- DAU (1 day ending today)
+      (SELECT count(DISTINCT actor)::int FROM activity_daily
+        WHERE kind = 'user' AND day = (now() AT TIME ZONE ${tz})::date) AS dau_users,
+      (SELECT count(DISTINCT a.actor)::int FROM activity_daily a
+        WHERE a.kind = 'guest' AND a.day = (now() AT TIME ZONE ${tz})::date
+          AND NOT EXISTS (
+            SELECT 1 FROM activity_daily u
+            WHERE u.kind = 'user'
+              AND u.day = (now() AT TIME ZONE ${tz})::date
+              AND u.install = a.actor
+          )) AS dau_guests,
+      -- WAU (7 days ending today)
+      (SELECT count(DISTINCT actor)::int FROM activity_daily
+        WHERE kind = 'user'
+          AND day >= ((now() AT TIME ZONE ${tz}) - make_interval(days => 6))::date) AS wau_users,
+      (SELECT count(DISTINCT a.actor)::int FROM activity_daily a
+        WHERE a.kind = 'guest'
+          AND a.day >= ((now() AT TIME ZONE ${tz}) - make_interval(days => 6))::date
+          AND NOT EXISTS (
+            SELECT 1 FROM activity_daily u
+            WHERE u.kind = 'user'
+              AND u.day >= ((now() AT TIME ZONE ${tz}) - make_interval(days => 6))::date
+              AND u.install = a.actor
+          )) AS wau_guests,
+      -- MAU (30 days ending today)
+      (SELECT count(DISTINCT actor)::int FROM activity_daily
+        WHERE kind = 'user'
+          AND day >= ((now() AT TIME ZONE ${tz}) - make_interval(days => 29))::date) AS mau_users,
+      (SELECT count(DISTINCT a.actor)::int FROM activity_daily a
+        WHERE a.kind = 'guest'
+          AND a.day >= ((now() AT TIME ZONE ${tz}) - make_interval(days => 29))::date
+          AND NOT EXISTS (
+            SELECT 1 FROM activity_daily u
+            WHERE u.kind = 'user'
+              AND u.day >= ((now() AT TIME ZONE ${tz}) - make_interval(days => 29))::date
+              AND u.install = a.actor
+          )) AS mau_guests
   `;
 
   const daily = await sql`
     WITH days AS (
-      SELECT generate_series(
-        date_trunc('day', now() AT TIME ZONE ${tz}) - make_interval(days => ${days - 1}),
-        date_trunc('day', now() AT TIME ZONE ${tz}),
-        interval '1 day'
-      ) AS day
+      SELECT (date_trunc('day', now() AT TIME ZONE ${tz}) - make_interval(days => ${days - 1}) + interval '1 day' * i)::date AS day
+      FROM generate_series(0, ${days - 1}) AS i
     ),
     req AS (
-      SELECT date_trunc('day', (at AT TIME ZONE 'UTC') AT TIME ZONE ${tz}) AS day,
-             count(*)::int AS requests,
-             count(*) FILTER (WHERE status >= 500)::int AS server_errors,
-             count(DISTINCT user_id)::int AS active_users
-      FROM request_logs
-      WHERE at >= (now() AT TIME ZONE 'UTC') - make_interval(days => ${days + 1})
+      SELECT ((hour AT TIME ZONE 'UTC') AT TIME ZONE ${tz})::date AS day,
+             sum(count)::int AS requests,
+             sum(s5xx)::int AS server_errors
+      FROM api_usage_hourly
+      WHERE ((hour AT TIME ZONE 'UTC') AT TIME ZONE ${tz})::date >= ((now() AT TIME ZONE ${tz}) - make_interval(days => ${days - 1}))::date
+      GROUP BY 1
+    ),
+    act_users AS (
+      SELECT day,
+             count(DISTINCT actor)::int AS active_users
+      FROM activity_daily
+      WHERE kind = 'user'
+        AND day >= ((now() AT TIME ZONE ${tz}) - make_interval(days => ${days - 1}))::date
+      GROUP BY 1
+    ),
+    act_guests AS (
+      SELECT a.day,
+             count(DISTINCT a.actor)::int AS guests
+      FROM activity_daily a
+      WHERE a.kind = 'guest'
+        AND a.day >= ((now() AT TIME ZONE ${tz}) - make_interval(days => ${days - 1}))::date
+        AND NOT EXISTS (
+          SELECT 1 FROM activity_daily u
+          WHERE u.kind = 'user'
+            AND u.day = a.day
+            AND u.install = a.actor
+        )
       GROUP BY 1
     ),
     signups AS (
-      SELECT date_trunc('day', (created_at AT TIME ZONE current_setting('TimeZone')) AT TIME ZONE ${tz}) AS day,
+      SELECT ((created_at AT TIME ZONE current_setting('TimeZone')) AT TIME ZONE ${tz})::date AS day,
              count(*)::int AS signups
       FROM users
       WHERE role = 'user'
-        AND created_at AT TIME ZONE current_setting('TimeZone') >= now() - make_interval(days => ${days + 1})
+        AND ((created_at AT TIME ZONE current_setting('TimeZone')) AT TIME ZONE ${tz})::date >= ((now() AT TIME ZONE ${tz}) - make_interval(days => ${days - 1}))::date
       GROUP BY 1
     ),
     plays AS (
-      SELECT date_trunc('day', (played_at AT TIME ZONE 'UTC') AT TIME ZONE ${tz}) AS day,
+      SELECT ((played_at AT TIME ZONE 'UTC') AT TIME ZONE ${tz})::date AS day,
              count(*)::int AS plays
       FROM play_history
-      WHERE played_at >= (now() AT TIME ZONE 'UTC') - make_interval(days => ${days + 1})
+      WHERE ((played_at AT TIME ZONE 'UTC') AT TIME ZONE ${tz})::date >= ((now() AT TIME ZONE ${tz}) - make_interval(days => ${days - 1}))::date
       GROUP BY 1
     )
     SELECT to_char(days.day, 'YYYY-MM-DD') AS day,
-           coalesce(req.requests, 0) AS requests,
-           coalesce(req.server_errors, 0) AS server_errors,
-           coalesce(req.active_users, 0) AS active_users,
-           coalesce(signups.signups, 0) AS signups,
-           coalesce(plays.plays, 0) AS plays
+           coalesce(req.requests, 0)::int AS requests,
+           coalesce(req.server_errors, 0)::int AS server_errors,
+           coalesce(act_users.active_users, 0)::int AS users,
+           coalesce(act_users.active_users, 0)::int AS active_users,
+           coalesce(act_guests.guests, 0)::int AS guests,
+           coalesce(signups.signups, 0)::int AS signups,
+           coalesce(plays.plays, 0)::int AS plays
     FROM days
     LEFT JOIN req USING (day)
+    LEFT JOIN act_users USING (day)
+    LEFT JOIN act_guests USING (day)
     LEFT JOIN signups USING (day)
     LEFT JOIN plays USING (day)
     ORDER BY days.day
   `;
 
   const clients = await sql`
-    SELECT coalesce(client, 'other') AS client,
-           count(*)::int AS requests,
-           count(DISTINCT user_id)::int AS users
-    FROM request_logs
-    WHERE at >= (now() AT TIME ZONE 'UTC') - make_interval(days => ${days})
+    SELECT a.client,
+           count(DISTINCT a.actor) FILTER (WHERE a.kind = 'user')::int AS users,
+           count(DISTINCT a.actor) FILTER (
+             WHERE a.kind = 'guest'
+               AND NOT EXISTS (
+                 SELECT 1 FROM activity_daily u
+                 WHERE u.kind = 'user'
+                   AND u.day >= ((now() AT TIME ZONE ${tz}) - make_interval(days => ${days - 1}))::date
+                   AND u.install = a.actor
+               )
+           )::int AS guests
+    FROM activity_daily a
+    WHERE a.day >= ((now() AT TIME ZONE ${tz}) - make_interval(days => ${days - 1}))::date
+    GROUP BY a.client
+    ORDER BY users DESC, guests DESC, a.client ASC
+  `;
+
+  const signupsByClient = await sql`
+    SELECT
+      CASE
+        WHEN signup_client IN ('web', 'linux', 'windows', 'mobile') THEN signup_client
+        ELSE 'unknown'
+      END AS client,
+      count(*)::int AS count
+    FROM users
+    WHERE role = 'user'
+      AND ((created_at AT TIME ZONE current_setting('TimeZone')) AT TIME ZONE ${tz})::date >= ((now() AT TIME ZONE ${tz}) - make_interval(days => ${days - 1}))::date
     GROUP BY 1
-    ORDER BY 2 DESC
+    ORDER BY count DESC, client ASC
   `;
 
   res.json({
@@ -380,6 +479,7 @@ adminRouter.get('/analytics/overview', async (req, res) => {
       users: totals.users,
       newUsers: totals.new_users,
       activeUsers: totals.active_users,
+      activeGuests: totals.active_guests,
       requests: totals.requests,
       plays: totals.plays,
       listeningHours: Math.round(totals.ms_played / 360_000) / 10,
@@ -387,15 +487,30 @@ adminRouter.get('/analytics/overview', async (req, res) => {
       favouriteTracks: totals.favourite_tracks,
       errorGroups: totals.error_groups,
     },
+    active: {
+      dau: { users: activeStats.dau_users, guests: activeStats.dau_guests },
+      wau: { users: activeStats.wau_users, guests: activeStats.wau_guests },
+      mau: { users: activeStats.mau_users, guests: activeStats.mau_guests },
+    },
     daily: daily.map((d) => ({
       day: d.day,
-      requests: d.requests,
-      serverErrors: d.server_errors,
+      users: d.users,
       activeUsers: d.active_users,
+      guests: d.guests,
       signups: d.signups,
       plays: d.plays,
+      requests: d.requests,
+      serverErrors: d.server_errors,
     })),
-    clients: clients.map((c) => ({ client: c.client, requests: c.requests, users: c.users })),
+    clients: clients.map((c) => ({
+      client: c.client,
+      users: c.users,
+      guests: c.guests,
+    })),
+    signupsByClient: signupsByClient.map((s) => ({
+      client: s.client as 'web' | 'linux' | 'windows' | 'mobile' | 'unknown',
+      count: s.count,
+    })),
     health: await health(),
   });
 });
@@ -409,13 +524,23 @@ adminRouter.get('/analytics/requests', async (req, res) => {
   const step = unit === 'hour' ? '1 hour' : '1 day';
 
   const [summary] = await sql`
-    SELECT count(*)::int AS total,
-           count(*) FILTER (WHERE status >= 500)::int AS server_errors,
-           count(*) FILTER (WHERE status >= 400 AND status < 500)::int AS client_errors,
-           coalesce(percentile_cont(0.5) WITHIN GROUP (ORDER BY duration_ms), 0)::float8 AS p50,
-           coalesce(percentile_cont(0.95) WITHIN GROUP (ORDER BY duration_ms), 0)::float8 AS p95
-    FROM request_logs
-    WHERE at >= (now() AT TIME ZONE 'UTC') - make_interval(hours => ${hours})
+    SELECT coalesce(sum(count), 0)::int AS total,
+           coalesce(sum(s5xx), 0)::int AS server_errors,
+           coalesce(sum(s4xx), 0)::int AS client_errors,
+           coalesce(max(max_ms), 0)::int AS max_ms,
+           ARRAY[
+             coalesce(sum(hist[1]), 0)::int,
+             coalesce(sum(hist[2]), 0)::int,
+             coalesce(sum(hist[3]), 0)::int,
+             coalesce(sum(hist[4]), 0)::int,
+             coalesce(sum(hist[5]), 0)::int,
+             coalesce(sum(hist[6]), 0)::int,
+             coalesce(sum(hist[7]), 0)::int,
+             coalesce(sum(hist[8]), 0)::int,
+             coalesce(sum(hist[9]), 0)::int
+           ] AS hist
+    FROM api_usage_hourly
+    WHERE hour >= (now() AT TIME ZONE 'UTC') - make_interval(hours => ${hours})
   `;
 
   const series = await sql`
@@ -427,43 +552,67 @@ adminRouter.get('/analytics/requests', async (req, res) => {
       ) AS bucket
     ),
     req AS (
-      SELECT date_trunc(${unit}, (at AT TIME ZONE 'UTC') AT TIME ZONE ${tz}) AS bucket,
-             count(*)::int AS requests,
-             count(*) FILTER (WHERE status >= 500)::int AS server_errors,
-             coalesce(percentile_cont(0.95) WITHIN GROUP (ORDER BY duration_ms), 0)::float8 AS p95
-      FROM request_logs
-      WHERE at >= (now() AT TIME ZONE 'UTC') - make_interval(hours => ${hours + 24})
+      SELECT date_trunc(${unit}, (hour AT TIME ZONE 'UTC') AT TIME ZONE ${tz}) AS bucket,
+             sum(count)::int AS requests,
+             sum(s5xx)::int AS server_errors,
+             max(max_ms)::int AS max_ms,
+             ARRAY[
+               coalesce(sum(hist[1]), 0)::int,
+               coalesce(sum(hist[2]), 0)::int,
+               coalesce(sum(hist[3]), 0)::int,
+               coalesce(sum(hist[4]), 0)::int,
+               coalesce(sum(hist[5]), 0)::int,
+               coalesce(sum(hist[6]), 0)::int,
+               coalesce(sum(hist[7]), 0)::int,
+               coalesce(sum(hist[8]), 0)::int,
+               coalesce(sum(hist[9]), 0)::int
+             ] AS hist
+      FROM api_usage_hourly
+      WHERE hour >= (now() AT TIME ZONE 'UTC') - make_interval(hours => ${hours + 24})
       GROUP BY 1
     )
     SELECT to_char(buckets.bucket, 'YYYY-MM-DD"T"HH24:MI') AS at,
-           coalesce(req.requests, 0) AS requests,
-           coalesce(req.server_errors, 0) AS server_errors,
-           coalesce(req.p95, 0) AS p95
+           coalesce(req.requests, 0)::int AS requests,
+           coalesce(req.server_errors, 0)::int AS server_errors,
+           req.max_ms,
+           req.hist
     FROM buckets LEFT JOIN req USING (bucket)
     ORDER BY buckets.bucket
   `;
 
   const routes = await sql`
     SELECT method, route,
-           count(*)::int AS count,
-           count(*) FILTER (WHERE status >= 500)::int AS server_errors,
-           count(*) FILTER (WHERE status >= 400 AND status < 500)::int AS client_errors,
-           percentile_cont(0.5) WITHIN GROUP (ORDER BY duration_ms)::float8 AS p50,
-           percentile_cont(0.95) WITHIN GROUP (ORDER BY duration_ms)::float8 AS p95,
-           max(duration_ms)::int AS max
-    FROM request_logs
-    WHERE at >= (now() AT TIME ZONE 'UTC') - make_interval(hours => ${hours})
+           sum(count)::int AS count,
+           sum(s5xx)::int AS server_errors,
+           sum(s4xx)::int AS client_errors,
+           sum(total_ms)::bigint AS total_ms,
+           max(max_ms)::int AS max,
+           ARRAY[
+             coalesce(sum(hist[1]), 0)::int,
+             coalesce(sum(hist[2]), 0)::int,
+             coalesce(sum(hist[3]), 0)::int,
+             coalesce(sum(hist[4]), 0)::int,
+             coalesce(sum(hist[5]), 0)::int,
+             coalesce(sum(hist[6]), 0)::int,
+             coalesce(sum(hist[7]), 0)::int,
+             coalesce(sum(hist[8]), 0)::int,
+             coalesce(sum(hist[9]), 0)::int
+           ] AS hist
+    FROM api_usage_hourly
+    WHERE hour >= (now() AT TIME ZONE 'UTC') - make_interval(hours => ${hours})
     GROUP BY method, route
     ORDER BY count DESC
     LIMIT 100
   `;
 
-  const statuses = await sql`
-    SELECT status, count(*)::int AS count
-    FROM request_logs
-    WHERE at >= (now() AT TIME ZONE 'UTC') - make_interval(hours => ${hours})
-    GROUP BY status
-    ORDER BY status
+  const statusClasses = await sql`
+    SELECT '2xx' AS class, coalesce(sum(s2xx), 0)::int AS count FROM api_usage_hourly WHERE hour >= (now() AT TIME ZONE 'UTC') - make_interval(hours => ${hours})
+    UNION ALL
+    SELECT '3xx', coalesce(sum(s3xx), 0)::int FROM api_usage_hourly WHERE hour >= (now() AT TIME ZONE 'UTC') - make_interval(hours => ${hours})
+    UNION ALL
+    SELECT '4xx', coalesce(sum(s4xx), 0)::int FROM api_usage_hourly WHERE hour >= (now() AT TIME ZONE 'UTC') - make_interval(hours => ${hours})
+    UNION ALL
+    SELECT '5xx', coalesce(sum(s5xx), 0)::int FROM api_usage_hourly WHERE hour >= (now() AT TIME ZONE 'UTC') - make_interval(hours => ${hours})
   `;
 
   res.json({
@@ -473,14 +622,14 @@ adminRouter.get('/analytics/requests', async (req, res) => {
       total: summary.total,
       serverErrors: summary.server_errors,
       clientErrors: summary.client_errors,
-      p50: Math.round(summary.p50),
-      p95: Math.round(summary.p95),
+      p50: percentileFromHist(summary.hist, 50, summary.max_ms),
+      p95: percentileFromHist(summary.hist, 95, summary.max_ms),
     },
     series: series.map((s) => ({
       at: s.at,
       requests: s.requests,
       serverErrors: s.server_errors,
-      p95: Math.round(s.p95),
+      p95: s.hist ? percentileFromHist(s.hist, 95, s.max_ms) : 0,
     })),
     routes: routes.map((r) => ({
       method: r.method,
@@ -488,17 +637,18 @@ adminRouter.get('/analytics/requests', async (req, res) => {
       count: r.count,
       serverErrors: r.server_errors,
       clientErrors: r.client_errors,
-      p50: Math.round(r.p50),
-      p95: Math.round(r.p95),
+      avg: r.count > 0 ? Math.round(Number(r.total_ms) / r.count) : 0,
+      p50: percentileFromHist(r.hist, 50, r.max),
+      p95: percentileFromHist(r.hist, 95, r.max),
       max: r.max,
     })),
-    statuses: statuses.map((s) => ({ status: s.status, count: s.count })),
+    statusClasses: statusClasses.map((s) => ({ class: s.class, count: s.count })),
   });
 });
 
 // ---- Error logs ----
 
-const SOURCES = ['backend', 'web', 'linux', 'mobile'] as const;
+const SOURCES = ['backend', 'web', 'linux', 'windows', 'mobile'] as const;
 
 const errorFilter = (req: Request): SQL | undefined => {
   const source =

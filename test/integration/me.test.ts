@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import net from 'node:net';
+import crypto from 'node:crypto';
 import request from 'supertest';
 import { createApp } from '../../src/app.js';
 import { config } from '../../src/config.js';
@@ -23,6 +24,7 @@ import {
 } from '../../src/db/schema.js';
 import { eq } from 'drizzle-orm';
 import { MockAgent, getGlobalDispatcher, setGlobalDispatcher, type Dispatcher } from 'undici';
+import { isRedisAvailable, redis } from '../../src/services/cache.js';
 
 describe('Me: profile & personal data', () => {
   const app = createApp();
@@ -148,19 +150,19 @@ describe('Me: profile & personal data', () => {
     const { user, token } = await createUser();
     await db.insert(favouriteAlbums).values({
       userId: user.id,
-      albumId: 'PLfavAlbum123',
+      albumId: 'OLAK5uy_favAlbum123',
     });
 
     const pipedMock = mockAgent!.get('http://localhost:8090');
     pipedMock
-      .intercept({ path: '/playlists/PLfavAlbum123', method: 'GET' })
-      .reply(200, samplePipedPlaylist('PLfavAlbum123'));
+      .intercept({ path: '/playlists/OLAK5uy_favAlbum123', method: 'GET' })
+      .reply(200, samplePipedPlaylist('OLAK5uy_favAlbum123'));
 
     const res = await request(app).get('/api/v1/me/library/albums').set('Authorization', `Bearer ${token}`);
 
     expect(res.status).toBe(200);
     expect(res.body.items).toHaveLength(1);
-    expect(res.body.items[0].id).toBe('yt:PLfavAlbum123');
+    expect(res.body.items[0].id).toBe('yt:OLAK5uy_favAlbum123');
   });
 
   it('BE-ME-004: GET /api/v1/me/library/artists resolves followed artists', async () => {
@@ -241,19 +243,19 @@ describe('Me: profile & personal data', () => {
     const { user, token } = await createUser();
     await db.insert(favouriteAlbums).values({
       userId: user.id,
-      albumId: 'PLmyFavAlb1',
+      albumId: 'OLAK5uy_myFavAlb1',
     });
 
     const pipedMock = mockAgent!.get('http://localhost:8090');
     pipedMock
-      .intercept({ path: '/playlists/PLmyFavAlb1', method: 'GET' })
-      .reply(200, samplePipedPlaylist('PLmyFavAlb1'));
+      .intercept({ path: '/playlists/OLAK5uy_myFavAlb1', method: 'GET' })
+      .reply(200, samplePipedPlaylist('OLAK5uy_myFavAlb1'));
 
     const res = await request(app).get('/api/v1/me/library/albums').set('Authorization', `Bearer ${token}`);
 
     expect(res.status).toBe(200);
     expect(res.body.items).toHaveLength(1);
-    expect(res.body.items[0].id).toBe('yt:PLmyFavAlb1');
+    expect(res.body.items[0].id).toBe('yt:OLAK5uy_myFavAlb1');
   });
 
   it('BE-ME-010: PUT /api/v1/me/favourites/albums/:id adds album to favourites', async () => {
@@ -741,6 +743,136 @@ describe('Me: profile & personal data', () => {
     } finally {
       config.PIPED_API_URL = original;
     }
+  });
+
+  // ---- Library: liked songs plus playlist songs ----
+
+  const songMeta = (title: string, artist: string, durationMs: number | null = 200_000, album?: string) => ({
+    title,
+    artist,
+    artistId: '',
+    durationMs,
+    ...(album && { album }),
+  });
+
+  const playlistWith = async (userId: string, songs: { id: string; meta?: unknown; at?: Date; kind?: string }[]) => {
+    const id = `sonare:${crypto.randomUUID()}`;
+    await db.insert(playlists).values({ id, userId, name: 'Mix', kind: 'online' });
+    await db.insert(playlistTracks).values(
+      songs.map((s, i) => ({
+        playlistId: id,
+        position: i,
+        trackRefKind: s.kind ?? 'server',
+        trackRefId: s.id,
+        meta: s.meta ?? null,
+        ...(s.at && { addedAt: s.at }),
+      })),
+    );
+    return id;
+  };
+
+  const library = (token: string, query = '') =>
+    request(app).get(`/api/v1/me/library/tracks${query}`).set('Authorization', `Bearer ${token}`);
+
+  it('BE-ME-051: GET /api/v1/me/library/tracks lists liked and playlist songs once, newest add first', async () => {
+    const { user, token } = await createUser();
+    await db.insert(favouriteTracks).values([
+      {
+        userId: user.id,
+        trackRefKind: 'server',
+        trackRefId: 'likedOnly',
+        addedAt: new Date(1000),
+        meta: songMeta('A', 'X'),
+      },
+      {
+        userId: user.id,
+        trackRefKind: 'server',
+        trackRefId: 'both',
+        addedAt: new Date(2000),
+        meta: songMeta('B', 'X'),
+      },
+    ]);
+    await playlistWith(user.id, [
+      { id: 'both', meta: songMeta('B', 'X'), at: new Date(5000) },
+      { id: 'listedOnly', meta: songMeta('C', 'Y'), at: new Date(3000) },
+      // Another device's file: it can't play from here, so the library leaves it out.
+      { id: 'fingerprint1', kind: 'local', at: new Date(9000) },
+    ]);
+
+    const res = await library(token);
+    expect(res.status).toBe(200);
+    expect(res.body.items.map((t: { id: string }) => t.id)).toEqual(['yt:both', 'yt:listedOnly', 'yt:likedOnly']);
+    expect(res.body.items.map((t: { favourite: boolean }) => t.favourite)).toEqual([true, false, true]);
+    expect(res.body.items[0].addedAt).toBe(5000);
+    expect(res.body.items[1]).toMatchObject({ title: 'C', addedAt: 3000 });
+    expect(res.body.meta).toEqual({ total: 3 });
+  });
+
+  it('BE-ME-052: GET /api/v1/me/library/tracks?filter=liked leaves out songs only in playlists', async () => {
+    const { user, token } = await createUser();
+    await db
+      .insert(favouriteTracks)
+      .values({ userId: user.id, trackRefKind: 'server', trackRefId: 'liked1', meta: songMeta('A', 'X') });
+    await playlistWith(user.id, [{ id: 'listed1', meta: songMeta('B', 'X') }]);
+
+    const res = await library(token, '?filter=liked');
+    expect(res.status).toBe(200);
+    expect(res.body.items.map((t: { id: string }) => t.id)).toEqual(['yt:liked1']);
+    expect(res.body.meta.total).toBe(1);
+  });
+
+  it('BE-ME-053: GET /api/v1/me/library/tracks sorts by stored details; unknown ones go last', async () => {
+    const { user, token } = await createUser();
+    await playlistWith(user.id, [
+      { id: 'song1', meta: songMeta('beta', 'Zed', 300_000, 'Moon') },
+      { id: 'song2', meta: songMeta('Alpha', 'amy', 100_000, 'sun') },
+      { id: 'song3', meta: songMeta('gamma', 'Bob', null) },
+    ]);
+    await db.insert(playHistory).values([
+      { userId: user.id, trackRefKind: 'server', trackRefId: 'song3', playedAt: new Date(), msPlayed: 40000 },
+      { userId: user.id, trackRefKind: 'server', trackRefId: 'song3', playedAt: new Date(), msPlayed: 40000 },
+      { userId: user.id, trackRefKind: 'server', trackRefId: 'song1', playedAt: new Date(), msPlayed: 40000 },
+    ]);
+    const ids = async (query: string) =>
+      (await library(token, query)).body.items.map((t: { id: string }) => t.id.slice(3));
+
+    expect(await ids('?sort=title')).toEqual(['song2', 'song1', 'song3']);
+    expect(await ids('?sort=title&order=desc')).toEqual(['song3', 'song1', 'song2']);
+    expect(await ids('?sort=artist')).toEqual(['song2', 'song3', 'song1']);
+    expect(await ids('?sort=album')).toEqual(['song1', 'song2', 'song3']);
+    expect(await ids('?sort=durationMs')).toEqual(['song2', 'song1', 'song3']);
+    expect(await ids('?sort=playCount')).toEqual(['song3', 'song1', 'song2']);
+    expect((await library(token, '?sort=playCount')).body.items[0].playCount).toBe(2);
+    expect((await library(token, '?sort=loudness')).status).toBe(400);
+  });
+
+  it('BE-ME-054: GET /api/v1/me/library/tracks pages with limit and cursor', async () => {
+    const { user, token } = await createUser();
+    await playlistWith(
+      user.id,
+      ['p1', 'p2', 'p3', 'p4', 'p5'].map((id, i) => ({ id, meta: songMeta(id, 'X'), at: new Date(10_000 - i) })),
+    );
+
+    const first = await library(token, '?limit=2');
+    expect(first.body.items.map((t: { id: string }) => t.id)).toEqual(['yt:p1', 'yt:p2']);
+    expect(first.body.meta).toEqual({ total: 5, nextCursor: '2' });
+    const second = await library(token, `?limit=2&cursor=${first.body.meta.nextCursor}`);
+    expect(second.body.items.map((t: { id: string }) => t.id)).toEqual(['yt:p3', 'yt:p4']);
+    const last = await library(token, '?limit=2&cursor=4');
+    expect(last.body.items.map((t: { id: string }) => t.id)).toEqual(['yt:p5']);
+    expect(last.body.meta).toEqual({ total: 5 });
+    expect((await library(token, '?cursor=abc')).status).toBe(400);
+  });
+
+  it("BE-ME-055: GET /api/v1/me/library/tracks leaves out other users' playlists", async () => {
+    const { token } = await createUser();
+    const { user: other } = await createUser();
+    await playlistWith(other.id, [{ id: 'theirs', meta: songMeta('T', 'X') }]);
+
+    const res = await library(token);
+    expect(res.status).toBe(200);
+    expect(res.body.items).toEqual([]);
+    expect(res.body.meta).toEqual({ total: 0 });
   });
 });
 
@@ -1519,5 +1651,608 @@ describe('Me: request validation', () => {
 
     expect(res.status).toBe(400);
     expect(res.body.error).toEqual({ code: 'BAD_REQUEST', message: 'Must be at least 1' });
+  });
+});
+
+describe('Me: bulk unlike', () => {
+  const app = createApp();
+
+  it('BE-ME-056: DELETE /api/v1/me/favourites/tracks removes exactly the listed ids and leaves others', async () => {
+    const { user, token } = await createUser();
+    await db.insert(favouriteTracks).values([
+      { userId: user.id, trackRefKind: 'server', trackRefId: 'keepMe' },
+      { userId: user.id, trackRefKind: 'server', trackRefId: 'removeA' },
+      { userId: user.id, trackRefKind: 'local', trackRefId: 'removeB' },
+    ]);
+
+    const res = await request(app)
+      .delete('/api/v1/me/favourites/tracks')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ ids: ['yt:removeA', 'local:removeB'] });
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ ok: true, removed: 2 });
+
+    // Only 'keepMe' must survive.
+    const remaining = await db.select().from(favouriteTracks).where(eq(favouriteTracks.userId, user.id));
+    expect(remaining).toHaveLength(1);
+    expect(remaining[0].trackRefId).toBe('keepMe');
+  });
+
+  it("BE-ME-057: DELETE /api/v1/me/favourites/tracks does not touch another user's rows", async () => {
+    const { token } = await createUser();
+    const { user: other } = await createUser();
+    // Both users have the same raw id.
+    await db.insert(favouriteTracks).values({ userId: other.id, trackRefKind: 'server', trackRefId: 'sharedId' });
+
+    const res = await request(app)
+      .delete('/api/v1/me/favourites/tracks')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ ids: ['yt:sharedId'] });
+
+    expect(res.status).toBe(200);
+    // Called user has no rows to delete; other user's row is untouched.
+    expect(res.body).toEqual({ ok: true, removed: 0 });
+    const otherRows = await db.select().from(favouriteTracks).where(eq(favouriteTracks.userId, other.id));
+    expect(otherRows).toHaveLength(1);
+  });
+
+  it('BE-ME-058: DELETE /api/v1/me/favourites/tracks rejects empty array and 501-element array with 400', async () => {
+    const { token } = await createUser();
+
+    const emptyRes = await request(app)
+      .delete('/api/v1/me/favourites/tracks')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ ids: [] });
+    expect(emptyRes.status).toBe(400);
+    expect(emptyRes.body.error.code).toBe('BAD_REQUEST');
+
+    const tooMany = await request(app)
+      .delete('/api/v1/me/favourites/tracks')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ ids: Array.from({ length: 501 }, (_, i) => `yt:track${i}`) });
+    expect(tooMany.status).toBe(400);
+    expect(tooMany.body.error.code).toBe('BAD_REQUEST');
+  });
+
+  it('BE-ME-059: DELETE /api/v1/me/favourites/tracks requires a token, returning 401 without one', async () => {
+    const res = await request(app)
+      .delete('/api/v1/me/favourites/tracks')
+      .send({ ids: ['yt:anyTrack'] });
+
+    expect(res.status).toBe(401);
+    expect(res.body.error.code).toBe('UNAUTHORIZED');
+  });
+});
+
+describe('Me: not played lately', () => {
+  const app = createApp();
+
+  const songMeta = (title: string, artist: string, durationMs: number | null = 200_000, album?: string) => ({
+    title,
+    artist,
+    artistId: '',
+    durationMs,
+    ...(album && { album }),
+  });
+
+  const daysAgo = (days: number) => new Date(Date.now() - days * 24 * 3600 * 1000);
+
+  it('BE-ME-060: GET /api/v1/me/not-played-lately returns songs played >= 2 times with newest play > 30 days ago', async () => {
+    const { user, token } = await createUser();
+    const play1 = daysAgo(42);
+    const play2 = daysAgo(41);
+    const play3 = daysAgo(40);
+
+    await db.insert(playHistory).values([
+      {
+        userId: user.id,
+        trackRefKind: 'server',
+        trackRefId: 'oldFavorite',
+        playedAt: play1,
+        msPlayed: 30000,
+        meta: songMeta('Old Favorite', 'Artist One'),
+      },
+      {
+        userId: user.id,
+        trackRefKind: 'server',
+        trackRefId: 'oldFavorite',
+        playedAt: play2,
+        msPlayed: 30000,
+        meta: songMeta('Old Favorite', 'Artist One'),
+      },
+      {
+        userId: user.id,
+        trackRefKind: 'server',
+        trackRefId: 'oldFavorite',
+        playedAt: play3,
+        msPlayed: 30000,
+        meta: songMeta('Old Favorite', 'Artist One'),
+      },
+    ]);
+
+    const res = await request(app).get('/api/v1/me/not-played-lately').set('Authorization', `Bearer ${token}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.items).toHaveLength(1);
+    expect(res.body.items[0].id).toBe('yt:oldFavorite');
+    expect(res.body.items[0].title).toBe('Old Favorite');
+    expect(res.body.items[0].playCount).toBe(3);
+    expect(typeof res.body.items[0].lastPlayedAt).toBe('number');
+    // lastPlayedAt reflects the latest play (> 30 days ago, ~40 days ago)
+    expect(res.body.items[0].lastPlayedAt).toBeLessThan(Date.now() - 30 * 24 * 3600 * 1000);
+    expect(Math.abs(res.body.items[0].lastPlayedAt - play3.getTime())).toBeLessThan(24 * 3600 * 1000);
+    expect(res.body.meta).toEqual({ total: 1 });
+  });
+
+  it("BE-ME-061: GET /api/v1/me/not-played-lately excludes songs played once, songs played recently, and other users' plays", async () => {
+    const { user, token } = await createUser();
+    const { user: other } = await createUser();
+
+    // Song played once 40 days ago
+    await db.insert(playHistory).values({
+      userId: user.id,
+      trackRefKind: 'server',
+      trackRefId: 'playedOnce',
+      playedAt: daysAgo(40),
+      msPlayed: 30000,
+      meta: songMeta('Played Once', 'Artist A'),
+    });
+
+    // Song played 5 times: 4 times 40 days ago, but 1 time yesterday
+    await db.insert(playHistory).values([
+      {
+        userId: user.id,
+        trackRefKind: 'server',
+        trackRefId: 'playedRecent',
+        playedAt: daysAgo(40),
+        msPlayed: 30000,
+        meta: songMeta('Recent Song', 'Artist B'),
+      },
+      {
+        userId: user.id,
+        trackRefKind: 'server',
+        trackRefId: 'playedRecent',
+        playedAt: daysAgo(39),
+        msPlayed: 30000,
+        meta: songMeta('Recent Song', 'Artist B'),
+      },
+      {
+        userId: user.id,
+        trackRefKind: 'server',
+        trackRefId: 'playedRecent',
+        playedAt: daysAgo(38),
+        msPlayed: 30000,
+        meta: songMeta('Recent Song', 'Artist B'),
+      },
+      {
+        userId: user.id,
+        trackRefKind: 'server',
+        trackRefId: 'playedRecent',
+        playedAt: daysAgo(35),
+        msPlayed: 30000,
+        meta: songMeta('Recent Song', 'Artist B'),
+      },
+      {
+        userId: user.id,
+        trackRefKind: 'server',
+        trackRefId: 'playedRecent',
+        playedAt: daysAgo(1),
+        msPlayed: 30000,
+        meta: songMeta('Recent Song', 'Artist B'),
+      },
+    ]);
+
+    // Another user played a song 3 times 40 days ago
+    await db.insert(playHistory).values([
+      {
+        userId: other.id,
+        trackRefKind: 'server',
+        trackRefId: 'otherUserSong',
+        playedAt: daysAgo(40),
+        msPlayed: 30000,
+        meta: songMeta('Other Song', 'Artist C'),
+      },
+      {
+        userId: other.id,
+        trackRefKind: 'server',
+        trackRefId: 'otherUserSong',
+        playedAt: daysAgo(39),
+        msPlayed: 30000,
+        meta: songMeta('Other Song', 'Artist C'),
+      },
+      {
+        userId: other.id,
+        trackRefKind: 'server',
+        trackRefId: 'otherUserSong',
+        playedAt: daysAgo(38),
+        msPlayed: 30000,
+        meta: songMeta('Other Song', 'Artist C'),
+      },
+    ]);
+
+    const res = await request(app).get('/api/v1/me/not-played-lately').set('Authorization', `Bearer ${token}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.items).toHaveLength(0);
+    expect(res.body.meta).toEqual({ total: 0 });
+  });
+
+  it('BE-ME-062: GET /api/v1/me/not-played-lately orders by playCount desc, then longest unplayed (oldest max playedAt) first', async () => {
+    const { user, token } = await createUser();
+
+    // Song 1: 5 plays, last played 35 days ago
+    for (let i = 0; i < 5; i++) {
+      await db.insert(playHistory).values({
+        userId: user.id,
+        trackRefKind: 'server',
+        trackRefId: 'songHighestCount',
+        playedAt: daysAgo(35 + i),
+        msPlayed: 30000,
+        meta: songMeta('Highest Count', 'Artist 1'),
+      });
+    }
+
+    // Song 2: 3 plays, last played 50 days ago (longer unplayed than Song 3)
+    for (let i = 0; i < 3; i++) {
+      await db.insert(playHistory).values({
+        userId: user.id,
+        trackRefKind: 'server',
+        trackRefId: 'songLongestUnplayed',
+        playedAt: daysAgo(50 + i),
+        msPlayed: 30000,
+        meta: songMeta('Longest Unplayed', 'Artist 2'),
+      });
+    }
+
+    // Song 3: 3 plays, last played 32 days ago
+    for (let i = 0; i < 3; i++) {
+      await db.insert(playHistory).values({
+        userId: user.id,
+        trackRefKind: 'server',
+        trackRefId: 'songShorterUnplayed',
+        playedAt: daysAgo(32 + i),
+        msPlayed: 30000,
+        meta: songMeta('Shorter Unplayed', 'Artist 3'),
+      });
+    }
+
+    const res = await request(app).get('/api/v1/me/not-played-lately').set('Authorization', `Bearer ${token}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.items).toHaveLength(3);
+    expect(res.body.items.map((t: { id: string }) => t.id)).toEqual([
+      'yt:songHighestCount',
+      'yt:songLongestUnplayed',
+      'yt:songShorterUnplayed',
+    ]);
+  });
+
+  it('BE-ME-063: GET /api/v1/me/not-played-lately validates limit (default 20, 1..50; rejects 0, 51, non-numeric)', async () => {
+    const { user, token } = await createUser();
+
+    // Insert 22 qualifying tracks
+    for (let t = 0; t < 22; t++) {
+      await db.insert(playHistory).values([
+        {
+          userId: user.id,
+          trackRefKind: 'server',
+          trackRefId: `track_${t}`,
+          playedAt: daysAgo(40),
+          msPlayed: 30000,
+          meta: songMeta(`Track ${t}`, 'Artist'),
+        },
+        {
+          userId: user.id,
+          trackRefKind: 'server',
+          trackRefId: `track_${t}`,
+          playedAt: daysAgo(41),
+          msPlayed: 30000,
+          meta: songMeta(`Track ${t}`, 'Artist'),
+        },
+      ]);
+    }
+
+    // Default limit should be 20
+    const defaultRes = await request(app).get('/api/v1/me/not-played-lately').set('Authorization', `Bearer ${token}`);
+    expect(defaultRes.status).toBe(200);
+    expect(defaultRes.body.items).toHaveLength(20);
+
+    // Custom limit
+    const customRes = await request(app)
+      .get('/api/v1/me/not-played-lately?limit=5')
+      .set('Authorization', `Bearer ${token}`);
+    expect(customRes.status).toBe(200);
+    expect(customRes.body.items).toHaveLength(5);
+
+    // Rejects limit 0
+    const zeroRes = await request(app)
+      .get('/api/v1/me/not-played-lately?limit=0')
+      .set('Authorization', `Bearer ${token}`);
+    expect(zeroRes.status).toBe(400);
+    expect(zeroRes.body.error.code).toBe('BAD_REQUEST');
+
+    // Rejects limit 51
+    const excessRes = await request(app)
+      .get('/api/v1/me/not-played-lately?limit=51')
+      .set('Authorization', `Bearer ${token}`);
+    expect(excessRes.status).toBe(400);
+    expect(excessRes.body.error.code).toBe('BAD_REQUEST');
+
+    // Rejects non-numeric limit
+    const nanRes = await request(app)
+      .get('/api/v1/me/not-played-lately?limit=many')
+      .set('Authorization', `Bearer ${token}`);
+    expect(nanRes.status).toBe(400);
+    expect(nanRes.body.error.code).toBe('BAD_REQUEST');
+  });
+
+  it('BE-ME-064: GET /api/v1/me/not-played-lately returns 502 UPSTREAM_UNAVAILABLE when Piped is down and track has no stored details', async () => {
+    const { user, token } = await createUser();
+
+    await db.insert(playHistory).values([
+      {
+        userId: user.id,
+        trackRefKind: 'server',
+        trackRefId: 'unreachableTrack',
+        playedAt: daysAgo(40),
+        msPlayed: 30000,
+      },
+      {
+        userId: user.id,
+        trackRefKind: 'server',
+        trackRefId: 'unreachableTrack',
+        playedAt: daysAgo(41),
+        msPlayed: 30000,
+      },
+    ]);
+
+    const probe = net.createServer();
+    await new Promise<void>((resolve) => probe.listen(0, '127.0.0.1', resolve));
+    const { port } = probe.address() as net.AddressInfo;
+    await new Promise((resolve) => probe.close(resolve));
+    const original = config.PIPED_API_URL;
+    config.PIPED_API_URL = `http://127.0.0.1:${port}`;
+    try {
+      const res = await request(app).get('/api/v1/me/not-played-lately').set('Authorization', `Bearer ${token}`);
+      expect(res.status).toBe(502);
+      expect(res.body.error.code).toBe('UPSTREAM_UNAVAILABLE');
+    } finally {
+      config.PIPED_API_URL = original;
+    }
+  });
+
+  it('BE-ME-065: GET /api/v1/me/not-played-lately requires a token, returning 401 without one', async () => {
+    const res = await request(app).get('/api/v1/me/not-played-lately');
+    expect(res.status).toBe(401);
+    expect(res.body.error.code).toBe('UNAUTHORIZED');
+  });
+
+  it('BE-ME-066: DELETE /api/v1/me/history deletes all play_history rows of the caller and returns removed count', async () => {
+    const { user, token } = await createUser();
+
+    await db.insert(playHistory).values([
+      { userId: user.id, trackRefKind: 'server', trackRefId: 'songH1', playedAt: new Date(), msPlayed: 30000 },
+      { userId: user.id, trackRefKind: 'server', trackRefId: 'songH2', playedAt: new Date(), msPlayed: 45000 },
+      { userId: user.id, trackRefKind: 'server', trackRefId: 'songH3', playedAt: new Date(), msPlayed: 20000 },
+    ]);
+
+    if (isRedisAvailable()) {
+      await redis.set(`ai:ymal:${user.id}`, JSON.stringify({ picks: [], basedOn: [], generatedAt: Date.now() }));
+    }
+
+    const res = await request(app).delete('/api/v1/me/history').set('Authorization', `Bearer ${token}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ ok: true, removed: 3 });
+
+    const remaining = await db.select().from(playHistory).where(eq(playHistory.userId, user.id));
+    expect(remaining).toHaveLength(0);
+
+    if (isRedisAvailable()) {
+      const cached = await redis.get(`ai:ymal:${user.id}`);
+      expect(cached).toBeNull();
+    }
+  });
+
+  it("BE-ME-067: DELETE /api/v1/me/history leaves another user's history and caller's favourites and playlists untouched", async () => {
+    const { user, token } = await createUser();
+    const { user: other } = await createUser();
+
+    await db.insert(playHistory).values([
+      { userId: user.id, trackRefKind: 'server', trackRefId: 'userSong', playedAt: new Date(), msPlayed: 30000 },
+      { userId: other.id, trackRefKind: 'server', trackRefId: 'otherSong', playedAt: new Date(), msPlayed: 30000 },
+    ]);
+
+    await db.insert(favouriteTracks).values({
+      userId: user.id,
+      trackRefKind: 'server',
+      trackRefId: 'favSong1',
+    });
+
+    await db.insert(playlists).values({
+      id: `sonare:${crypto.randomUUID()}`,
+      userId: user.id,
+      name: 'Untouched Playlist',
+      kind: 'online',
+    });
+
+    const res = await request(app).delete('/api/v1/me/history').set('Authorization', `Bearer ${token}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ ok: true, removed: 1 });
+
+    const userPlays = await db.select().from(playHistory).where(eq(playHistory.userId, user.id));
+    expect(userPlays).toHaveLength(0);
+
+    const otherPlays = await db.select().from(playHistory).where(eq(playHistory.userId, other.id));
+    expect(otherPlays).toHaveLength(1);
+
+    const userFavs = await db.select().from(favouriteTracks).where(eq(favouriteTracks.userId, user.id));
+    expect(userFavs).toHaveLength(1);
+
+    const userPls = await db.select().from(playlists).where(eq(playlists.userId, user.id));
+    expect(userPls).toHaveLength(1);
+  });
+
+  it('BE-ME-068: DELETE /api/v1/me/history causes recently-played and most-played to return empty lists', async () => {
+    const { user, token } = await createUser();
+
+    await db.insert(playHistory).values([
+      {
+        userId: user.id,
+        trackRefKind: 'server',
+        trackRefId: 'playedTrack',
+        playedAt: new Date(),
+        msPlayed: 30000,
+        meta: songMeta('Track', 'Artist'),
+      },
+    ]);
+
+    const delRes = await request(app).delete('/api/v1/me/history').set('Authorization', `Bearer ${token}`);
+    expect(delRes.status).toBe(200);
+    expect(delRes.body).toEqual({ ok: true, removed: 1 });
+
+    const recentRes = await request(app).get('/api/v1/me/recently-played').set('Authorization', `Bearer ${token}`);
+    expect(recentRes.status).toBe(200);
+    expect(recentRes.body.items).toHaveLength(0);
+
+    const mostRes = await request(app).get('/api/v1/me/most-played').set('Authorization', `Bearer ${token}`);
+    expect(mostRes.status).toBe(200);
+    expect(mostRes.body.items).toHaveLength(0);
+  });
+
+  it('BE-ME-069: DELETE /api/v1/me/history requires a token, returning 401 without one', async () => {
+    const res = await request(app).delete('/api/v1/me/history');
+    expect(res.status).toBe(401);
+    expect(res.body.error.code).toBe('UNAUTHORIZED');
+  });
+
+  it('BE-ME-070: OLAK album shows only in /library/albums; PL playlist shows only in /saved-playlists with metadata', async () => {
+    const { user, token } = await createUser();
+
+    // Insert an album (OLAK5uy_) with row meta
+    await db.insert(favouriteAlbums).values({
+      userId: user.id,
+      albumId: 'OLAK5uy_realAlbum',
+      addedAt: new Date(Date.now() - 5000),
+      meta: {
+        title: 'Real Album',
+        artist: 'Band Name',
+        artistId: 'yt:UCband',
+        year: 2024,
+        trackCount: 12,
+        thumbnail: 'https://images.example/album.jpg',
+      },
+    });
+
+    // Insert a YouTube playlist (PL...) with row meta (title=name, artist=owner)
+    await db.insert(favouriteAlbums).values({
+      userId: user.id,
+      albumId: 'PLsavedPlaylist1',
+      addedAt: new Date(),
+      meta: {
+        title: 'My Curated Playlist',
+        artist: 'Curator Channel',
+        artistId: 'yt:UCchannel',
+        trackCount: 45,
+        thumbnail: 'https://i.ytimg.com/vi/abc/hqdefault.jpg',
+      },
+    });
+
+    // /me/library/albums should return only the OLAK5uy_ album
+    const albumRes = await request(app).get('/api/v1/me/library/albums').set('Authorization', `Bearer ${token}`);
+    expect(albumRes.status).toBe(200);
+    expect(albumRes.body.items).toHaveLength(1);
+    expect(albumRes.body.items[0]).toMatchObject({
+      id: 'yt:OLAK5uy_realAlbum',
+      title: 'Real Album',
+      artist: 'Band Name',
+    });
+
+    // /me/saved-playlists should return only the PL playlist with SavedPlaylist fields
+    const plRes = await request(app).get('/api/v1/me/saved-playlists').set('Authorization', `Bearer ${token}`);
+    expect(plRes.status).toBe(200);
+    expect(plRes.body.items).toHaveLength(1);
+    expect(plRes.body.items[0]).toMatchObject({
+      id: 'yt:PLsavedPlaylist1',
+      name: 'My Curated Playlist',
+      owner: 'Curator Channel',
+      trackCount: 45,
+      thumbnail: 'https://i.ytimg.com/vi/abc/hqdefault.jpg',
+    });
+    expect(typeof plRes.body.items[0].addedAt).toBe('number');
+    expect(plRes.body.meta).toEqual({ total: 1 });
+  });
+
+  it('BE-ME-071: GET /api/v1/me/saved-playlists orders newest first and excludes another user rows', async () => {
+    const { user, token } = await createUser();
+    const { user: other } = await createUser();
+
+    const now = Date.now();
+    await db.insert(favouriteAlbums).values([
+      {
+        userId: user.id,
+        albumId: 'PLolder',
+        addedAt: new Date(now - 10000),
+        meta: { title: 'Older Playlist', artist: 'Owner 1', artistId: 'yt:UC1' },
+      },
+      {
+        userId: user.id,
+        albumId: 'PLnewer',
+        addedAt: new Date(now - 1000),
+        meta: { title: 'Newer Playlist', artist: 'Owner 2', artistId: 'yt:UC2' },
+      },
+      {
+        userId: other.id,
+        albumId: 'PLotherUser',
+        addedAt: new Date(now),
+        meta: { title: 'Other Playlist', artist: 'Other Owner', artistId: 'yt:UC3' },
+      },
+    ]);
+
+    const res = await request(app).get('/api/v1/me/saved-playlists').set('Authorization', `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    expect(res.body.items).toHaveLength(2);
+    expect(res.body.items.map((p: { id: string }) => p.id)).toEqual(['yt:PLnewer', 'yt:PLolder']);
+    expect(res.body.meta).toEqual({ total: 2 });
+  });
+
+  it('BE-ME-072: GET /api/v1/me/saved-playlists falls back to placeholder when Piped is unreachable and row has no meta', async () => {
+    const { user, token } = await createUser();
+
+    await db.insert(favouriteAlbums).values({
+      userId: user.id,
+      albumId: 'PLunreachable',
+      addedAt: new Date(),
+    });
+
+    const probe = net.createServer();
+    await new Promise<void>((resolve) => probe.listen(0, '127.0.0.1', resolve));
+    const { port } = probe.address() as net.AddressInfo;
+    await new Promise((resolve) => probe.close(resolve));
+
+    const original = config.PIPED_API_URL;
+    config.PIPED_API_URL = `http://127.0.0.1:${port}`;
+    try {
+      const res = await request(app).get('/api/v1/me/saved-playlists').set('Authorization', `Bearer ${token}`);
+      expect(res.status).toBe(200);
+      expect(res.body.items).toHaveLength(1);
+      expect(res.body.items[0]).toMatchObject({
+        id: 'yt:PLunreachable',
+        name: 'Unavailable playlist',
+        owner: '',
+        trackCount: null,
+      });
+      expect(res.body.items[0].thumbnail).toBeUndefined();
+    } finally {
+      config.PIPED_API_URL = original;
+    }
+  });
+
+  it('BE-ME-073: GET /api/v1/me/saved-playlists requires a token, returning 401 without one', async () => {
+    const res = await request(app).get('/api/v1/me/saved-playlists');
+    expect(res.status).toBe(401);
+    expect(res.body.error.code).toBe('UNAUTHORIZED');
   });
 });

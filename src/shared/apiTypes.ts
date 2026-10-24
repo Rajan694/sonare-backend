@@ -85,6 +85,29 @@ export interface Playlist {
   /** The user's own playlists only; YouTube playlists (GET /playlists/:id) have no date. */
   updatedAt?: number;
   thumbnail?: string;
+  /** YouTube playlists: the channel that made it. */
+  owner?: string;
+}
+
+/**
+ * A YouTube playlist the user saved (GET /me/saved-playlists). It stays linked, so videos the
+ * channel adds later show up. Saved and unsaved with PUT/DELETE /me/favourites/albums/:id.
+ */
+export interface SavedPlaylist {
+  /** `yt:PL…` (never an `OLAK5uy_…` album). */
+  id: string;
+  name: string;
+  /** The channel that made it; empty when unknown. */
+  owner: string;
+  trackCount: number | null;
+  thumbnail?: string;
+  addedAt: number;
+}
+
+/** DELETE /me/favourites/tracks (bulk unlike) and DELETE /me/history. */
+export interface RemovedCount {
+  ok: true;
+  removed: number;
 }
 
 /** Search results carry a `kind` discriminator. */

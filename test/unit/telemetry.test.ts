@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import type { Request } from 'express';
-import { clientOf, flushTelemetry, recordError, startTelemetry } from '../../src/services/telemetry.js';
+import {
+  clientOf,
+  flushTelemetry,
+  percentileFromHist,
+  recordError,
+  startTelemetry,
+} from '../../src/services/telemetry.js';
 import { db } from '../../src/db/index.js';
 import { errorLogs } from '../../src/db/schema.js';
 import { eq } from 'drizzle-orm';
@@ -15,6 +21,9 @@ describe('telemetry.ts: internals', () => {
 
     const req3 = { get: (h: string) => (h === 'x-sonare-client' ? 'mobile' : undefined) } as unknown as Request;
     expect(clientOf(req3)).toBe('mobile');
+
+    const reqWindows = { get: (h: string) => (h === 'x-sonare-client' ? 'windows' : undefined) } as unknown as Request;
+    expect(clientOf(reqWindows)).toBe('windows');
 
     const req4 = { get: (h: string) => (h === 'x-sonare-client' ? 'unknown' : undefined) } as unknown as Request;
     expect(clientOf(req4)).toBeNull();
@@ -86,5 +95,26 @@ describe('telemetry.ts: error logs & startup', () => {
     const listeners = process.listenerCount('uncaughtException');
     startTelemetry();
     expect(process.listenerCount('uncaughtException')).toBe(listeners);
+  });
+
+  it('BE-TELEM-004: percentileFromHist estimates latency correctly via linear interpolation', () => {
+    // Empty / null histogram
+    expect(percentileFromHist(null, 50)).toBe(0);
+    expect(percentileFromHist([], 95)).toBe(0);
+    expect(percentileFromHist([0, 0, 0, 0, 0, 0, 0, 0, 0], 50)).toBe(0);
+
+    // Single bucket [0, 25] with 10 items
+    // p50 is target 5 -> 5/10 * 25 = 12.5 -> Math.round = 13
+    expect(percentileFromHist([10, 0, 0, 0, 0, 0, 0, 0, 0], 50)).toBe(13);
+
+    // Split across buckets: 10 items in [0, 25], 10 items in [25, 50]
+    // Total = 20. Target p50 = 10 -> cumulative reaches 10 at the end of bucket 0: 0 + 1.0 * 25 = 25
+    expect(percentileFromHist([10, 10, 0, 0, 0, 0, 0, 0, 0], 50)).toBe(25);
+    // Target p75 = 15 -> bucket 1 has count 10, prev cumulative 10. fraction = (15 - 10) / 10 = 0.5. 25 + 0.5 * 25 = 37.5 -> 38
+    expect(percentileFromHist([10, 10, 0, 0, 0, 0, 0, 0, 0], 75)).toBe(38);
+
+    // Open-ended bucket: [5000, maxMs || 10000]
+    // 1 item in bucket 8 (index 8), maxMs = 8000. Target p100 = 1. fraction = 1.0 -> 8000
+    expect(percentileFromHist([0, 0, 0, 0, 0, 0, 0, 0, 1], 100, 8000)).toBe(8000);
   });
 });
