@@ -116,6 +116,8 @@ describe('App releases from GitHub', () => {
     expect(none.status).toBe(502);
     expect(none.body.error.code).toBe('UPSTREAM_UNAVAILABLE');
 
+    // The failure starts a backoff; drop it so the next call asks GitHub again.
+    await clearReleasesCache();
     github().intercept({ path: LATEST, method: 'GET' }).reply(200, release);
     expect((await request(app).get('/api/v1/releases')).body.items).toHaveLength(5);
 
@@ -131,6 +133,48 @@ describe('App releases from GitHub', () => {
     const stale = await request(app).get('/api/v1/releases');
     expect(stale.status).toBe(200);
     expect(stale.body.items).toHaveLength(5);
+  });
+
+  it('BE-REL-008: after a failure GitHub is left alone for 5 minutes, then asked again', async () => {
+    github()
+      .intercept({ path: LATEST, method: 'GET' })
+      .reply(200, { ...release, tag_name: 'v1.1.0' });
+    expect((await request(app).get('/api/v1/releases')).body.items[0].version).toBe('1.1.0');
+
+    const { redis } = await import('../../src/services/cache.js');
+    await redis.del('releases:latest');
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(Date.now() + 11 * 60_000);
+    onTestFinished(() => {
+      vi.useRealTimers();
+    });
+
+    let calls = 0;
+    github()
+      .intercept({ path: LATEST, method: 'GET' })
+      .reply(() => {
+        calls += 1;
+        return { statusCode: 403, data: { message: 'API rate limit exceeded' } };
+      })
+      .persist();
+    for (let i = 0; i < 3; i++) {
+      const res = await request(app).get('/api/v1/releases');
+      expect(res.status).toBe(200);
+      expect(res.body.items[0].version).toBe('1.1.0');
+    }
+    expect(calls).toBe(1);
+    expect(await redis.ttl('releases:backoff')).toBeGreaterThan(4 * 60);
+
+    // Once the backoff is over, GitHub is asked again and the new release shows up.
+    await redis.del('releases:backoff');
+    vi.setSystemTime(Date.now() + 6 * 60_000);
+    await agent.close();
+    agent = new MockAgent();
+    agent.disableNetConnect();
+    agent.enableNetConnect(/127\.0\.0\.1|localhost/);
+    setGlobalDispatcher(agent);
+    agent.get(GITHUB).intercept({ path: LATEST, method: 'GET' }).reply(200, release);
+    expect((await request(app).get('/api/v1/releases')).body.items[0].version).toBe('1.2.0');
   });
 
   it('BE-REL-005: a download redirects to the file on GitHub; unknown ids are 404', async () => {
