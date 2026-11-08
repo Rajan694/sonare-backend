@@ -341,6 +341,7 @@ This document maps all backend test IDs to their specifications, assertions, and
 | `BE-REL-005` | `GET /api/v1/releases/:id/download` | Redirects to the asset on GitHub; unknown, emulator and malformed ids are 404.                                                              |
 | `BE-REL-006` | `/api/v1/admin/releases`            | The admin upload endpoints are gone (404).                                                                                                  |
 | `BE-REL-007` | `toAppReleases`                     | The tag's leading `v` is dropped; an empty body means no notes.                                                                             |
+| `BE-REL-008` | `GET /api/v1/releases`              | After a failure GitHub is left alone for 5 minutes (last good list served), then asked again.                                               |
 
 ### Piped key (Tailscale Funnel)
 

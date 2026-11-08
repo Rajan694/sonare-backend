@@ -96,8 +96,9 @@ describe('Analytics recording and storage (Phase A1)', () => {
   });
 
   it('BE-ANL-005: api usage counts, status classes, max and hist are recorded after flush', async () => {
-    // Fire a successful request (200)
-    await request(app).get('/api/v1/trending');
+    // Fire a successful request (200). /me needs no Piped, so it is a 200 in CI too.
+    const { token } = await createUser();
+    await request(app).get('/api/v1/me').set('Authorization', `Bearer ${token}`);
     // Fire a 404 request
     await request(app).get('/api/v1/nonexistent-route-for-testing-404');
 
@@ -106,7 +107,7 @@ describe('Analytics recording and storage (Phase A1)', () => {
     const rows = await db.select().from(apiUsageHourly);
     expect(rows.length).toBeGreaterThanOrEqual(1);
 
-    const hit = rows.find((r) => r.route === '/api/v1/trending');
+    const hit = rows.find((r) => r.route === '/api/v1/me');
     expect(hit).toBeDefined();
     expect(hit!.count).toBeGreaterThanOrEqual(1);
     expect(hit!.s2xx).toBeGreaterThanOrEqual(1);
