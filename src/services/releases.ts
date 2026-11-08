@@ -1,5 +1,6 @@
 import { request } from 'undici';
 import { config } from '../config.js';
+import { logger } from '../logger.js';
 import { UpstreamError } from '../upstream/piped.js';
 import { isRedisAvailable, redis } from './cache.js';
 
@@ -94,9 +95,20 @@ const fetchLatest = async (): Promise<AppRelease[]> => {
     return [];
   }
   if (res.statusCode !== 200) {
-    await res.body.dump();
-    // 403/429 is GitHub's rate limit (60 an hour per IP without GITHUB_TOKEN).
-    throw new UpstreamError(`GitHub answered ${res.statusCode} for the latest release`, 502, true);
+    // 403/429 is GitHub's rate limit (60 an hour per IP without GITHUB_TOKEN), 401 a bad token;
+    // GitHub's own message says which.
+    const reason = await res.body
+      .json()
+      .then((body) => (body as { message?: string }).message)
+      .catch(() => undefined);
+    const remaining = res.headers['x-ratelimit-remaining'];
+    throw new UpstreamError(
+      `GitHub answered ${res.statusCode} for the latest release` +
+        (reason ? `: ${reason}` : '') +
+        (remaining !== undefined ? ` (rate limit remaining: ${remaining})` : ''),
+      502,
+      true,
+    );
   }
   return toAppReleases((await res.body.json()) as GitHubRelease);
 };
@@ -106,9 +118,29 @@ const FRESH_TTL_S = 10 * 60;
 const LAST_GOOD_TTL_S = 7 * 24 * 60 * 60;
 const FRESH_KEY = 'releases:latest';
 const LAST_GOOD_KEY = 'releases:last-good';
+// After a failure GitHub isn't asked again for 5 minutes: asking on every request keeps a rate
+// limit used up.
+const BACKOFF_S = 5 * 60;
+const BACKOFF_KEY = 'releases:backoff';
 
 // Redis is shared and survives restarts; this copy covers a Redis outage.
 let memory: { items: AppRelease[]; at: number } | null = null;
+let backoffUntil = 0;
+
+const inBackoff = async (): Promise<boolean> => {
+  if (Date.now() < backoffUntil) return true;
+  if (!isRedisAvailable()) return false;
+  try {
+    return (await redis.exists(BACKOFF_KEY)) === 1;
+  } catch {
+    return false;
+  }
+};
+
+const startBackoff = async (): Promise<void> => {
+  backoffUntil = Date.now() + BACKOFF_S * 1000;
+  if (isRedisAvailable()) await redis.set(BACKOFF_KEY, '1', 'EX', BACKOFF_S).catch(() => {});
+};
 
 const readCache = async (key: string): Promise<AppRelease[] | null> => {
   if (!isRedisAvailable()) return null;
@@ -130,24 +162,34 @@ const writeCache = async (items: AppRelease[]): Promise<void> => {
   ]).catch(() => {});
 };
 
-/** The latest release's builds, from cache when fresh, else from GitHub, else the last good list. */
+/**
+ * The latest release's builds, from cache when fresh, else from GitHub, else the last good list.
+ * A failed lookup is logged and GitHub is left alone for BACKOFF_S.
+ */
 export const latestReleases = async (): Promise<AppRelease[]> => {
   const fresh =
     (await readCache(FRESH_KEY)) ?? (memory && Date.now() - memory.at < FRESH_TTL_S * 1000 ? memory.items : null);
   if (fresh) return fresh;
-  try {
-    const items = await fetchLatest();
-    await writeCache(items);
-    return items;
-  } catch (err) {
-    const lastGood = (await readCache(LAST_GOOD_KEY)) ?? memory?.items;
-    if (lastGood) return lastGood;
-    throw err;
+  let failure: unknown = new UpstreamError('GitHub failed recently; the latest release is not known', 502, true);
+  if (!(await inBackoff())) {
+    try {
+      const items = await fetchLatest();
+      await writeCache(items);
+      return items;
+    } catch (err) {
+      failure = err;
+      logger.warn({ err }, 'Could not get the latest release from GitHub; serving the last good list');
+      await startBackoff();
+    }
   }
+  const lastGood = (await readCache(LAST_GOOD_KEY)) ?? memory?.items;
+  if (lastGood) return lastGood;
+  throw failure;
 };
 
-/** Forget the cached lists (tests). */
+/** Forget the cached lists and any backoff (tests). */
 export const clearReleasesCache = async (): Promise<void> => {
   memory = null;
-  if (isRedisAvailable()) await redis.del(FRESH_KEY, LAST_GOOD_KEY).catch(() => {});
+  backoffUntil = 0;
+  if (isRedisAvailable()) await redis.del(FRESH_KEY, LAST_GOOD_KEY, BACKOFF_KEY).catch(() => {});
 };
